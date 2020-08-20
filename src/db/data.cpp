@@ -70,7 +70,7 @@ namespace db
       show_key ? std::addressof(self.key) : nullptr;
     const bool admin = (self.flags & admin_account);
     const bool generated_locally = (self.flags & account_generated_locally);
-    
+
     wire::object(dest,
       WIRE_FIELD(id),
       wire::field("access_time", self.access),
@@ -103,17 +103,17 @@ namespace db
     }
   }
   WIRE_DEFINE_OBJECT(transaction_link, map_transaction_link);
-  
+
   void write_bytes(wire::writer& dest, const output& self)
   {
     const std::pair<db::extra, std::uint8_t> unpacked =
       db::unpack(self.extra);
-    
+
     const bool coinbase = (unpacked.first & lws::db::coinbase_output);
     const bool rct = (unpacked.first & lws::db::ringct_output);
-    
+
     const auto rct_mask = rct ? std::addressof(self.ringct_mask) : nullptr;
-    
+
     epee::span<const std::uint8_t> payment_bytes{};
     if (unpacked.second == 32)
       payment_bytes = epee::as_byte_span(self.payment_id.long_);
@@ -146,14 +146,14 @@ namespace db
     void map_spend(F& format, T1& self, T2& payment_id)
     {
       wire::object(format,
-        wire::field("height", self.link.height),
+        wire::field("height", std::ref(self.link.height)),
         wire::field("tx_hash", std::ref(self.link.tx_hash)),
-	WIRE_FIELD(image),
-	WIRE_FIELD(source),
-	WIRE_FIELD(timestamp),
-	WIRE_FIELD(unlock_time),
-	WIRE_FIELD(mixin_count),
-	wire::optional_field("payment_id", payment_id)
+        WIRE_FIELD(image),
+        WIRE_FIELD(source),
+        WIRE_FIELD(timestamp),
+        WIRE_FIELD(unlock_time),
+        WIRE_FIELD(mixin_count),
+        wire::optional_field("payment_id", std::ref(payment_id))
       );
     }
   }
@@ -161,7 +161,7 @@ namespace db
   {
     boost::optional<crypto::hash> payment_id;
     map_spend(source, dest, payment_id);
-    
+
     if (payment_id)
     {
       dest.length = sizeof(dest.payment_id);
@@ -185,8 +185,8 @@ namespace db
     {
       wire::object(format,
         wire::field("key_image", std::ref(self.value)),
-	wire::field("tx_hash", std::ref(self.link.tx_hash)),
-	wire::field("height", self.link.height)
+        wire::field("tx_hash", std::ref(self.link.tx_hash)),
+        wire::field("height", std::ref(self.link.height))
       );
     }
   }
@@ -197,7 +197,7 @@ namespace db
     db::view_key const* const key =
       show_key ? std::addressof(self.key) : nullptr;
     const bool generated = (self.creation_flags & lws::db::account_generated_locally);
-      
+
     wire::object(dest,
       WIRE_FIELD(address),
       wire::optional_field("view_key", key),

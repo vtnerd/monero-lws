@@ -85,7 +85,7 @@ namespace cryptonote
   {
     wire::object(source,
       WIRE_FIELD(amount),
-        wire::variant_field("transaction output variant", std::ref(self.target),
+      wire::variant_field("transaction output variant", std::ref(self.target),
         wire::option<txout_to_key>{"to_key"},
         wire::option<txout_to_script>{"to_script"},
         wire::option<txout_to_scripthash>{"to_scripthash"}
@@ -112,7 +112,7 @@ namespace cryptonote
   static void read_bytes(wire::json_reader& source, txin_v& self)
   {
     wire::object(source,
-        wire::variant_field("transaction input variant", std::ref(self),
+      wire::variant_field("transaction input variant", std::ref(self),
         wire::option<txin_to_key>{"to_key"},
         wire::option<txin_gen>{"gen"},
         wire::option<txin_to_script>{"to_script"},
