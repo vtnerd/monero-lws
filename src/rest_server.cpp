@@ -789,8 +789,7 @@ namespace lws
       response.m_response_comment = "OK";
       response.m_mime_tipe = "application/json";
       response.m_header_info.m_content_type = "application/json";
-      response.m_body.assign(reinterpret_cast<const char*>(body->data()), body->size()); // \TODO Remove copy here too!
-      response.m_additional_fields.push_back({"Access-Control-Allow-Credentials", "true"});
+      response.m_body.assign(reinterpret_cast<const char*>(body->data()), body->size()); // \TODO Remove copy here too!s
       return true;
     }
   };

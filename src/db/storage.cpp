@@ -184,7 +184,7 @@ namespace db
       "accounts_by_status,id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(account, id)
     };
     constexpr const lmdb::basic_table<unsigned, account_by_address> accounts_by_address(
-      "accounts_by_address", (MDB_CREATE | MDB_DUPSORT), MONERO_COMPARE(account_by_address, address.spend_public)
+      "accounts_by_address", (MDB_CREATE | MDB_DUPSORT), MONERO_COMPARE(account_by_address, address.view_public)
     );
     constexpr const lmdb::basic_table<block_id, account_lookup> accounts_by_height(
       "accounts_by_height,id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(account_lookup, id)
@@ -543,6 +543,13 @@ namespace db
         return {lws::error::account_not_found};
       return {lmdb::error(err)};
     }
+
+    /* Database is only indexing by view public for possible CurveZMQ
+       authentication extensions. Verifying both public keys here - the function
+       takes the entire address as an argument. */
+    static_assert(offsetof(account_by_address, address) == 0, "unexpected field offset");
+    if (value.mv_size < sizeof(account_address) || std::memcmp(value.mv_data, &address, sizeof(account_address)) != 0)
+      return {lws::error::account_not_found};
 
     const expect<account_lookup> lookup =
       accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(value);

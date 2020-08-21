@@ -55,7 +55,7 @@ namespace  db
       return {lws::error::bad_address};
 
     return account_address{
-      info.address.m_spend_public_key, info.address.m_view_public_key
+      info.address.m_view_public_key, info.address.m_spend_public_key
     };
   }
 } // db

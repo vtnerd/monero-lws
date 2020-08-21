@@ -104,8 +104,8 @@ namespace db
   //! The public keys of a monero address
   struct account_address
   {
-    crypto::public_key spend_public; //!< Must be first for LMDB optimizations.
-    crypto::public_key view_public;
+    crypto::public_key view_public; //!< Must be first for LMDB optimizations.
+    crypto::public_key spend_public;
   };
   static_assert(sizeof(account_address) == 64, "padding in account_address");
   WIRE_DECLARE_OBJECT(account_address);
