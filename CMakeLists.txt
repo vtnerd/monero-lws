@@ -51,9 +51,10 @@ set(MONERO_LIBRARIES
   easylogging
   version
   wallet-crypto
+  unbound
 )
 
-set(MONERO_OPTIONAL wallet-crypto)
+set(MONERO_OPTIONAL unbound wallet-crypto)
 
 set(MONERO_SEARCH_PATHS
   "/contrib/epee/src"
@@ -104,6 +105,10 @@ if (NOT (CMAKE_CXX_COMPILER STREQUAL monero_CMAKE_CXX_COMPILER))
   message(FATAL_ERROR "Compiler for monero build differs from this project")
 endif()
 
+if ("${monero_UNBOUND_LIBRARIES}" STREQUAL "UNBOUND_LIBRARIES-NOTFOUND")
+  unset(monero_UNBOUND_LIBRARIES)
+endif()
+
 #
 # Dependencies specific to monero-lws
 #
@@ -121,15 +126,17 @@ foreach (LIB ${MONERO_LIBRARIES})
   find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} REQUIRED NO_DEFAULT_PATH)
 
   list(FIND MONERO_OPTIONAL "${LIB}" LIB_OPTIONAL)
-  if (NOT LIB_PATH AND NOT LIB_OPTIONAL)
-    message(FATAL_ERROR "Unable to find required Monero library ${LIB}")
+  if (NOT LIB_PATH)
+    if (LIB_OPTIONAL EQUAL -1)
+      message(FATAL_ERROR "Unable to find required Monero library ${LIB}")
+    endif()
+  else ()
+    set(LIB_NAME "monero::${LIB}")
+    add_library(${LIB_NAME} STATIC IMPORTED)
+    set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
+    list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
   endif()
-
-  set(LIB_NAME "monero::${LIB}")
-  add_library(${LIB_NAME} STATIC IMPORTED)
-  set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
   
-  list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
   unset(LIB_PATH CACHE)
 endforeach()
 
