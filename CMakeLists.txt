@@ -141,8 +141,8 @@ foreach (LIB ${MONERO_LIBRARIES})
 endforeach()
 
 add_library(monero::libraries INTERFACE IMPORTED)
-target_include_directories(monero::libraries SYSTEM
-  INTERFACE
+set_property(TARGET monero::libraries PROPERTY
+  INTERFACE_INCLUDE_DIRECTORIES
     ${Boost_INCLUDE_DIR}
     "${MONERO_BUILD_DIR}/generated_include"
     "${MONERO_SOURCE_DIR}/contrib/epee/include"
@@ -150,8 +150,8 @@ target_include_directories(monero::libraries SYSTEM
     "${MONERO_SOURCE_DIR}/external/rapidjson/include"
     "${MONERO_SOURCE_DIR}/src"
 )
-target_link_libraries(monero::libraries
-  INTERFACE
+set_property(TARGET monero::libraries PROPERTY
+  INTERFACE_LINK_LIBRARIES
     ${CMAKE_DL_LIBS}
     ${Boost_CHRONO_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
