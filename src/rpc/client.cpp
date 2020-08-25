@@ -28,12 +28,14 @@
 #include "client.h"
 
 #include <boost/thread/mutex.hpp>
+#include <boost/utility/string_ref.hpp>
 #include <cassert>
 #include <system_error>
 
 #include "common/error.h"    // monero/contrib/epee/include
 #include "error.h"
-#include "net/http_client.h" // monero/contrib/epee/include/net
+#include "misc_log_ex.h"     // monero/contrib/epee/include
+#include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
 
 namespace lws
@@ -47,8 +49,11 @@ namespace rpc
     constexpr const char signal_endpoint[] = "inproc://signal";
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
+    constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const int daemon_zmq_linger = 0;
-    
+    constexpr const std::chrono::seconds chain_poll_timeout{20};
+    constexpr const std::chrono::minutes chain_sub_timeout{2};
+
     struct terminate
     {
       void operator()(void* ptr) const noexcept
@@ -112,14 +117,14 @@ namespace rpc
     template<std::size_t N>
     expect<void> do_signal(void* signal_pub, const char (&signal)[N]) noexcept
     {
-      MONERO_ZMQ_CHECK(zmq_send(signal_pub, signal, sizeof(signal), 0));
+      MONERO_ZMQ_CHECK(zmq_send(signal_pub, signal, sizeof(signal) - 1, 0));
       return success();
     }
 
     template<std::size_t N>
     expect<void> do_subscribe(void* signal_sub, const char (&signal)[N]) noexcept
     {
-      MONERO_ZMQ_CHECK(zmq_setsockopt(signal_sub, ZMQ_SUBSCRIBE, signal, sizeof(signal)));
+      MONERO_ZMQ_CHECK(zmq_setsockopt(signal_sub, ZMQ_SUBSCRIBE, signal, sizeof(signal) - 1));
       return success();
     }
   } // anonymous
@@ -128,10 +133,11 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, socket signal_pub, std::string daemon_addr, std::chrono::minutes interval)
+      explicit context(zcontext comm, socket signal_pub, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , daemon_addr(std::move(daemon_addr))
+        , sub_addr(std::move(sub_addr))
         , rates_conn()
         , cache_time()
         , cache_interval(interval)
@@ -144,7 +150,8 @@ namespace rpc
 
       zcontext comm;
       socket signal_pub;
-      std::string daemon_addr;
+      const std::string daemon_addr;
+      const std::string sub_addr;
       http::http_simple_client rates_conn;
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
@@ -176,14 +183,26 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
 
-    const int linger = daemon_zmq_linger;
+    int option = daemon_zmq_linger;
     client out{std::move(ctx)};
 
     out.daemon.reset(zmq_socket(out.ctx->comm.get(), ZMQ_REQ));
     if (out.daemon.get() == nullptr)
       return net::zmq::get_error_code();
     MONERO_ZMQ_CHECK(zmq_connect(out.daemon.get(), out.ctx->daemon_addr.c_str()));
-    MONERO_ZMQ_CHECK(zmq_setsockopt(out.daemon.get(), ZMQ_LINGER, &linger, sizeof(linger)));
+    MONERO_ZMQ_CHECK(zmq_setsockopt(out.daemon.get(), ZMQ_LINGER, &option, sizeof(option)));
+
+    if (!out.ctx->sub_addr.empty())
+    {
+      out.daemon_sub.reset(zmq_socket(out.ctx->comm.get(), ZMQ_SUB));
+      if (out.daemon_sub.get() == nullptr)
+        return net::zmq::get_error_code();
+
+      option = 1; // keep only last pub message from daemon
+      MONERO_ZMQ_CHECK(zmq_connect(out.daemon_sub.get(), out.ctx->sub_addr.c_str()));
+      MONERO_ZMQ_CHECK(zmq_setsockopt(out.daemon_sub.get(), ZMQ_CONFLATE, &option, sizeof(option)));
+      MONERO_CHECK(do_subscribe(out.daemon_sub.get(), minimal_chain_topic));
+    }
 
     out.signal_sub.reset(zmq_socket(out.ctx->comm.get(), ZMQ_SUB));
     if (out.signal_sub.get() == nullptr)
@@ -204,12 +223,35 @@ namespace rpc
     return do_subscribe(signal_sub.get(), abort_scan_signal);
   }
 
-  expect<void> client::wait(std::chrono::seconds timeout) noexcept
+  expect<minimal_chain_pub> client::wait_for_block()
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(daemon != nullptr);
     assert(signal_sub != nullptr);
-    return do_wait(daemon.get(), signal_sub.get(), 0, timeout);
+
+    if (daemon_sub == nullptr)
+    {
+      MONERO_CHECK(do_wait(daemon.get(), signal_sub.get(), 0, chain_poll_timeout));
+      return {lws::error::daemon_timeout};
+    }
+
+    {
+      const expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, chain_sub_timeout);
+      if (!ready)
+      {
+        if (ready == lws::error::daemon_timeout)
+          MWARNING("ZeroMQ Pub/Sub chain timeout, check connection settings");
+        return ready.error();
+      }
+    }
+    expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+    if (!pub)
+      return pub.error();
+
+    if (!boost::string_ref{*pub}.starts_with(minimal_chain_topic))
+      return {lws::error::bad_daemon_response};
+    pub->erase(0, sizeof(minimal_chain_topic));
+    return minimal_chain_pub::from_json(std::move(*pub));
   }
 
   expect<void> client::send(epee::byte_slice message, std::chrono::seconds timeout) noexcept
@@ -243,7 +285,7 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::chrono::minutes rates_interval)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::chrono::minutes rates_interval)
   {
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
@@ -257,7 +299,7 @@ namespace rpc
 
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(daemon_addr), rates_interval
+        std::move(comm), std::move(pub), std::move(daemon_addr), std::move(sub_addr), rates_interval
       )
     };
   }

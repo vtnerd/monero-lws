@@ -74,7 +74,6 @@ namespace lws
   namespace
   {
     constexpr const std::chrono::seconds account_poll_interval{10};
-    constexpr const std::chrono::seconds block_poll_interval{20};
     constexpr const std::chrono::minutes block_rpc_timeout{2};
     constexpr const std::chrono::seconds send_timeout{30};
     constexpr const std::chrono::seconds sync_rpc_timeout{30};
@@ -111,6 +110,28 @@ namespace lws
         const auto sleep_time = std::min(wait - current, std::chrono::nanoseconds{interval});
         boost::this_thread::sleep_for(boost::chrono::nanoseconds{sleep_time.count()});
       }
+    }
+
+    bool is_new_block(db::storage& disk, const account& user, const rpc::minimal_chain_pub& chain)
+    {
+      if (user.scan_height() < db::block_id(chain.top_block_height))
+        return true;
+
+      auto reader = disk.start_read();
+      if (!reader)
+      {
+        MWARNING("Failed to start DB read: " << reader.error());
+        return true;
+      }
+
+      // check possible chain rollback daemon side
+      const expect<crypto::hash> id = reader->get_block_hash(db::block_id(chain.top_block_height));
+      if (!id || *id != chain.top_block_id)
+        return true;
+
+      // check possible chain rollback from other thread
+      const expect<db::account> user_db = reader->get_account(db::account_status::active, user.id());
+      return !user_db || user_db->scan_height != user.scan_height();
     }
 
     bool send(rpc::client& client, epee::byte_slice message)
@@ -352,7 +373,7 @@ namespace lws
               MWARNING("Block retrieval timeout, retrying");
               if (!send(client, block_request.clone()))
                 return;
-              continue;
+              continue; // to next get_blocks_fast read
             }
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
@@ -367,19 +388,31 @@ namespace lws
             return;
           }
 
-          // retrieve next blocks in background
+          // prep for next blocks retrieval
           req.start_height = fetched.result.start_height + fetched.result.blocks.size() - 1;
           block_request = rpc::client::make_message("get_blocks_fast", req);
-          if (!send(client, block_request.clone()))
-            return;
 
           if (fetched.result.blocks.size() <= 1)
           {
-            // ... how about some ZMQ push stuff? we can only dream ...
-            if (client.wait(block_poll_interval).matches(std::errc::interrupted))
+            // synced to top of chain, wait for next blocks
+            for (;;)
+            {
+              const expect<rpc::minimal_chain_pub> new_block = client.wait_for_block();
+              if (new_block.matches(std::errc::interrupted))
+                return;
+              if (!new_block || is_new_block(disk, users.front(), *new_block))
+                break;
+            }
+
+            // request next chunk of blocks
+            if (!send(client, block_request.clone()))
               return;
-            continue;
+            continue; // to next get_blocks_fast read
           }
+
+          // request next chunk of blocks
+          if (!send(client, block_request.clone()))
+            return;
 
           if (fetched.result.blocks.size() != fetched.result.output_indices.size())
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};

@@ -36,7 +36,7 @@ API, and the server will scan for incoming Monero blockchain transactions.
 Differences from [OpenMonero](https://github.com/moneroexamples/openmonero):
   - LMDB instead of MySQL
   - View keys stored in database - scanning occurs continuously in background
-  - Uses ZeroMQ interface to `monerod` ("push" support coming soon)
+  - Uses ZeroMQ interface to `monerod` with chain subscription ("push") support
   - Uses amd64 ASM acceleration from Monero project, if available
 
 

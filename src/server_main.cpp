@@ -55,6 +55,7 @@ namespace
   struct options : lws::options
   {
     const command_line::arg_descriptor<std::string> daemon_rpc;
+    const command_line::arg_descriptor<std::string> daemon_sub;
     const command_line::arg_descriptor<std::vector<std::string>> rest_servers;
     const command_line::arg_descriptor<std::string> rest_ssl_key;
     const command_line::arg_descriptor<std::string> rest_ssl_cert;
@@ -85,6 +86,7 @@ namespace
     options()
       : lws::options()
       , daemon_rpc{"daemon", "<protocol>://<address>:<port> of a monerod ZMQ RPC", get_default_zmq()}
+      , daemon_sub{"sub", "tcp://address:port or ipc://path of a monerod ZMQ Pub", ""}
       , rest_servers{"rest-server", "[(https|http)://<address>:]<port> for incoming connections, multiple declarations allowed"}
       , rest_ssl_key{"rest-ssl-key", "<path> to PEM formatted SSL key for https REST server", ""}
       , rest_ssl_cert{"rest-ssl-certificate", "<path> to PEM formatted SSL certificate (chains supported) for https REST server", ""}
@@ -103,6 +105,7 @@ namespace
 
       lws::options::prepare(description);
       command_line::add_arg(description, daemon_rpc);
+      command_line::add_arg(description, daemon_sub);
       description.add_options()(rest_servers.name, boost::program_options::value<std::vector<std::string>>()->default_value({rest_default}, rest_default), rest_servers.description);
       command_line::add_arg(description, rest_ssl_key);
       command_line::add_arg(description, rest_ssl_cert);
@@ -122,6 +125,7 @@ namespace
     std::vector<std::string> rest_servers;
     lws::rest_server::configuration rest_config;
     std::string daemon_rpc;
+    std::string daemon_sub;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
     unsigned create_queue_max;
@@ -171,6 +175,7 @@ namespace
         command_line::get_arg(args, opts.external_bind)
       },
       command_line::get_arg(args, opts.daemon_rpc),
+      command_line::get_arg(args, opts.daemon_sub),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
       command_line::get_arg(args, opts.create_queue_max),
@@ -191,7 +196,7 @@ namespace
 
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
-    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), prog.rates_interval);
+    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), prog.rates_interval);
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();

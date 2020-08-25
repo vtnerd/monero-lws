@@ -89,6 +89,9 @@ namespace db
     //! \return Last known block.
     expect<block_info> get_last_block() noexcept;
 
+    //! \return "Our" block hash at `height`.
+    expect<crypto::hash> get_block_hash(const block_id height) noexcept;
+
     //! \return List for `GetHashesFast` to sync blockchain with daemon.
     expect<std::list<crypto::hash>> get_chain_sync();
 
@@ -100,16 +103,12 @@ namespace db
     expect<lmdb::value_stream<account, cursor::close_accounts>>
       get_accounts(account_status status, cursor::accounts cur = nullptr) noexcept;
 
-    //! \return Info related to `address` or `lmdb::error(MDB_NOT_FOUND)`.
-    expect<std::pair<account_status, account>>
-      get_account(account_address const& address, cursor::accounts& cur) noexcept;
+    //! \return Info for account `id` iff it has `status`.
+    expect<account> get_account(const account_status status, const account_id id) noexcept;
 
+    //! \return Info related to `address`.
     expect<std::pair<account_status, account>>
-      get_account(account_address const& address) noexcept
-    {
-      cursor::accounts cur;
-      return get_account(address, cur);
-    }
+      get_account(account_address const& address) noexcept;
 
     //! \return All outputs received by `id`.
     expect<lmdb::value_stream<output, cursor::close_outputs>>

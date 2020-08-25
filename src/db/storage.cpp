@@ -288,7 +288,7 @@ namespace db
     }
 
     //! \return Current block hash at `id` using `cur`.
-    expect<crypto::hash> get_block_hash(MDB_cursor& cur, block_id id) noexcept
+    expect<crypto::hash> do_get_block_hash(MDB_cursor& cur, block_id id) noexcept
     {
       MDB_val key = lmdb::to_val(blocks_version);
       MDB_val value = lmdb::to_val(id);
@@ -340,7 +340,7 @@ namespace db
         ///
         /// TODO Trim blockchain after a checkpoint has been reached
         ///
-        const crypto::hash genesis = MONERO_UNWRAP(get_block_hash(*cur, block_id(0)));
+        const crypto::hash genesis = MONERO_UNWRAP(do_get_block_hash(*cur, block_id(0)));
         if (genesis != points.begin()->second)
         {
           MONERO_THROW(
@@ -383,7 +383,7 @@ namespace db
 
       const auto add_block = [&cur, &out] (std::uint64_t id) -> expect<void>
       {
-        expect<crypto::hash> next = get_block_hash(cur, block_id(id));
+        expect<crypto::hash> next = do_get_block_hash(cur, block_id(id));
         if (!next)
           return next.error();
         out.push_back(block_info{block_id(id), std::move(*next)});
@@ -493,6 +493,17 @@ namespace db
     return blocks.get_value<block_info>(value);
   }
 
+  expect<crypto::hash> storage_reader::get_block_hash(const block_id height) noexcept
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+
+    MONERO_CHECK(check_cursor(*txn, db->tables.blocks, curs.blocks_cur));
+    assert(curs.blocks_cur != nullptr);
+
+    return do_get_block_hash(*curs.blocks_cur, height);
+  }
+
   expect<std::list<crypto::hash>> storage_reader::get_chain_sync()
   {
     MONERO_PRECOND(txn != nullptr);
@@ -526,8 +537,30 @@ namespace db
     return accounts.get_value_stream(status, std::move(cur));
   }
 
+  expect<account> storage_reader::get_account(const account_status status, const account_id id) noexcept
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+
+    cursor::accounts cur;
+    MONERO_CHECK(check_cursor(*txn, db->tables.accounts, cur));
+    assert(cur != nullptr);
+
+    MDB_val key = lmdb::to_val(status);
+    MDB_val value = lmdb::to_val(id);
+    const int err = mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH);
+    if (err)
+    {
+      if (err == MDB_NOTFOUND)
+        return {lws::error::account_not_found};
+      return {lmdb::error(err)};
+    }
+
+    return accounts.get_value<account>(value);
+  }
+
   expect<std::pair<account_status, account>>
-  storage_reader::get_account(account_address const& address, cursor::accounts& cur) noexcept
+  storage_reader::get_account(account_address const& address) noexcept
   {
     MONERO_PRECOND(txn != nullptr);
     assert(db != nullptr);
@@ -556,14 +589,7 @@ namespace db
     if (!lookup)
       return lookup.error();
 
-    MONERO_CHECK(check_cursor(*txn, db->tables.accounts, cur));
-    assert(cur != nullptr);
-
-    key = lmdb::to_val(lookup->status);
-    value = lmdb::to_val(lookup->id);
-    MONERO_LMDB_CHECK(mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH));
-
-    const expect<account> user = accounts.get_value<account>(value);
+    const expect<account> user = get_account(lookup->status, lookup->id);
     if (!user)
       return user.error();
     return {{lookup->status, *user}};
@@ -1002,7 +1028,7 @@ namespace db
       cursor::blocks blocks_cur;
       MONERO_CHECK(check_cursor(txn, this->db->tables.blocks, blocks_cur));
 
-      expect<crypto::hash> hash = get_block_hash(*blocks_cur, height);
+      expect<crypto::hash> hash = do_get_block_hash(*blocks_cur, height);
       if (!hash)
         return hash.error();
 
@@ -1697,7 +1723,7 @@ namespace db
           std::min(lmdb::to_native(last_block->id), last_update);
 
         const expect<crypto::hash> hash_check =
-          get_block_hash(*blocks_cur, block_id(last_same));
+          do_get_block_hash(*blocks_cur, block_id(last_same));
         if (!hash_check)
           return hash_check.error();
 

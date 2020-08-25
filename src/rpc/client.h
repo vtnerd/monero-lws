@@ -35,8 +35,9 @@
 
 #include "byte_slice.h"    // monero/contrib/epee/include
 #include "common/expect.h" // monero/src
-#include "rates.h"
 #include "rpc/message.h"   // monero/src
+#include "rpc/daemon_pub.h"
+#include "rpc/rates.h"
 
 namespace lws
 {
@@ -62,16 +63,17 @@ namespace rpc
   {
     std::shared_ptr<detail::context> ctx;
     detail::socket daemon;
+    detail::socket daemon_sub;
     detail::socket signal_sub;
 
-    explicit client(std::shared_ptr<detail::context> ctx)
-      : ctx(std::move(ctx)), daemon(), signal_sub()
+    explicit client(std::shared_ptr<detail::context> ctx) noexcept
+      : ctx(std::move(ctx)), daemon(), daemon_sub(), signal_sub()
     {}
 
   public:
     //! A client with no connection (all send/receive functions fail).
     explicit client() noexcept
-      : ctx(), daemon(), signal_sub()
+      : ctx(), daemon(), daemon_sub(), signal_sub()
     {}
 
     static expect<client> make(std::shared_ptr<detail::context> ctx) noexcept;
@@ -103,8 +105,8 @@ namespace rpc
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
     expect<void> watch_scan_signals() noexcept;
 
-    //! Block until `timeout` or until `context::stop()` is invoked.
-    expect<void> wait(std::chrono::seconds timeout) noexcept;
+    //! Wait for new block announce or internal timeout.
+    expect<minimal_chain_pub> wait_for_block();
 
     //! \return A JSON message for RPC request `M`.
     template<typename M>
@@ -167,7 +169,7 @@ namespace rpc
       \param rates_interval Frequency to retrieve exchange rates. Set value to
         `<= 0` to disable exchange rate retrieval.
     */
-    static context make(std::string daemon_addr, std::chrono::minutes rates_interval);
+    static context make(std::string daemon_addr, std::string sub_addr, std::chrono::minutes rates_interval);
 
     context(context&&) = default;
     context(context const&) = delete;
