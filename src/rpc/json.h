@@ -43,7 +43,7 @@ namespace rpc
     unsigned id;
     const char* method; //!< Must be in static memory
   };
-  const char json_request_base::jsonrpc[];
+  constexpr const char json_request_base::jsonrpc[];
 
   //! \tparam W implements the WRITE concept \tparam M implements the METHOD concept
   template<typename W, typename M>

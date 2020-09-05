@@ -141,7 +141,7 @@ namespace lws
         if (!user)
           return user.error();
 
-        response resp{.rates = {common_error::kInvalidArgument}};
+        response resp{};
 
         auto outputs = user->second.get_outputs(user->first.id);
         if (!outputs)

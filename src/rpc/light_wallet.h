@@ -76,7 +76,19 @@ namespace rpc
 
   struct get_address_info_response
   {
-    get_address_info_response() = delete;
+    get_address_info_response() noexcept
+      : locked_funds(safe_uint64(0)),
+        total_received(safe_uint64(0)),
+        total_sent(safe_uint64(0)),
+        scanned_height(0),
+        scanned_block_height(0),
+        start_height(0),
+        transaction_height(0),
+        blockchain_height(0),
+        spent_outputs(),
+        rates(common_error::kInvalidArgument)
+    {}
+
     safe_uint64 locked_funds;
     safe_uint64 total_received;
     safe_uint64 total_sent;
