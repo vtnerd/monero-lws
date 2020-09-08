@@ -120,7 +120,7 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-find_package(Boost 1.58 QUIET REQUIRED COMPONENTS chrono filesystem program_options regex serialization thread)
+find_package(Boost 1.58 QUIET REQUIRED COMPONENTS chrono filesystem program_options regex serialization system thread)
 
 if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
   message(FATAL_ERROR "Boost libraries for monero build differs from this project")
@@ -161,6 +161,7 @@ set_property(TARGET monero::libraries PROPERTY
     ${Boost_FILESYSTEM_LIBRARY}
     ${Boost_REGEX_LIBRARY}
     ${Boost_SERIALIZATION_LIBRARY}
+    ${Boost_SYSTEM_LIBRARY}
     ${Boost_THREAD_LIBRARY}
     ${monero_HIDAPI_LIBRARY}
     ${monero_OPENSSL_CRYPTO_LIBRARY}
