@@ -152,6 +152,7 @@ set_property(TARGET monero::libraries PROPERTY
     "${MONERO_SOURCE_DIR}/contrib/epee/include"
     "${MONERO_SOURCE_DIR}/external/easylogging++"
     "${MONERO_SOURCE_DIR}/external/rapidjson/include"
+    "${MONERO_SOURCE_DIR}/external/supercop/include"
     "${MONERO_SOURCE_DIR}/src"
 )
 set_property(TARGET monero::libraries PROPERTY
