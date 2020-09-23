@@ -82,18 +82,26 @@ namespace wire
   {
     dest.integer(source);
   }
-  inline void write_bytes(writer& dest, const std::intmax_t source)
+  inline void write_bytes(writer& dest, const long source)
   {
-    dest.integer(source);
+    dest.integer(std::intmax_t(source));
+  }
+  inline void write_bytes(writer& dest, const long long source)
+  {
+    dest.integer(std::intmax_t(source));
   }
 
   inline void write_bytes(writer& dest, const unsigned source)
   {
     dest.unsigned_integer(source);
   }
-  inline void write_bytes(writer& dest, const std::uintmax_t source)
+  inline void write_bytes(writer& dest, const unsigned long source)
   {
-    dest.unsigned_integer(source);
+    dest.unsigned_integer(std::uintmax_t(source));
+  }
+  inline void write_bytes(writer& dest, const unsigned long long source)
+  {
+    dest.unsigned_integer(std::uintmax_t(source));
   }
 
   inline void write_bytes(writer& dest, const double source)
