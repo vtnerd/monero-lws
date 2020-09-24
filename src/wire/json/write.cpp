@@ -27,6 +27,7 @@
 
 #include "write.h"
 
+#include <ostream>
 #include <stdexcept>
 
 #include "hex.h" // monero/contrib/epee/include
