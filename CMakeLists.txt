@@ -164,7 +164,7 @@ set_property(TARGET monero::libraries PROPERTY
 )
 set_property(TARGET monero::libraries PROPERTY
   INTERFACE_LINK_LIBRARIES
-    ${CMAKE_DL_LIBS}
+    ${IMPORTED_MONERO_LIBRARIES}
     ${Boost_CHRONO_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
     ${Boost_REGEX_LIBRARY}
@@ -176,7 +176,7 @@ set_property(TARGET monero::libraries PROPERTY
     ${monero_OPENSSL_SSL_LIBRARY}
     ${monero_SODIUM_LIBRARY}
     ${monero_UNBOUND_LIBRARIES}
-    ${IMPORTED_MONERO_LIBRARIES}
+    ${CMAKE_DL_LIBS}
 )
 
 set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
