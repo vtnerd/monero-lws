@@ -113,6 +113,10 @@ if ("${monero_UNBOUND_LIBRARIES}" STREQUAL "UNBOUND_LIBRARIES-NOTFOUND")
   unset(monero_UNBOUND_LIBRARIES)
 endif()
 
+if ("${monero_HIDAPI_LIBRARY}" STREQUAL "HIDAPI_LIBRARY-NOTFOUND")
+  unset(monero_HIDAPI_LIBRARY)
+endif()
+
 #
 # Dependencies specific to monero-lws
 #
