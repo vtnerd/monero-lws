@@ -195,7 +195,7 @@ namespace lws
 
         crypto::key_derivation derived;
         if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
-          throw std::runtime_error{"Key derivation failed"};
+          continue; // to next user
 
         db::extra ext{};
         std::uint32_t mixin = 0;
