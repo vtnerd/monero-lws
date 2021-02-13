@@ -263,7 +263,7 @@ namespace lws
           rct::key mask = rct::identity();
           if (!amount && !(ext & db::coinbase_output) && 1 < tx.version)
           {
-            const bool bulletproof2 = (tx.rct_signatures.type == rct::RCTTypeBulletproof2);
+            const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
               tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), derived, index, bulletproof2
             );
