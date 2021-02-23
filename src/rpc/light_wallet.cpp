@@ -84,8 +84,8 @@ namespace
     if (!epee::misc_utils::get_gmt_time(std::time_t(self), value))
       throw std::runtime_error{"Failed to convert std::time_t to std::tm"};
 
-    char buf[28] = {0};
-    if (sizeof(buf) - 1 != std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.0-00:00", std::addressof(value)))
+    char buf[21] = {0};
+    if (sizeof(buf) - 1 != std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::addressof(value)))
       throw std::runtime_error{"strftime failed"};
 
     dest.string({buf, sizeof(buf) - 1});
