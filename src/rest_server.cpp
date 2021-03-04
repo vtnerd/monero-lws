@@ -43,12 +43,14 @@
 #include "lmdb/util.h"                 // monero/src
 #include "net/http_base.h"             // monero/contrib/epee/include
 #include "net/net_parse_helpers.h"     // monero/contrib/epee/include
+#include "rpc/client.h"
 #include "rpc/daemon_messages.h"       // monero/src
 #include "rpc/light_wallet.h"
 #include "rpc/rates.h"
 #include "util/http_server.h"
 #include "util/gamma_picker.h"
 #include "util/random_outputs.h"
+#include "util/source_location.h"
 #include "wire/json.h"
 
 namespace lws
@@ -367,7 +369,7 @@ namespace lws
           epee::byte_slice msg = rpc::client::make_message("get_output_histogram", histogram_req);
           MONERO_CHECK(client->send(std::move(msg), std::chrono::seconds{10}));
 
-          auto histogram_resp = client->receive<histogram_rpc::Response>(std::chrono::minutes{3});
+          auto histogram_resp = client->receive<histogram_rpc::Response>(std::chrono::minutes{3}, MLWS_CURRENT_LOCATION);
           if (!histogram_resp)
             return histogram_resp.error();
           if (histogram_resp->histogram.size() != histogram_req.amounts.size())
@@ -396,7 +398,7 @@ namespace lws
           MONERO_CHECK(client->send(std::move(msg), std::chrono::seconds{10}));
 
           auto distribution_resp =
-            client->receive<distribution_rpc::Response>(std::chrono::minutes{3});
+            client->receive<distribution_rpc::Response>(std::chrono::minutes{3}, MLWS_CURRENT_LOCATION);
           if (!distribution_resp)
             return distribution_resp.error();
 
@@ -445,7 +447,7 @@ namespace lws
             epee::byte_slice msg = rpc::client::make_message("get_output_keys", keys_req);
             MONERO_CHECK(client->send(std::move(msg), std::chrono::seconds{10}));
 
-            auto keys_resp = client->receive<get_keys_rpc::Response>(std::chrono::seconds{10});
+            auto keys_resp = client->receive<get_keys_rpc::Response>(std::chrono::seconds{10}, MLWS_CURRENT_LOCATION);
             if (!keys_resp)
               return keys_resp.error();
 
@@ -526,7 +528,7 @@ namespace lws
         if (received < std::uint64_t(req.amount))
           return {lws::error::account_not_found};
 
-        const auto resp = client->receive<rpc_command::Response>(std::chrono::seconds{20});
+        const auto resp = client->receive<rpc_command::Response>(std::chrono::seconds{20}, MLWS_CURRENT_LOCATION);
         if (!resp)
           return resp.error();
 
@@ -638,7 +640,7 @@ namespace lws
         epee::byte_slice message = rpc::client::make_message("send_raw_tx_hex", daemon_req);
         MONERO_CHECK(client->send(std::move(message), std::chrono::seconds{10}));
 
-        const auto daemon_resp = client->receive<transaction_rpc::Response>(std::chrono::seconds{20});
+        const auto daemon_resp = client->receive<transaction_rpc::Response>(std::chrono::seconds{20}, MLWS_CURRENT_LOCATION);
         if (!daemon_resp)
           return daemon_resp.error();
         if (!daemon_resp->relayed)

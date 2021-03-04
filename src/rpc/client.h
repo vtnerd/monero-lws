@@ -38,6 +38,7 @@
 #include "rpc/message.h"   // monero/src
 #include "rpc/daemon_pub.h"
 #include "rpc/rates.h"
+#include "util/source_location.h"
 
 namespace lws
 {
@@ -69,6 +70,9 @@ namespace rpc
     explicit client(std::shared_ptr<detail::context> ctx) noexcept
       : ctx(std::move(ctx)), daemon(), daemon_sub(), signal_sub()
     {}
+
+    //! Expect `response` as the next message payload unless error.
+    expect<void> get_response(cryptonote::rpc::Message& response, std::chrono::seconds timeout, source_location loc);
 
   public:
     //! A client with no connection (all send/receive functions fail).
@@ -125,18 +129,13 @@ namespace rpc
     //! \return Next available RPC message response from server
     expect<std::string> get_message(std::chrono::seconds timeout);
 
-    //! \return RPC response `M`, waiting a max of `timeout` seconds.
+    //! \return RPC response `M`, waiting a max of `timeout` seconds. Log errors as from `loc`.
     template<typename M>
-    expect<M> receive(std::chrono::seconds timeout)
+    expect<M> receive(const std::chrono::seconds timeout, const source_location loc = {})
     {
-      expect<std::string> message = get_message(timeout);
-      if (!message)
-        return message.error();
-
-      cryptonote::rpc::FullMessage fm{std::move(*message)};
-      M out{};
-      out.fromJson(fm.getMessage());
-      return out;
+      M response{};
+      MONERO_CHECK(get_response(response, timeout, loc));
+      return response;
     }
 
     /*!

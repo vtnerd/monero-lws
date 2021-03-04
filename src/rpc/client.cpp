@@ -37,6 +37,7 @@
 #include "misc_log_ex.h"     // monero/contrib/epee/include
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
+#include "serialization/json_object.h" // monero/src
 
 namespace lws
 {
@@ -159,6 +160,32 @@ namespace rpc
       boost::mutex sync_rates;
     };
   } // detail
+
+  expect<void> client::get_response(cryptonote::rpc::Message& response, const std::chrono::seconds timeout, const source_location loc)
+  {
+    expect<std::string> message = get_message(timeout);
+    if (!message)
+      return message.error();
+
+    try
+    {
+      cryptonote::rpc::FullMessage fm{std::move(*message)};
+      const cryptonote::rpc::error json_error = fm.getError();
+      if (!json_error.use)
+      {
+        response.fromJson(fm.getMessage());
+        return success();
+      }
+
+      MERROR("Server returned RPC error: " << json_error.message << " with code " << json_error.code << " called from " << loc);
+    }
+    catch (const cryptonote::json::JSON_ERROR& error)
+    {
+      MERROR("Failed to parse json response: " << error.what() << " called from " << loc);
+    }
+
+    return {lws::error::bad_daemon_response};
+  }
 
   expect<std::string> client::get_message(std::chrono::seconds timeout)
   {

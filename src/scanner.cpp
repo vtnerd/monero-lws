@@ -50,6 +50,7 @@
 #include "rpc/daemon_messages.h"     // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
+#include "util/source_location.h"
 #include "util/transactions.h"
 #include "wire/json.h"
 
@@ -705,7 +706,7 @@ namespace lws
       expect<get_hashes::Response> resp{lws::error::daemon_timeout};
       start = std::chrono::steady_clock::now();
 
-      while (!(resp = client.receive<get_hashes::Response>(std::chrono::seconds{1})))
+      while (!(resp = client.receive<get_hashes::Response>(std::chrono::seconds{1}, MLWS_CURRENT_LOCATION)))
       {
         if (!scanner::is_running())
           return {lws::error::signal_abort_process};

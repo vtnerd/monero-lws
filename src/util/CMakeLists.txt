@@ -26,8 +26,8 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-set(monero-lws-util_sources gamma_picker.cpp random_outputs.cpp transactions.cpp)
-set(monero-lws-util_headers fwd.h gamma_picker.h http_server.h random_outputs.h transactions.h)
+set(monero-lws-util_sources gamma_picker.cpp random_outputs.cpp source_location.cpp transactions.cpp)
+set(monero-lws-util_headers fwd.h gamma_picker.h http_server.h random_outputs.h source_location.h transactions.h)
 
 add_library(monero-lws-util ${monero-lws-util_sources} ${monero-lws-util_headers})
 target_link_libraries(monero-lws-util monero::libraries)
