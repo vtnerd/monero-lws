@@ -33,10 +33,10 @@ namespace lws
 {
   std::ostream& operator<<(std::ostream& os, const source_location loc)
   {
-    char const* const just_name = loc.file_name() ?
-      std::strrchr(loc.file_name(), '/') : nullptr;
     if (loc.line())
     {
+      char const* const just_name = loc.file_name() ?
+        std::strrchr(loc.file_name(), '/') : nullptr;
       os << (just_name ? just_name + 1 : loc.file_name()) << ':' << loc.line();
     }
     else
