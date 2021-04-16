@@ -279,11 +279,11 @@ namespace lws
               resp.transactions.back().info.spend_meta.amount += amount;
             }
 
-            const db::output_id this_id = resp.transactions.back().info.spend_meta.id;
-            if (metas.empty() || metas.back().id < this_id)
-              metas.push_back(resp.transactions.back().info.spend_meta);
+            const db::output::spend_meta_ meta = output.get_value<MONERO_FIELD(db::output, spend_meta)>();
+            if (metas.empty() || metas.back().id < meta.id)
+              metas.push_back(meta);
             else
-              metas.insert(find_metadata(metas, this_id), resp.transactions.back().info.spend_meta);
+              metas.insert(find_metadata(metas, meta.id), meta);
 
             resp.total_received = rpc::safe_uint64(std::uint64_t(resp.total_received) + amount);
 
