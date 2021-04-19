@@ -132,6 +132,11 @@ namespace lws
       return {std::make_pair(user->second, std::move(*reader))};
     }
 
+    namespace
+    {
+      std::atomic_flag rates_error_once = ATOMIC_FLAG_INIT;
+    }
+
     struct get_address_info
     {
       using request = rpc::account_credentials;
@@ -198,7 +203,7 @@ namespace lws
         }
 
         resp.rates = client.get_rates();
-        if (!resp.rates)
+        if (!resp.rates && !rates_error_once.test_and_set(std::memory_order_relaxed))
           MWARNING("Unable to retrieve exchange rates: " << resp.rates.error().message());
 
         return resp;
