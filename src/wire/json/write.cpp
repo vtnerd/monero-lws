@@ -35,6 +35,7 @@
 namespace
 {
   constexpr const unsigned flush_threshold = 100;
+  constexpr const unsigned max_buffer = 4096;
 }
 
 namespace wire
@@ -44,7 +45,7 @@ namespace wire
 
   void json_writer::check_flush()
   {
-    if (needs_flush_ && (bytes_.increase_size() < flush_threshold || bytes_.increase_size() - flush_threshold < bytes_.size()))
+    if (needs_flush_ && (max_buffer < bytes_.size() || bytes_.available() < flush_threshold))
       flush();
   }
 
