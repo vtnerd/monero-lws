@@ -367,15 +367,11 @@ namespace lws
           auto resp = client.get_message(block_rpc_timeout);
           if (!resp)
           {
-            if (resp.matches(std::errc::interrupted))
-              return; // a signal was sent over ZMQ
-            if (resp.matches(std::errc::timed_out))
-            {
-              MWARNING("Block retrieval timeout, retrying");
-              if (!send(client, block_request.clone()))
-                return;
-              continue; // to next get_blocks_fast read
-            }
+            const bool timeout = resp.matches(std::errc::timed_out);
+            if (timeout)
+              MWARNING("Block retrieval timeout, resetting scanner");
+            if (timeout || resp.matches(std::errc::interrupted))
+              return;
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
 
