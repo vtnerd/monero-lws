@@ -774,7 +774,7 @@ namespace lws
           response.m_response_code = 400;
           response.m_response_comment = "Bad Request";
         }
-        else if (body == lws::error::account_not_found)
+        else if (body == lws::error::account_not_found || body == lws::error::duplicate_request)
         {
           response.m_response_code = 403;
           response.m_response_comment = "Forbidden";
