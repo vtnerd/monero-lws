@@ -27,6 +27,7 @@
 
 #include "daemon_zmq.h"
 
+#include <boost/optional/optional.hpp>
 #include "crypto/crypto.h"            // monero/src
 #include "rpc/message_data_structs.h" // monero/src
 #include "wire/crypto.h"
@@ -57,13 +58,28 @@ namespace rct
 
   static void read_bytes(wire::json_reader& source, rctSig& self)
   {
+    boost::optional<std::vector<ecdhTuple>> ecdhInfo;
+    boost::optional<ctkeyV> outPk;
+    boost::optional<xmr_amount> txnFee;
+
     self.outPk.reserve(default_inputs);
     wire::object(source,
       WIRE_FIELD(type),
-      wire::field("encrypted", std::ref(self.ecdhInfo)),
-      wire::field("commitments", std::ref(self.outPk)),
-      wire::field("fee", std::ref(self.txnFee))
+      wire::optional_field("encrypted", std::ref(ecdhInfo)),
+      wire::optional_field("commitments", std::ref(outPk)),
+      wire::optional_field("fee", std::ref(txnFee))
     );
+
+    if (self.type != RCTTypeNull)
+    {
+      if (!ecdhInfo || !outPk || !txnFee)
+        WIRE_DLOG_THROW(wire::error::schema::missing_key, "Expected fields `encrypted`, `commitments`, and `fee`");
+      self.ecdhInfo = std::move(*ecdhInfo);
+      self.outPk = std::move(*outPk);
+      self.txnFee = std::move(*txnFee);
+    }
+    else if (ecdhInfo || outPk || txnFee)
+      WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
   }
 } // rct
 
