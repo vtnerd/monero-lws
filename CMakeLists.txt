@@ -40,6 +40,7 @@ set(MONERO_LIBRARIES
   net
   cryptonote_core
   cryptonote_basic
+  cryptonote_format_utils_basic
   ringct
   ringct_basic
   multisig
@@ -67,6 +68,7 @@ set(MONERO_SEARCH_PATHS
   "/src"
   "/src/crypto"
   "/src/crypto/wallet"
+  "/src/cryptonote_basic"
   "/src/lmdb"
   "/src/ringct"
   "/src/rpc"
