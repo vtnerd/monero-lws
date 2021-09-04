@@ -40,6 +40,8 @@ namespace lws
     constexpr const double gamma_shape = 19.28;
     constexpr const double gamma_scale = 1 / double(1.61);
     constexpr const std::size_t blocks_in_a_year = (86400 * 365) / DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t defaut_unlock_time = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t recent_spend_window = 50 * DIFFICULTY_TARGET_V2;
   }
 
   gamma_picker::gamma_picker(std::vector<uint64_t> rct_offsets)
@@ -49,7 +51,7 @@ namespace lws
   gamma_picker::gamma_picker(std::vector<std::uint64_t> offsets_in, double shape, double scale)
     : rct_offsets(std::move(offsets_in)),
       gamma(shape, scale),
-      outputs_per_second(0)
+      seconds_per_output(0)
   {
     if (!rct_offsets.empty())
     {
@@ -59,8 +61,11 @@ namespace lws
       const std::size_t outputs_to_consider = rct_offsets.back() - initial;
 
       static_assert(0 < DIFFICULTY_TARGET_V2, "block target time cannot be zero");
+      // match wallet2's integer truncation implementation to avoid creating distinct anonymity puddles
       // this assumes constant target over the whole rct range
-      outputs_per_second = outputs_to_consider / double(DIFFICULTY_TARGET_V2 * blocks_to_consider);
+      seconds_per_output = DIFFICULTY_TARGET_V2 * blocks_to_consider / outputs_to_consider;
+      if (seconds_per_output == 0)
+        seconds_per_output = double(DIFFICULTY_TARGET_V2 * blocks_to_consider) / outputs_to_consider;
     }
   }
 
@@ -84,17 +89,27 @@ namespace lws
     static_assert(std::is_empty<crypto::random_device>(), "random_device is no longer cheap to construct");
     static constexpr const crypto::random_device engine{};
     const auto end = offsets().end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE;
+    const uint64_t num_rct_outputs = spendable_upper_bound();
 
     for (unsigned tries = 0; tries < 100; ++tries)
     {
-      std::uint64_t output_index = std::exp(gamma(engine)) * outputs_per_second;
-      if (offsets().back() <= output_index)
+      double output_age_in_seconds = std::exp(gamma(engine));
+
+      // match wallet2 implementation to avoid creating distinct anonymity pools
+      // shift output back by unlock time to apply distribution from chain tip
+      if (output_age_in_seconds > defaut_unlock_time)
+        output_age_in_seconds -= defaut_unlock_time;
+      else
+        output_age_in_seconds = crypto::rand_idx(recent_spend_window);
+
+      std::uint64_t output_index = output_age_in_seconds / seconds_per_output;
+      if (num_rct_outputs <= output_index)
         continue; // gamma selected older than blockchain height (rare)
 
-      output_index = offsets().back() - 1 - output_index;
+      output_index = num_rct_outputs - 1 - output_index;
       const auto selection = std::lower_bound(offsets().begin(), end, output_index);
       if (selection == end)
-        continue; // gamma selected within locked/non-spendable range (rare)
+        throw std::runtime_error{"Unable to select random output - output not found"};
 
       const std::uint64_t first_rct = offsets().begin() == selection ? 0 : *(selection - 1);
       const std::uint64_t n_rct = *selection - first_rct;
