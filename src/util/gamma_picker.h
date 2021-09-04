@@ -36,7 +36,7 @@ namespace lws
   {
     std::vector<uint64_t> rct_offsets;
     std::gamma_distribution<double> gamma;
-    double outputs_per_second;
+    double seconds_per_output;
 
     gamma_picker(const gamma_picker&) = default; // force explicit usage of `clone()` to copy.
   public:
