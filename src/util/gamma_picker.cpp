@@ -41,7 +41,7 @@ namespace lws
     constexpr const double gamma_scale = 1 / double(1.61);
     constexpr const std::size_t blocks_in_a_year = (86400 * 365) / DIFFICULTY_TARGET_V2;
     constexpr const std::size_t default_unlock_time = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
-    constexpr const std::size_t recent_spend_window = 50 * DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t recent_spend_window = 15 * DIFFICULTY_TARGET_V2;
   }
 
   gamma_picker::gamma_picker(std::vector<uint64_t> rct_offsets)
