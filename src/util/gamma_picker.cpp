@@ -40,7 +40,7 @@ namespace lws
     constexpr const double gamma_shape = 19.28;
     constexpr const double gamma_scale = 1 / double(1.61);
     constexpr const std::size_t blocks_in_a_year = (86400 * 365) / DIFFICULTY_TARGET_V2;
-    constexpr const std::size_t defaut_unlock_time = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t default_unlock_time = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
     constexpr const std::size_t recent_spend_window = 50 * DIFFICULTY_TARGET_V2;
   }
 
@@ -93,8 +93,8 @@ namespace lws
       double output_age_in_seconds = std::exp(gamma(engine));
 
       // shift output back by unlock time to apply distribution from chain tip
-      if (output_age_in_seconds > defaut_unlock_time)
-        output_age_in_seconds -= defaut_unlock_time;
+      if (output_age_in_seconds > default_unlock_time)
+        output_age_in_seconds -= default_unlock_time;
       else
         output_age_in_seconds = crypto::rand_idx(recent_spend_window);
 
