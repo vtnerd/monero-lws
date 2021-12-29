@@ -76,7 +76,7 @@ namespace db
       account_address address; //!< Must be first for LMDB optimizations
       account_lookup lookup;
     };
-    static_assert(sizeof(account_by_address) == 64 + 4 + 1 + 3, "padding in account_by_address");
+    static_assert(sizeof(account_by_address) == 64 + 1 + 7 + 4 + 1 + 3, "padding in account_by_address");
 
     constexpr const unsigned blocks_version = 0;
     constexpr const unsigned by_address_version = 0;
@@ -1196,13 +1196,10 @@ namespace db
   {
     expect<void> do_add_account(MDB_cursor& accounts_cur, MDB_cursor& accounts_ba_cur, MDB_cursor& accounts_bh_cur, account const& user) noexcept
     {
+      if (!user.address.is_subaddress)
       {
-        crypto::secret_key copy{};
+        crypto::secret_key copy = get_secret_view_key(user.key);
         crypto::public_key verify{};
-        static_assert(sizeof(copy) == sizeof(user.key), "bad memcpy");
-        std::memcpy(
-          std::addressof(unwrap(copy)), std::addressof(user.key), sizeof(copy)
-        );
 
         if (!crypto::secret_key_to_public_key(copy, verify))
           return {lws::error::bad_view_key};

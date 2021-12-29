@@ -100,14 +100,17 @@ namespace db
 
   struct view_key : crypto::ec_scalar {};
   // wire::is_blob trait below
+  crypto::secret_key get_secret_view_key(const lws::db::view_key key);
 
   //! The public keys of a monero address
   struct account_address
   {
     crypto::public_key view_public; //!< Must be first for LMDB optimizations.
     crypto::public_key spend_public;
+    bool is_subaddress;
+    char reserved[7];
   };
-  static_assert(sizeof(account_address) == 64, "padding in account_address");
+  static_assert(sizeof(account_address) == 64 + 1 + 7, "padding in account_address");
   WIRE_DECLARE_OBJECT(account_address);
 
   struct account
@@ -122,7 +125,7 @@ namespace db
     account_flags flags;    //!< Additional account info bitmask.
     char reserved[3];
   };
-  static_assert(sizeof(account) == (4 * 2) + 64 + 32 + (8 * 2) + (4 * 2), "padding in account");
+  static_assert(sizeof(account) == (4 * 2) + 64 + 1 + 7 + 32 + (8 * 2) + (4 * 2), "padding in account");
   void write_bytes(wire::writer&, const account&, bool show_key = false);
 
   struct block_info
@@ -234,7 +237,7 @@ namespace db
     account_flags creation_flags; //!< Generated locally?
     char reserved[3];
   };
-  static_assert(sizeof(request_info) == 64 + 32 + 8 + (4 * 2), "padding in request_info");
+  static_assert(sizeof(request_info) == 64 + 1 + 7 + 32 + 8 + (4 * 2), "padding in request_info");
   void write_bytes(wire::writer& dest, const request_info& self, bool show_key = false);
 
   inline constexpr bool operator==(output_id left, output_id right) noexcept

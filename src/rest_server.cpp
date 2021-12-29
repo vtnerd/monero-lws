@@ -106,11 +106,19 @@ namespace lws
 
     bool key_check(const rpc::account_credentials& creds)
     {
-      crypto::public_key verify{};
-      if (!crypto::secret_key_to_public_key(creds.key, verify))
-        return false;
-      if (verify != creds.address.view_public)
-        return false;
+      // key check on subaddresses here is not possible because need the primary
+      // public spend key (B) in order to derive subaddresses (C = a*D, D = B + m*G)
+      // [1]: https://monerodocs.org/public-address/subaddress/#private-view-key
+      // [2]: https://github.com/monero-project/monero/blob/319b831e65437f1c8e5ff4b4cb9be03f091f6fc6/src/device/device_default.cpp#L127-L208
+      // [3]: https://monero.stackexchange.com/questions/10674/how-are-subaddresses-and-account-addresses-generated-from-master-wallet-keys/10676#10676
+      if (!creds.address.is_subaddress)
+      {
+        crypto::public_key verify{};
+        if (!crypto::secret_key_to_public_key(creds.key, verify))
+          return false;
+        if (verify != creds.address.view_public)
+          return false;
+      }
       return true;
     }
 
@@ -129,6 +137,8 @@ namespace lws
         return user.error();
       if (is_hidden(user->first))
         return {lws::error::account_not_found};
+      if (get_secret_view_key(user->second.key) != creds.key)
+        return {lws::error::bad_view_key};
       return {std::make_pair(user->second, std::move(*reader))};
     }
 
@@ -611,6 +621,8 @@ namespace lws
           {
             if (is_hidden(account->first))
               return {lws::error::account_not_found};
+            if (get_secret_view_key(account->second.key) != req.creds.key)
+              return {lws::error::bad_view_key};
 
             // Do not count a request for account creation as login
             return response{false, bool(account->second.flags & db::account_generated_locally)};
