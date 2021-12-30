@@ -381,10 +381,9 @@ namespace db
 
     void migrate_0_1(MDB_txn& txn, tables_ const& tables)
     {
-      MINFO("Migrating from db version 0 to 1...");
-
       // All addresses in version 0 were primary addresses, but didn't have a bool `is_subaddress`.
       // This migration adds a falsey `is_subaddress` to every account_address stored in the db.
+      // If no addresses are stored, this wraps up quickly.
       struct account_address_v0
       {
         crypto::public_key view_public; //!< Must be first for LMDB optimizations.
@@ -544,6 +543,9 @@ namespace db
 
     void migrate(MDB_txn& txn, tables_ const& tables, const unsigned oldversion)
     {
+      if (oldversion == 0)
+        MINFO("Setting up database...");
+
       if (oldversion < 1)
         migrate_0_1(txn, tables);
     }
