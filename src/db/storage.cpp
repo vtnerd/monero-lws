@@ -80,6 +80,7 @@ namespace db
 
     constexpr const unsigned blocks_version = 0;
     constexpr const unsigned by_address_version = 0;
+    constexpr const unsigned db_version = 1;
 
     template<typename T>
     int less(epee::span<const std::uint8_t> left, epee::span<const std::uint8_t> right) noexcept
@@ -177,6 +178,22 @@ namespace db
       return compare_32bytes(left_bytes, right_bytes);
     }
 
+    // copied from monero/src/blockchain_db/lmdb/db_lmdb.cpp
+    int compare_string(const MDB_val *a, const MDB_val *b)
+    {
+      const char *va = (const char*) a->mv_data;
+      const char *vb = (const char*) b->mv_data;
+      const size_t sz = std::min(a->mv_size, b->mv_size);
+      int ret = strncmp(va, vb, sz);
+      if (ret)
+        return ret;
+      if (a->mv_size < b->mv_size)
+        return -1;
+      if (a->mv_size > b->mv_size)
+        return 1;
+      return 0;
+    }
+
     constexpr const lmdb::basic_table<unsigned, block_info> blocks{
       "blocks_by_id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(block_info, id)
     };
@@ -200,6 +217,9 @@ namespace db
     };
     constexpr const lmdb::basic_table<request, request_info> requests{
       "requests_by_type,address", (MDB_CREATE | MDB_DUPSORT), MONERO_COMPARE(request_info, address.spend_public)
+    };
+    constexpr const lmdb::basic_table<char *, unsigned> properties{
+      "properties", (MDB_CREATE), &compare_string
     };
 
     template<typename D>
@@ -350,6 +370,206 @@ namespace db
       }
     }
 
+    void complete_migration(MDB_txn& txn, tables_ const& tables, unsigned version)
+    {
+      MDB_val key = lmdb::to_val("version");
+      MDB_val value = lmdb::to_val(version);
+      int err = mdb_put(&txn, tables.properties, &key, &value, 0);
+      if (err)
+        MONERO_THROW(lmdb::error(err), std::string("Unable to complete migration " + std::to_string(version)).c_str());
+    }
+
+    void migrate_0_1(MDB_txn& txn, tables_ const& tables)
+    {
+      MINFO("Migrating from db version 0 to 1...");
+
+      // All addresses in version 0 were primary addresses, but didn't have a bool `is_subaddress`.
+      // This migration adds a falsey `is_subaddress` to every account_address stored in the db.
+      struct account_address_v0
+      {
+        crypto::public_key view_public; //!< Must be first for LMDB optimizations.
+        crypto::public_key spend_public;
+        /* bool is_subaddress; */       //!< will be adding and setting to false for all addresses during this migration.
+      };
+      bool is_subaddress = false;
+
+      // begin migration by updating addresses in the accounts_by_address table
+      cursor::accounts_by_address accounts_ba_cur;
+      check_cursor(txn, tables.accounts_ba, accounts_ba_cur);
+      std::unordered_set<unsigned> by_address_version_keys;
+      std::map<unsigned, std::vector<account_by_address>> accounts_ba_v1;
+      for (;;)
+      {
+        MDB_val key;
+        MDB_val value;
+        int err = mdb_cursor_get(accounts_ba_cur.get(), &key, &value, MDB_NEXT);
+        if (err == MDB_NOTFOUND)
+          break;
+        else if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to read accounts by address in migration 1");
+
+        struct account_by_address_v0
+        {
+          account_address_v0 address; //!< Must be first for LMDB optimizations
+          account_lookup lookup;
+        };
+        account_by_address_v0 account_ba_v0 = *(account_by_address_v0 *) value.mv_data;
+
+        account_address address_v1{
+          account_ba_v0.address.view_public, account_ba_v0.address.spend_public, is_subaddress
+        };
+        account_by_address account_ba_v1{
+          address_v1, account_ba_v0.lookup
+        };
+
+        unsigned by_address_version_key = *(unsigned *) key.mv_data;
+        by_address_version_keys.insert(by_address_version_key);
+        accounts_ba_v1[by_address_version_key].push_back(account_ba_v1);
+
+        // delete all addresses, then bulk insert (can't modify one at a time because each record
+        // has different size, and MDB_DUPFIXED default prevents different size values for same key)
+        err = mdb_cursor_del(accounts_ba_cur.get(), 0);
+        if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to delete accounts by address in migration 1");
+      }
+      for (const unsigned by_address_version_key : by_address_version_keys)
+        bulk_insert(*accounts_ba_cur, by_address_version_key, epee::to_span(accounts_ba_v1[by_address_version_key]));
+
+      // next up in the migration, update addresses in the accounts table
+      cursor::accounts accounts_cur;
+      check_cursor(txn, tables.accounts, accounts_cur);
+      std::unordered_set<account_status> lookup_status_keys;
+      std::map<account_status, std::vector<account>> accounts_v1;
+      for (;;)
+      {
+        MDB_val key;
+        MDB_val value;
+        int err = mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_NEXT);
+        if (err == MDB_NOTFOUND)
+          break;
+        else if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to read accounts in migration 1");
+
+        struct account_v0
+        {
+          account_id id;          //!< Must be first for LMDB optimizations
+          account_time access;    //!< Last time `get_address_info` was called.
+          account_address_v0 address;
+          view_key key;           //!< Doubles as authorization handle for REST API.
+          block_id scan_height;   //!< Last block scanned; check-ins are always by block
+          block_id start_height;  //!< Account started scanning at this block height
+          account_time creation;  //!< Time account first appeared in database.
+          account_flags flags;    //!< Additional account info bitmask.
+          char reserved[3];
+        };
+        account_v0 acc_v0 = *(account_v0 *) value.mv_data;
+
+        account_address address_v1{
+          acc_v0.address.view_public, acc_v0.address.spend_public, is_subaddress
+        };
+        account account_v1{
+          acc_v0.id, acc_v0.access, address_v1, acc_v0.key, acc_v0.scan_height, acc_v0.start_height, acc_v0.creation, acc_v0.flags
+        };
+
+        account_status lookup_status_key = *(account_status *) key.mv_data;
+        lookup_status_keys.insert(lookup_status_key);
+        accounts_v1[lookup_status_key].push_back(account_v1);
+
+        err = mdb_cursor_del(accounts_cur.get(), 0);
+        if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to delete accounts in migration 1");
+      }
+      for (const account_status lookup_status_key : lookup_status_keys)
+        bulk_insert(*accounts_cur, lookup_status_key, epee::to_span(accounts_v1[lookup_status_key]));
+
+      // finally, update addresses in the requests table
+      cursor::requests requests_cur;
+      check_cursor(txn, tables.requests, requests_cur);
+      std::unordered_set<request> request_keys;
+      std::map<request, std::vector<request_info>> requests_v1;
+      for (;;)
+      {
+        MDB_val key;
+        MDB_val value;
+        int err = mdb_cursor_get(requests_cur.get(), &key, &value, MDB_NEXT);
+        if (err == MDB_NOTFOUND)
+          break;
+        else if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to read requests in migration 1");
+
+        struct request_info_v0
+        {
+          account_address_v0 address;//!< Must be first for LMDB optimizations
+          view_key key;
+          block_id start_height;
+          account_time creation;        //!< Time the request was created.
+          account_flags creation_flags; //!< Generated locally?
+          char reserved[3];
+        };
+        request_info_v0 req_v0 = *(request_info_v0 *) value.mv_data;
+
+        account_address address_v1{
+          req_v0.address.view_public, req_v0.address.spend_public, is_subaddress
+        };
+        request_info req_v1{};
+        const request request_key = *(request *) key.mv_data;
+        if (request_key == request::create)
+        {
+          req_v1.address = address_v1;
+          req_v1.key = req_v0.key;
+          req_v1.creation = req_v0.creation;
+          req_v1.start_height = req_v0.start_height;
+          req_v1.creation_flags = req_v0.creation_flags;
+        }
+        else if (request_key == request::import_scan)
+        {
+          req_v1.address = address_v1;
+          req_v1.start_height = req_v0.start_height;
+        }
+        else
+          throw std::runtime_error("Unknown request type");
+
+        request_keys.insert(request_key);
+        requests_v1[request_key].push_back(req_v1);
+
+        err = mdb_cursor_del(requests_cur.get(), 0);
+        if (err)
+          MONERO_THROW(lmdb::error(err), "Failed to delete requests in migration 1");
+      }
+      for (const request request_key : request_keys)
+        bulk_insert(*requests_cur, request_key, epee::to_span(requests_v1[request_key]));
+
+      complete_migration(txn, tables, 1);
+    }
+
+    void migrate(MDB_txn& txn, tables_ const& tables, const unsigned oldversion)
+    {
+      if (oldversion < 1)
+        migrate_0_1(txn, tables);
+    }
+
+    void check_db_version(MDB_txn& txn, tables_ const& tables)
+    {
+      MDB_val key = lmdb::to_val("version");
+      MDB_val value;
+      int err = mdb_get(&txn, tables.properties, &key, &value);
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          migrate(txn, tables, 0); // no version found, migrate from version 0
+        else
+          MONERO_THROW(lmdb::error(err), "Unable to retrieve db version");
+      }
+      else
+      {
+        const unsigned version = *(const unsigned*)value.mv_data;
+        if (version < db_version)
+          migrate(txn, tables, version);
+        else if (version > db_version)
+          throw std::runtime_error(std::string("Incompatible db version (" + std::to_string(version) + ") with running monero-lws version (" + std::to_string(db_version) + ")").c_str());
+      }
+    }
+
     template<typename T>
     expect<T> get_blocks(MDB_cursor& cur, std::size_t max_internal)
     {
@@ -441,18 +661,7 @@ namespace db
 
   struct storage_internal : lmdb::database
   {
-    struct tables_
-    {
-      MDB_dbi blocks;
-      MDB_dbi accounts;
-      MDB_dbi accounts_ba;
-      MDB_dbi accounts_bh;
-      MDB_dbi outputs;
-      MDB_dbi spends;
-      MDB_dbi images;
-      MDB_dbi requests;
-    } tables;
-
+    tables_ tables;
     const unsigned create_queue_max;
 
     explicit storage_internal(lmdb::environment env, unsigned create_queue_max)
@@ -469,7 +678,9 @@ namespace db
       tables.spends      = spends.open(*txn).value();
       tables.images      = images.open(*txn).value();
       tables.requests    = requests.open(*txn).value();
+      tables.properties  = properties.open(*txn).value();
 
+      check_db_version(*txn, tables);
       check_blockchain(*txn, tables.blocks);
 
       MONERO_UNWRAP(this->commit(std::move(txn)));
@@ -887,7 +1098,7 @@ namespace db
       return success();
     }
 
-    expect<void> rollback_accounts(storage_internal::tables_ const& tables, MDB_txn& txn, block_id height)
+    expect<void> rollback_accounts(tables_ const& tables, MDB_txn& txn, block_id height)
     {
       cursor::accounts_by_height accounts_bh_cur;
       MONERO_CHECK(check_cursor(txn, tables.accounts_bh, accounts_bh_cur));
@@ -955,7 +1166,7 @@ namespace db
       return bulk_insert(*accounts_bh_cur, new_height, epee::to_span(new_by_heights));
     }
 
-    expect<void> rollback_chain(storage_internal::tables_ const& tables, MDB_txn& txn, MDB_cursor& cur, block_id height)
+    expect<void> rollback_chain(tables_ const& tables, MDB_txn& txn, MDB_cursor& cur, block_id height)
     {
       MDB_val key;
       MDB_val value;
@@ -1496,7 +1707,7 @@ namespace db
   namespace
   {
     expect<std::vector<account_address>>
-    create_accounts(MDB_txn& txn, storage_internal::tables_ const& tables, epee::span<const account_address> addresses)
+    create_accounts(MDB_txn& txn, tables_ const& tables, epee::span<const account_address> addresses)
     {
       std::vector<account_address> stored{};
       stored.reserve(addresses.size());
@@ -1567,7 +1778,7 @@ namespace db
     }
 
     expect<std::vector<account_address>>
-    import_accounts(MDB_txn& txn, storage_internal::tables_ const& tables, epee::span<const account_address> addresses)
+    import_accounts(MDB_txn& txn, tables_ const& tables, epee::span<const account_address> addresses)
     {
       std::vector<account_address> updated{};
       updated.reserve(addresses.size());
