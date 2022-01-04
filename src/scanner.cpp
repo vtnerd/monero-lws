@@ -161,7 +161,8 @@ namespace lws
       const std::uint64_t timestamp,
       crypto::hash const& tx_hash,
       cryptonote::transaction const& tx,
-      std::vector<std::uint64_t> const& out_ids)
+      std::vector<std::uint64_t> const& out_ids,
+      const bool scan_subaddresses)
     {
       if (2 < tx.version)
         throw std::runtime_error{"Unsupported tx version"};
@@ -170,6 +171,7 @@ namespace lws
       boost::optional<crypto::hash> prefix_hash;
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
       std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+      cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
 
       {
         std::vector<cryptonote::tx_extra_field> extra;
@@ -187,6 +189,10 @@ namespace lws
         }
         else
           extra_nonce = boost::none;
+
+        // additional tx pub keys present when there are 3+ outputs in a tx involving subaddresses
+        if (scan_subaddresses)
+          cryptonote::find_tx_extra_field_by_type(extra, additional_tx_pub_keys);
       } // destruct `extra` vector
 
       for (account& user : users)
@@ -197,6 +203,20 @@ namespace lws
         crypto::key_derivation derived;
         if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
           continue; // to next user
+
+        std::vector<crypto::key_derivation> additional_derivations;
+        if (user.db_address().is_subaddress && additional_tx_pub_keys.data.size() == tx.vout.size())
+        {
+          additional_derivations.reserve(tx.vout.size());
+          std::size_t index = -1;
+          for (auto const& out: tx.vout)
+          {
+            ++index;
+            crypto::key_derivation additional_derived;
+            if (crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derived))
+              additional_derivations.push_back(additional_derived);
+          }
+        }
 
         db::extra ext{};
         std::uint32_t mixin = 0;
@@ -251,7 +271,12 @@ namespace lws
             crypto::wallet::derive_subaddress_public_key(out_data->key, derived, index, derived_pub) &&
             derived_pub == user.spend_public();
 
-          if (!received)
+          crypto::public_key additional_derived_pub;
+          const bool received_to_additional_subaddress = additional_derivations.size() > index && !received &&
+            crypto::wallet::derive_subaddress_public_key(out_data->key, additional_derivations[index], index, additional_derived_pub) &&
+            additional_derived_pub == user.spend_public();
+
+          if (!received && !received_to_additional_subaddress)
             continue; // to next output
 
           if (!prefix_hash)
@@ -266,7 +291,7 @@ namespace lws
           {
             const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), derived, index, bulletproof2
+              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), received ? derived : additional_derivations[index], index, bulletproof2
             );
             if (!decrypted)
             {
@@ -334,6 +359,16 @@ namespace lws
 
         assert(!users.empty());
         assert(std::is_sorted(users.begin(), users.end(), by_height{}));
+
+        bool scan_subaddresses = false;
+        for (const lws::account &user : users)
+        {
+          if (user.db_address().is_subaddress)
+          {
+            scan_subaddresses = true;
+            break;
+          }
+        }
 
         data.reset();
 
@@ -452,7 +487,8 @@ namespace lws
               block.timestamp,
               miner_tx_hash,
               block.miner_tx,
-              *(indices.begin())
+              *(indices.begin()),
+              false /* `scan_subaddresses = false` here bc mining to subaddresses not supported */
             );
 
             indices.remove_prefix(1);
@@ -467,7 +503,8 @@ namespace lws
                 block.timestamp,
                 boost::get<0>(tx_data),
                 boost::get<1>(tx_data),
-                boost::get<2>(tx_data)
+                boost::get<2>(tx_data),
+                scan_subaddresses
               );
             }
 
