@@ -155,7 +155,7 @@ namespace rpc
   struct get_unspent_outs_response
   {
     get_unspent_outs_response() = delete;
-    std::uint64_t per_kb_fee;
+    std::uint64_t per_byte_fee;
     std::uint64_t fee_mask;
     safe_uint64 amount;
     std::vector<std::pair<db::output, std::vector<crypto::key_image>>> outputs;
