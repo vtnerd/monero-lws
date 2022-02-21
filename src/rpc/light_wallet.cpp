@@ -294,7 +294,7 @@ namespace lws
       return expand_outputs{src, self.user_key};
     };
     wire::object(dest,
-      WIRE_FIELD_COPY(per_kb_fee),
+      WIRE_FIELD_COPY(per_byte_fee),
       WIRE_FIELD_COPY(fee_mask),
       WIRE_FIELD_COPY(amount),
       wire::field("outputs", wire::as_array(std::cref(self.outputs), expand))
