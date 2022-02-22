@@ -541,11 +541,8 @@ namespace lws
           return {lws::error::bad_daemon_response};
 
         const bool use_per_byte_fee = resp->size_scale == 1;
-        const std::uint64_t base_fee = resp->estimated_base_fee;
-        const std::uint64_t base_fee_masked =
-          ((base_fee + (resp->fee_mask - 1)) / resp->fee_mask) * resp->fee_mask;
 
-        return response{base_fee_masked, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key), use_per_byte_fee};
+        return response{resp->estimated_base_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key), use_per_byte_fee};
       }
     };
 
