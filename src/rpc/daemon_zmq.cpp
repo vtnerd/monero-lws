@@ -93,6 +93,10 @@ namespace cryptonote
   {
     wire::object(source, WIRE_FIELD(hash));
   }
+  static void read_bytes(wire::json_reader& source, txout_to_tagged_key& self)
+  {
+    wire::object(source, WIRE_FIELD(key), WIRE_FIELD(view_tag));
+  }
   static void read_bytes(wire::json_reader& source, txout_to_key& self)
   {
     wire::object(source, WIRE_FIELD(key));
@@ -103,6 +107,7 @@ namespace cryptonote
       WIRE_FIELD(amount),
       wire::variant_field("transaction output variant", std::ref(self.target),
         wire::option<txout_to_key>{"to_key"},
+        wire::option<txout_to_tagged_key>{"to_tagged_key"},
         wire::option<txout_to_script>{"to_script"},
         wire::option<txout_to_scripthash>{"to_scripthash"}
       )
