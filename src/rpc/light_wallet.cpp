@@ -35,7 +35,7 @@
 
 #include "db/string.h"
 #include "error.h"
-#include "misc_os_dependent.h" // monero/contrib/epee/include
+#include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"

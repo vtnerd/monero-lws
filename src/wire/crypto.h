@@ -69,4 +69,9 @@ namespace wire
   struct is_blob<rct::key>
     : std::true_type
   {};
+
+  template<>
+  struct is_blob<crypto::view_tag>
+    : std::true_type
+  {};
 }

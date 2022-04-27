@@ -241,14 +241,18 @@ namespace lws
         {
           ++index;
 
-          cryptonote::txout_to_key const* const out_data =
-            boost::get<cryptonote::txout_to_key>(std::addressof(out.target));
-          if (!out_data)
+          crypto::public_key out_pub_key;
+          if (!cryptonote::get_output_public_key(out, out_pub_key))
+            continue; // to next output
+
+          boost::optional<crypto::view_tag> view_tag_opt =
+            cryptonote::get_output_view_tag(out);
+          if (!cryptonote::out_can_be_to_acc(view_tag_opt, derived, index))
             continue; // to next output
 
           crypto::public_key derived_pub;
           const bool received =
-            crypto::wallet::derive_subaddress_public_key(out_data->key, derived, index, derived_pub) &&
+            crypto::wallet::derive_subaddress_public_key(out_pub_key, derived, index, derived_pub) &&
             derived_pub == user.spend_public();
 
           if (!received)
@@ -300,7 +304,7 @@ namespace lws
               timestamp,
               tx.unlock_time,
               *prefix_hash,
-              out_data->key,
+              out_pub_key,
               mask,
               {0, 0, 0, 0, 0, 0, 0}, // reserved bytes
               db::pack(ext, payment_id.first),
