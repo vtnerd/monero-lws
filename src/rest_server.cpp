@@ -537,12 +537,13 @@ namespace lws
         if (!resp)
           return resp.error();
 
-        if ((resp->size_scale != 1 && resp->size_scale != 1024) || resp->fee_mask == 0)
+        if (resp->size_scale == 0 || 1024 < resp->size_scale || resp->fee_mask == 0)
           return {lws::error::bad_daemon_response};
 
-        const bool use_per_byte_fee = resp->size_scale == 1;
+        const std::uint64_t per_byte_fee =
+          resp->estimated_base_fee / resp->size_scale;
 
-        return response{resp->estimated_base_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key), use_per_byte_fee};
+        return response{per_byte_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key)};
       }
     };
 
