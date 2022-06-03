@@ -540,12 +540,10 @@ namespace lws
         if (resp->size_scale == 0 || 1024 < resp->size_scale || resp->fee_mask == 0)
           return {lws::error::bad_daemon_response};
 
-        const std::uint64_t per_kb_fee =
-          resp->estimated_base_fee * (1024 / resp->size_scale);
-        const std::uint64_t per_kb_fee_masked =
-          ((per_kb_fee + (resp->fee_mask - 1)) / resp->fee_mask) * resp->fee_mask;
+        const std::uint64_t per_byte_fee =
+          resp->estimated_base_fee / resp->size_scale;
 
-        return response{per_kb_fee_masked, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key)};
+        return response{per_byte_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key)};
       }
     };
 
