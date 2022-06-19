@@ -88,6 +88,14 @@ if (NOT MONERO_BUILD_DIR)
   message(FATAL_ERROR "The argument -DMONERO_BUILD_DIR must specify a location of an existing monero build")
 endif()
 
+if(STATIC)
+  if(MSVC)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .dll.a .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  else()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  endif()
+endif()
+
 load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   Boost_THREAD_LIBRARY_RELEASE
   CMAKE_CXX_COMPILER
@@ -101,7 +109,21 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   UNBOUND_LIBRARIES
   ZMQ_INCLUDE_PATH
   ZMQ_LIB
+  PGM_LIBRARY
+  NORM_LIBRARY
+  GSSAPI_LIBRARY
+  PROTOLIB_LIBRARY
+  SODIUM_LIBRARY
 )
+
+message(STATUS "Norm: ${monero_NORM_LIBRARY}")
+
+# if(STATIC)
+#  load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
+#   )
+# endif()
+
+message(STATUS "Found zmq: ${monero_ZMQ_LIB} ${monero_ZMQ_INCLUDE_PATH}")
 
 if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
   message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
@@ -180,30 +202,23 @@ if (NOT (HIDAPI_INCLUDE_DIR STREQUAL monero_HIDAPI_INCLUDE_DIR))
   message(FATAL_ERROR "hidapi libraries for monero build differs from this project")
 endif()
 
+set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
+set(LMDB_LIB_PATH "monero::lmdb")
+set(ZMQ_LIB "${monero_ZMQ_LIB}")
+set(ZMQ_INCLUDE_PATH "${monero_ZMQ_INCLUDE_PATH}")
+
+
 # openssl
 if (STATIC)
   set(OPENSSL_USE_STATIC_LIBS TRUE)
 endif()
 find_package(OpenSSL REQUIRED)
 
-if (NOT (OPENSSL_CRYPTO_LIBRARY STREQUAL monero_OPENSSL_CRYPTO_LIBRARY))
-  message(STATUS "Found OPENSSL_CRYPTO_LIBRARY: ${OPENSSL_CRYPTO_LIBRARY}")
-  message(STATUS "Found monero_OPENSSL_CRYPTO_LIBRARY: ${monero_OPENSSL_CRYPTO_LIBRARY}")
-  message(FATAL_ERROR "openssl libraries for monero build differs from this project")
-endif()
-
-# zmq
-# https://github.com/monero-project/monero/blob/9aab19f349433687c7aaf2c1cbc5751e5912c0aa/CMakeLists.txt#L1171-L1199
-if(STATIC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DZMQ_STATIC")
-endif()
-find_path(ZMQ_INCLUDE_PATH zmq.h)
-find_library(ZMQ_LIB zmq)
-find_library(PGM_LIBRARY pgm)
-find_library(NORM_LIBRARY norm)
-find_library(GSSAPI_LIBRARY gssapi_krb5)
-find_library(PROTOLIB_LIBRARY protolib)
-find_library(SODIUM_LIBRARY sodium)
+# if (NOT (OPENSSL_CRYPTO_LIBRARY STREQUAL monero_OPENSSL_CRYPTO_LIBRARY))
+#   message(STATUS "Found OPENSSL_CRYPTO_LIBRARY: ${OPENSSL_CRYPTO_LIBRARY}")
+#   message(STATUS "Found monero_OPENSSL_CRYPTO_LIBRARY: ${monero_OPENSSL_CRYPTO_LIBRARY}")
+#   message(FATAL_ERROR "openssl libraries for monero build differs from this project")
+# endif()
 
 if(NOT ZMQ_INCLUDE_PATH)
   message(FATAL_ERROR "Could not find required header zmq.h")
@@ -211,26 +226,26 @@ endif()
 if(NOT ZMQ_LIB)
   message(FATAL_ERROR "Could not find required libzmq")
 endif()
-if(PGM_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${PGM_LIBRARY}")
+if(monero_PGM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_PGM_LIBRARY}")
 endif()
-if(NORM_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${NORM_LIBRARY}")
+if(monero_NORM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_NORM_LIBRARY}")
 endif()
-if(GSSAPI_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${GSSAPI_LIBRARY}")
+if(monero_GSSAPI_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_GSSAPI_LIBRARY}")
 endif()
-if(PROTOLIB_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${PROTOLIB_LIBRARY}")
+if(monero_PROTOLIB_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(SODIUM_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${SODIUM_LIBRARY}")
+if(monero_SODIUM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
 endif()
 
-if (NOT (ZMQ_INCLUDE_PATH STREQUAL monero_ZMQ_INCLUDE_PATH))
-  message(STATUS "Found ZMQ_INCLUDE_PATH: ${ZMQ_INCLUDE_PATH}")
-  message(STATUS "Found monero_ZMQ_INCLUDE_PATH: ${monero_ZMQ_INCLUDE_PATH}")
-  message(FATAL_ERROR "zmq libraries for monero build differs from this project")
+if(STATIC AND NOT IOS)
+  if(UNIX)
+    set(monero_OPENSSL_LIBRARIES "${monero_OPENSSL_LIBRARIES};${CMAKE_DL_LIBS};${CMAKE_THREAD_LIBS_INIT}")
+  endif()
 endif()
 
 foreach (LIB ${MONERO_LIBRARIES})
@@ -247,9 +262,12 @@ foreach (LIB ${MONERO_LIBRARIES})
     set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
     list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
   endif()
-  
   unset(LIB_PATH CACHE)
 endforeach()
+
+message(STATUS "${ZMQ_LIB}")
+message(STATUS "${monero_OPENSSL_CRYPTO_LIBRARY}, ${monero_OPENSSL_SSL_LIBRARY}")
+
 
 add_library(monero::libraries INTERFACE IMPORTED)
 set_property(TARGET monero::libraries PROPERTY
@@ -275,14 +293,14 @@ set_property(TARGET monero::libraries PROPERTY
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_THREAD_LIBRARY}
     ${HIDAPI_LIBRARIES}
+    ${ZMQ_LIB}
+    ${monero_OPENSSL_CRYPTO_LIBRARY}
+    ${monero_OPENSSL_SSL_LIBRARY}
     ${OPENSSL_LIBRARIES}
     ${monero_SODIUM_LIBRARY}
     ${monero_UNBOUND_LIBRARIES}
     ${CMAKE_DL_LIBS}
 )
-
-set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
-set(LMDB_LIB_PATH "monero::lmdb")
 
 
 #
