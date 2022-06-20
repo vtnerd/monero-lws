@@ -96,11 +96,6 @@ RUN apt-get install --no-install-recommends -y \
     ca-certificates \
     curl \
     jq \
-    libgssapi-krb5-2 \
-    libhidapi-dev \
-    libnorm-dev \
-    libpgm-dev \
-    libzmq3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
