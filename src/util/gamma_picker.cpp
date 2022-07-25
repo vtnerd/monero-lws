@@ -40,6 +40,8 @@ namespace lws
     constexpr const double gamma_shape = 19.28;
     constexpr const double gamma_scale = 1 / double(1.61);
     constexpr const std::size_t blocks_in_a_year = (86400 * 365) / DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t default_unlock_time = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
+    constexpr const std::size_t recent_spend_window = 15 * DIFFICULTY_TARGET_V2;
   }
 
   gamma_picker::gamma_picker(std::vector<uint64_t> rct_offsets)
@@ -84,17 +86,26 @@ namespace lws
     static_assert(std::is_empty<crypto::random_device>(), "random_device is no longer cheap to construct");
     static constexpr const crypto::random_device engine{};
     const auto end = offsets().end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE;
+    const uint64_t num_rct_outputs = spendable_upper_bound();
 
     for (unsigned tries = 0; tries < 100; ++tries)
     {
-      std::uint64_t output_index = std::exp(gamma(engine)) * outputs_per_second;
-      if (offsets().back() <= output_index)
+      double output_age_in_seconds = std::exp(gamma(engine));
+
+      // shift output back by unlock time to apply distribution from chain tip
+      if (output_age_in_seconds > default_unlock_time)
+        output_age_in_seconds -= default_unlock_time;
+      else
+        output_age_in_seconds = crypto::rand_idx(recent_spend_window);
+
+      std::uint64_t output_index = output_age_in_seconds * outputs_per_second;
+      if (num_rct_outputs <= output_index)
         continue; // gamma selected older than blockchain height (rare)
 
-      output_index = offsets().back() - 1 - output_index;
+      output_index = num_rct_outputs - 1 - output_index;
       const auto selection = std::lower_bound(offsets().begin(), end, output_index);
       if (selection == end)
-        continue; // gamma selected within locked/non-spendable range (rare)
+        throw std::logic_error{"Unable to select random output - output not found in range (should never happen)"};
 
       const std::uint64_t first_rct = offsets().begin() == selection ? 0 : *(selection - 1);
       const std::uint64_t n_rct = *selection - first_rct;
@@ -102,7 +113,7 @@ namespace lws
         return first_rct + crypto::rand_idx(n_rct);
       // block had zero outputs (miner didn't collect XMR?)
     }
-    throw std::runtime_error{"Unable to select random output in spendable range using gamma distribution after 1,024 attempts"};
+    throw std::runtime_error{"Unable to select random output in spendable range using gamma distribution after 100 attempts"};
   }
 
   std::vector<std::uint64_t> gamma_picker::take_offsets()
