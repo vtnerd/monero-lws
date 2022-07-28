@@ -230,7 +230,6 @@ set_property(TARGET monero::libraries PROPERTY
     ${monero_HIDAPI_LIBRARY}
     ${monero_usb_LIBRARY}
     ${monero_LIBUDEV_LIBRARY}
-    ${ZMQ_LIB}
     ${monero_OPENSSL_SSL_LIBRARY}
     ${monero_OPENSSL_CRYPTO_LIBRARY}
     ${monero_SODIUM_LIBRARY}
