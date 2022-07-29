@@ -1,8 +1,8 @@
 # Initial base from https://github.com/sethforprivacy/monero-lws/blob/588c7f1965d3afbda8a65dc870645650e063e897/Dockerfile
 
 # Set monerod version to install from github
-ARG MONERO_BRANCH=v0.17.3.2
-ARG MONERO_COMMIT_HASH=424e4de16b98506170db7b0d7d87a79ccf541744
+ARG MONERO_BRANCH=v0.18.0.0
+ARG MONERO_COMMIT_HASH=b6a029f222abada36c7bc6c65899a4ac969d7dee
 
 # Select ubuntu:20.04 for the build image base
 FROM ubuntu:20.04 as build
@@ -32,13 +32,13 @@ RUN apt-get install --no-install-recommends -y \
     libsodium-dev \
     libssl-dev \
     libudev-dev \
-    libunbound-dev \
     libunwind8-dev \
     libusb-1.0-0-dev \
     libzmq3-dev \
     pkg-config \
     protobuf-compiler \
     qttools5-dev-tools \
+    wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,6 +50,27 @@ ENV CFLAGS='-fPIC'
 ENV CXXFLAGS='-fPIC -DELPP_FEATURE_CRASH_LOG'
 ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
+
+# Build expat, a dependency for libunbound
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_4_8/expat-2.4.8.tar.bz2 && \
+    echo "a247a7f6bbb21cf2ca81ea4cbb916bfb9717ca523631675f99b3d4a5678dcd16  expat-2.4.8.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.4.8.tar.bz2 && \
+    rm expat-2.4.8.tar.bz2 && \
+    cd expat-2.4.8 && \
+    ./configure --enable-static --disable-shared --prefix=/usr && \
+    make -j${NPROC:-$(nproc)} && \
+    make -j${NPROC:-$(nproc)} install
+
+# Build libunbound for static builds
+WORKDIR /tmp
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.16.1.tar.gz && \
+    echo "2fe4762abccd564a0738d5d502f57ead273e681e92d50d7fba32d11103174e9a  unbound-1.16.1.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.16.1.tar.gz && \
+    rm unbound-1.16.1.tar.gz && \
+    cd unbound-1.16.1 && \
+    ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
+    make -j${NPROC:-$(nproc)} && \
+    make -j${NPROC:-$(nproc)} install
 
 # Switch to Monero source directory
 WORKDIR /monero
@@ -63,10 +84,7 @@ RUN git clone --recursive --branch ${MONERO_BRANCH} \
     # Create make build files manually for release-static-linux-x86_64
     && cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-x64" ../.. \
     # Build only monerod binary using number of available threads
-    && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon
-
-# TODO: remove the need to manually make this static liblmdb_lib.a
-RUN cd /monero/build/release/src/lmdb && make && cd /monero
+    && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon lmdb_lib multisig
 
 # Switch to monero-lws source directory
 WORKDIR /monero-lws
