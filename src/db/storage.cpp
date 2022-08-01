@@ -1351,6 +1351,24 @@ namespace db
     MONERO_PRECOND(db != nullptr);
     return db->try_write([this, height, addresses] (MDB_txn& txn) -> expect<std::vector<account_address>>
     {
+      {
+        cursor::blocks blocks_cur;
+        MONERO_CHECK(check_cursor(txn, this->db->tables.blocks, blocks_cur));
+
+        MDB_val key = lmdb::to_val(blocks_version);
+        MDB_val value{};
+
+        MONERO_LMDB_CHECK(mdb_cursor_get(blocks_cur.get(), &key, &value, MDB_SET));
+        MONERO_LMDB_CHECK(mdb_cursor_get(blocks_cur.get(), &key, &value, MDB_LAST_DUP));
+
+        const expect<block_id> current_height =
+          blocks.get_value<MONERO_FIELD(block_info, id)>(value);
+        if (!current_height)
+          return current_height.error();
+        if (*current_height < height)
+          return {error::bad_height};
+      }
+
       std::vector<account_address> updated{};
       updated.reserve(addresses.size());
 
