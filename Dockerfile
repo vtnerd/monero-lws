@@ -23,7 +23,6 @@ RUN apt-get install --no-install-recommends -y \
     graphviz \
     libboost-all-dev \
     libexpat1-dev \
-    libhidapi-dev \
     libldns-dev \
     liblzma-dev \
     libpgm-dev \
