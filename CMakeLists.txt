@@ -251,6 +251,11 @@ foreach (LIB ${MONERO_LIBRARIES})
   unset(LIB_PATH CACHE)
 endforeach()
 
+if(APPLE)
+  find_library(IOKIT_LIBRARY IOKit)
+  list(APPEND IMPORTED_MONERO_LIBRARIES ${IOKIT_LIBRARY})
+endif()
+
 add_library(monero::libraries INTERFACE IMPORTED)
 set_property(TARGET monero::libraries PROPERTY
   INTERFACE_INCLUDE_DIRECTORIES
