@@ -103,10 +103,6 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   ZMQ_LIB
 )
 
-if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
-  message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
-endif()
-
 if (NOT (CMAKE_CXX_COMPILER STREQUAL monero_CMAKE_CXX_COMPILER))
   message(FATAL_ERROR "Compiler for monero build differs from this project")
 endif()
