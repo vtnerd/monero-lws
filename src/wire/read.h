@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <boost/lexical_cast/try_lexical_convert.hpp>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -167,33 +168,24 @@ namespace wire
 
   namespace integer
   {
-    [[noreturn]] void throw_exception(std::intmax_t source, std::intmax_t min);
+    [[noreturn]] void throw_exception(std::intmax_t source, std::intmax_t min, std::uintmax_t max);
     [[noreturn]] void throw_exception(std::uintmax_t source, std::uintmax_t max);
 
     template<typename Target, typename U>
     inline Target convert_to(const U source)
     {
-      using common = typename std::common_type<Target, U>::type;
       static constexpr const Target target_min = std::numeric_limits<Target>::min();
       static constexpr const Target target_max = std::numeric_limits<Target>::max();
-
-      /* After optimizations, this is:
-           * 1 check for unsigned -> unsigned (uint, uint)
-           * 2 checks for signed -> signed (int, int)
-           * 2 checks for signed -> unsigned-- (
-           * 1 check for unsigned -> signed (uint, uint)
-
-         Put `WIRE_DLOG_THROW` in cpp to reduce code/ASM duplication. Do not
-         remove first check, signed values can be implicitly converted to
-         unsigned in some checks. */
-      if (!std::numeric_limits<Target>::is_signed && source < 0)
-        throw_exception(std::intmax_t(source), std::intmax_t(0));
-      else if (common(source) < common(target_min))
-        throw_exception(std::intmax_t(source), std::intmax_t(target_min));
-      else if (common(target_max) < common(source))
-        throw_exception(std::uintmax_t(source), std::uintmax_t(target_max));
-
-      return Target(source);
+      
+      Target out = 0;
+      if (!boost::conversion::try_lexical_convert(source, out))
+      {
+        if (std::numeric_limits<U>::is_signed)
+          throw_exception(std::intmax_t(source), target_min, target_max);
+        else
+          throw_exception(std::uintmax_t(source), target_max);
+      }
+      return out;
     }
   }
 
