@@ -233,13 +233,22 @@ namespace wire
     return json_bool.value.boolean;
   }
 
+  using imax_limits = std::numeric_limits<std::intmax_t>;
+  static_assert(0 <= imax_limits::max(), "expected 0 <= intmax_t::max");
+  static_assert(
+    imax_limits::max() <= std::numeric_limits<std::uintmax_t>::max(),
+    "expected intmax_t::max <= uintmax_t::max"
+  );
+
   std::intmax_t json_reader::integer()
   {
     rapidjson_sax json_int{error::schema::integer};
     read_next_value(json_int);
     if (json_int.negative)
       return json_int.value.integer;
-    return integer::convert_to<std::intmax_t>(json_int.value.unsigned_integer);
+    if (static_cast<std::uintmax_t>(imax_limits::max()) < json_int.value.unsigned_integer)
+      WIRE_DLOG_THROW_(error::schema::smaller_integer);
+    return static_cast<std::intmax_t>(json_int.value.unsigned_integer);
   }
 
   std::uintmax_t json_reader::unsigned_integer()
@@ -248,7 +257,9 @@ namespace wire
     read_next_value(json_uint);
     if (!json_uint.negative)
       return json_uint.value.unsigned_integer;
-    return integer::convert_to<std::uintmax_t>(json_uint.value.integer);
+    if (json_uint.value.integer < 0)
+      WIRE_DLOG_THROW_(error::schema::larger_integer);
+    return static_cast<std::uintmax_t>(json_uint.value.integer);
   }
     /*
   const std::vector<std::uintmax_t>& json_reader::unsigned_integer_array()

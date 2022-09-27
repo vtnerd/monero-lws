@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2022, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,44 +25,30 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "wire/read.h"
+#pragma once
 
-#include <stdexcept>
+#include <cstdint>
+#include <cstring>
+#include <type_traits>
+#include "wire/traits.h"
 
-void wire::reader::increment_depth()
+namespace lws_test
 {
-  if (++depth_ == max_read_depth())
-    WIRE_DLOG_THROW_(error::schema::maximum_depth);
-}
+  struct small_blob { std::uint8_t buf[4]; };
+  constexpr const small_blob blob_test1{{0x00, 0xFF, 0x22, 0x11}};
+  constexpr const small_blob blob_test2{{0x11, 0x7F, 0x7E, 0x80}};
+  constexpr const small_blob blob_test3{{0xDE, 0xAD, 0xBE, 0xEF}};
 
-[[noreturn]] void wire::integer::throw_exception(std::intmax_t source, std::intmax_t min, std::intmax_t max)
-{
-  static_assert(
-    std::numeric_limits<std::intmax_t>::max() <= std::numeric_limits<std::uintmax_t>::max(),
-    "expected intmax_t::max <= uintmax_t::max"
-  );
-  if (source < 0)
-    WIRE_DLOG_THROW(error::schema::larger_integer, source << " given when " << min << " is minimum permitted");
-  else
-    throw_exception(std::uintmax_t(source), std::uintmax_t(max));
-}
-[[noreturn]] void wire::integer::throw_exception(std::uintmax_t source, std::uintmax_t max)
-{
-  WIRE_DLOG_THROW(error::schema::smaller_integer, source << " given when " << max << "is maximum permitted");
-}
-
-[[noreturn]] void wire_read::throw_exception(const wire::error::schema code, const char* display, epee::span<char const* const> names)
-{
-  const char* name = nullptr;
-  for (const char* elem : names)
+  inline bool operator==(const small_blob& lhs, const small_blob& rhs)
   {
-    if (elem != nullptr)
-    {
-      name = elem;
-      break;
-    }
+    return std::memcmp(lhs.buf, rhs.buf, sizeof(lhs.buf)) == 0;
   }
-  WIRE_DLOG_THROW(code, display << (name ? name : ""));
 }
 
-
+namespace wire
+{
+  template<>
+  struct is_blob<lws_test::small_blob>
+    : std::true_type
+  {};
+}

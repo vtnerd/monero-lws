@@ -73,6 +73,12 @@ namespace wire
     return buf;
   }
 
+  void json_writer::boolean(const bool source)
+  {
+    formatter_.Bool(source);
+    check_flush();
+  }
+
   void json_writer::integer(const int source)
   {
     formatter_.Int(source);
