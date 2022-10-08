@@ -167,32 +167,43 @@ namespace wire
 
   namespace integer
   {
-    [[noreturn]] void throw_exception(std::intmax_t source, std::intmax_t min);
-    [[noreturn]] void throw_exception(std::uintmax_t source, std::uintmax_t max);
+    [[noreturn]] void throw_exception(std::intmax_t value, std::intmax_t min, std::uintmax_t max);
+    [[noreturn]] void throw_exception(std::uintmax_t value, std::uintmax_t max);
+
+    template<typename Target, typename U>
+    inline bool will_overflow(const U val) noexcept
+    {
+      using t_limit = std::numeric_limits<Target>;
+      using s_limit = std::numeric_limits<U>;
+      
+      static_assert(t_limit::is_integer, "target must be integer");
+      static_assert(s_limit::is_integer, "source must be integer");
+
+      /* Adapted from:
+         https://blog.reverberate.org/2012/12/testing-for-integer-overflow-in-c-and-c.html */
+
+      if (t_limit::is_signed)
+      {
+        using im_limit = std::numeric_limits<std::intmax_t>;
+        return
+          (!s_limit::is_signed && std::uintmax_t(val) > std::uintmax_t(im_limit::max())) ||
+          std::intmax_t(val) < std::intmax_t(t_limit::min()) ||
+          std::intmax_t(val) > std::intmax_t(t_limit::max());
+      }
+      return val < 0 || std::uintmax_t(val) > std::uintmax_t(t_limit::max());
+    }
 
     template<typename Target, typename U>
     inline Target convert_to(const U source)
     {
-      using common = typename std::common_type<Target, U>::type;
-      static constexpr const Target target_min = std::numeric_limits<Target>::min();
-      static constexpr const Target target_max = std::numeric_limits<Target>::max();
-
-      /* After optimizations, this is:
-           * 1 check for unsigned -> unsigned (uint, uint)
-           * 2 checks for signed -> signed (int, int)
-           * 2 checks for signed -> unsigned-- (
-           * 1 check for unsigned -> signed (uint, uint)
-
-         Put `WIRE_DLOG_THROW` in cpp to reduce code/ASM duplication. Do not
-         remove first check, signed values can be implicitly converted to
-         unsigned in some checks. */
-      if (!std::numeric_limits<Target>::is_signed && source < 0)
-        throw_exception(std::intmax_t(source), std::intmax_t(0));
-      else if (common(source) < common(target_min))
-        throw_exception(std::intmax_t(source), std::intmax_t(target_min));
-      else if (common(target_max) < common(source))
-        throw_exception(std::uintmax_t(source), std::uintmax_t(target_max));
-
+      using limit = std::numeric_limits<Target>;
+      if (will_overflow<Target>(source))
+      {
+        if (std::numeric_limits<U>::is_signed)
+          throw_exception(source, limit::min(), limit::max());
+        else
+          throw_exception(source, limit::max());
+      }
       return Target(source);
     }
   }
