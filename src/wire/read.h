@@ -83,7 +83,7 @@ namespace wire
     //! \throw wire::exception if next value not a boolean.
     virtual bool boolean() = 0;
 
-    //! \throw wire::expception if next value not an integer.
+    //! \throw wire::exception if next value not an integer.
     virtual std::intmax_t integer() = 0;
 
     //! \throw wire::exception if next value not an unsigned integer.
@@ -104,8 +104,7 @@ namespace wire
     //! \throw wire::exception if next value invalid enum. \return Index in `enums`.
     virtual std::size_t enumeration(epee::span<char const* const> enums) = 0;
 
-    /*! \throw wire::exception if next value not array
-        \return Number of values to read before calling `is_array_end()`. */
+    //! \throw wire::exception if next value not array
     virtual std::size_t start_array() = 0;
 
     //! \return True if there is another element to read.
@@ -167,87 +166,58 @@ namespace wire
 
   namespace integer
   {
-    [[noreturn]] void throw_exception(std::intmax_t value, std::intmax_t min, std::uintmax_t max);
+    [[noreturn]] void throw_exception(std::intmax_t value, std::intmax_t min, std::intmax_t max);
     [[noreturn]] void throw_exception(std::uintmax_t value, std::uintmax_t max);
 
-    template<typename Target, typename U>
-    inline bool will_overflow(const U val) noexcept
+    template<typename T, typename U>
+    inline T cast_signed(const U source)
     {
-      using t_limit = std::numeric_limits<Target>;
-      using s_limit = std::numeric_limits<U>;
-      
-      static_assert(t_limit::is_integer, "target must be integer");
-      static_assert(s_limit::is_integer, "source must be integer");
-
-      /* Adapted from:
-         https://blog.reverberate.org/2012/12/testing-for-integer-overflow-in-c-and-c.html */
-
-      if (t_limit::is_signed)
-      {
-        using im_limit = std::numeric_limits<std::intmax_t>;
-        return
-          (!s_limit::is_signed && std::uintmax_t(val) > std::uintmax_t(im_limit::max())) ||
-          std::intmax_t(val) < std::intmax_t(t_limit::min()) ||
-          std::intmax_t(val) > std::intmax_t(t_limit::max());
-      }
-      return val < 0 || std::uintmax_t(val) > std::uintmax_t(t_limit::max());
+      using limit = std::numeric_limits<T>;
+      static_assert(
+        std::is_signed<T>::value && std::is_integral<T>::value,
+        "target must be signed integer type"
+      );
+      static_assert(
+        std::is_signed<U>::value && std::is_integral<U>::value,
+        "source must be signed integer type"
+      );
+      if (source < limit::min() || limit::max() < source)
+       throw_exception(source, limit::min(), limit::max());
+      return static_cast<T>(source);
     }
 
-    template<typename Target, typename U>
-    inline Target convert_to(const U source)
+    template<typename T, typename U>
+    inline T cast_unsigned(const U source)
     {
-      using limit = std::numeric_limits<Target>;
-      if (will_overflow<Target>(source))
-      {
-        if (std::numeric_limits<U>::is_signed)
-          throw_exception(source, limit::min(), limit::max());
-        else
-          throw_exception(source, limit::max());
-      }
-      return Target(source);
+      using limit = std::numeric_limits<T>;
+      static_assert(
+        std::is_unsigned<T>::value && std::is_integral<T>::value,
+        "target must be unsigned integer type"
+      );
+      static_assert(
+        std::is_unsigned<U>::value && std::is_integral<U>::value,
+        "source must be unsigned integer type"
+      );
+      if (limit::max() < source)
+        throw_exception(source, limit::max());
+      return static_cast<T>(source);
     }
   }
 
-  inline void read_bytes(reader& source, char& dest)
+  //! read all current and future signed integer types
+  template<typename T>
+  inline enable_if<std::is_signed<T>::value && std::is_integral<T>::value>
+  read_bytes(reader& source, T& dest)
   {
-    dest = integer::convert_to<char>(source.integer());
-  }
-  inline void read_bytes(reader& source, short& dest)
-  {
-    dest = integer::convert_to<short>(source.integer());
-  }
-  inline void read_bytes(reader& source, int& dest)
-  {
-    dest = integer::convert_to<int>(source.integer());
-  }
-  inline void read_bytes(reader& source, long& dest)
-  {
-    dest = integer::convert_to<long>(source.integer());
-  }
-  inline void read_bytes(reader& source, long long& dest)
-  {
-    dest = integer::convert_to<long long>(source.integer());
+    dest = integer::cast_signed<T>(source.integer());
   }
 
-  inline void read_bytes(reader& source, unsigned char& dest)
+  //! read all current and future unsigned integer types
+  template<typename T>
+  inline enable_if<std::is_unsigned<T>::value && std::is_integral<T>::value>
+  read_bytes(reader& source, T& dest)
   {
-    dest = integer::convert_to<unsigned char>(source.unsigned_integer());
-  }
-  inline void read_bytes(reader& source, unsigned short& dest)
-  {
-    dest = integer::convert_to<unsigned short>(source.unsigned_integer());
-  }
-  inline void read_bytes(reader& source, unsigned& dest)
-  {
-    dest = integer::convert_to<unsigned>(source.unsigned_integer());
-  }
-  inline void read_bytes(reader& source, unsigned long& dest)
-  {
-    dest = integer::convert_to<unsigned long>(source.unsigned_integer());
-  }
-  inline void read_bytes(reader& source, unsigned long long& dest)
-  {
-    dest = integer::convert_to<unsigned long long>(source.unsigned_integer());
+    dest = integer::cast_unsigned<T>(source.unsigned_integer());
   }
 } // wire
 
@@ -284,7 +254,7 @@ namespace wire_read
     using value_type = typename T::value_type;
     static_assert(!std::is_same<value_type, char>::value, "read array of chars as binary");
     static_assert(!std::is_same<value_type, std::uint8_t>::value, "read array of unsigned chars as binary");
-    
+
     std::size_t count = source.start_array();
 
     dest.clear();
