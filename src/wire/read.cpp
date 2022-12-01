@@ -35,12 +35,16 @@ void wire::reader::increment_depth()
     WIRE_DLOG_THROW_(error::schema::maximum_depth);
 }
 
-[[noreturn]] void wire::integer::throw_exception(std::intmax_t source, std::intmax_t min, std::uintmax_t max)
+[[noreturn]] void wire::integer::throw_exception(std::intmax_t source, std::intmax_t min, std::intmax_t max)
 {
+  static_assert(
+    std::numeric_limits<std::intmax_t>::max() <= std::numeric_limits<std::uintmax_t>::max(),
+    "expected intmax_t::max <= uintmax_t::max"
+  );
   if (source < 0)
     WIRE_DLOG_THROW(error::schema::larger_integer, source << " given when " << min << " is minimum permitted");
   else
-    throw_exception(std::uintmax_t(source), max);
+    throw_exception(std::uintmax_t(source), std::uintmax_t(max));
 }
 [[noreturn]] void wire::integer::throw_exception(std::uintmax_t source, std::uintmax_t max)
 {
