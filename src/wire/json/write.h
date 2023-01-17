@@ -85,6 +85,8 @@ namespace wire
     //! \return Null-terminated buffer containing uint as decimal ascii
     static std::array<char, uint_to_string_size> to_string(std::uintmax_t) noexcept;
 
+    void boolean(bool) override final;
+
     void integer(int) override final;
     void integer(std::intmax_t) override final;
 
