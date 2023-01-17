@@ -165,7 +165,7 @@ namespace lws
 
   void rpc::read_bytes(wire::json_reader& source, safe_uint64& self)
   {
-    self = safe_uint64(wire::integer::convert_to<std::uint64_t>(source.safe_unsigned_integer()));
+    self = safe_uint64(wire::integer::cast_unsigned<std::uint64_t>(source.safe_unsigned_integer()));
   }
   void rpc::write_bytes(wire::json_writer& dest, const safe_uint64 self)
   {
@@ -175,7 +175,7 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, safe_uint64_array& self)
   {
     for (std::size_t count = source.start_array(); !source.is_array_end(count); --count)
-      self.values.emplace_back(wire::integer::convert_to<std::uint64_t>(source.safe_unsigned_integer()));
+      self.values.emplace_back(wire::integer::cast_unsigned<std::uint64_t>(source.safe_unsigned_integer()));
     source.end_array();
   }
 

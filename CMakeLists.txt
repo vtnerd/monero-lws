@@ -33,6 +33,8 @@ enable_language(CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(BUILD_TESTS "Build Tests" OFF)
+
 set(MONERO_LIBRARIES
   daemon_messages
   serialization
@@ -247,3 +249,8 @@ set_property(TARGET monero::libraries PROPERTY
 #
 
 add_subdirectory(src)
+
+if (BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
