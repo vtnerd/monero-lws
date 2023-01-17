@@ -108,7 +108,7 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   HIDAPI_LIBRARY
   LMDB_INCLUDE
   monero_SOURCE_DIR
-  OPENSSL_INCLUDE_PATH
+  OPENSSL_INCLUDE_DIR
   OPENSSL_CRYPTO_LIBRARY
   OPENSSL_SSL_LIBRARY
   SODIUM_LIBRARY
@@ -217,7 +217,7 @@ set_property(TARGET monero::libraries PROPERTY
   INTERFACE_INCLUDE_DIRECTORIES
     ${Boost_INCLUDE_DIR}
     ${monero_HIDAPI_INCLUDE_DIRS}
-    ${monero_OPENSSL_INCLUDE_PATH}
+    ${monero_OPENSSL_INCLUDE_DIR}
     "${MONERO_BUILD_DIR}/generated_include"
     "${MONERO_SOURCE_DIR}/contrib/epee/include"
     "${MONERO_SOURCE_DIR}/external/easylogging++"

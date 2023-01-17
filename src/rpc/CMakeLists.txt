@@ -26,8 +26,8 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-set(monero-lws-rpc_sources client.cpp daemon_pub.cpp daemon_zmq.cpp light_wallet.cpp rates.cpp)
-set(monero-lws-rpc_headers client.h daemon_pub.h daemon_zmq.h fwd.h json.h light_wallet.h rates.h)
+set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp light_wallet.cpp rates.cpp)
+set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h fwd.h json.h light_wallet.h rates.h)
 
 add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})
 target_link_libraries(monero-lws-rpc monero::libraries monero-lws-wire-json)

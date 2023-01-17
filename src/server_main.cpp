@@ -57,6 +57,7 @@ namespace
     const command_line::arg_descriptor<std::string> daemon_rpc;
     const command_line::arg_descriptor<std::string> daemon_sub;
     const command_line::arg_descriptor<std::vector<std::string>> rest_servers;
+    const command_line::arg_descriptor<std::vector<std::string>> admin_rest_servers;
     const command_line::arg_descriptor<std::string> rest_ssl_key;
     const command_line::arg_descriptor<std::string> rest_ssl_cert;
     const command_line::arg_descriptor<std::size_t> rest_threads;
@@ -87,7 +88,8 @@ namespace
       : lws::options()
       , daemon_rpc{"daemon", "<protocol>://<address>:<port> of a monerod ZMQ RPC", get_default_zmq()}
       , daemon_sub{"sub", "tcp://address:port or ipc://path of a monerod ZMQ Pub", ""}
-      , rest_servers{"rest-server", "[(https|http)://<address>:]<port> for incoming connections, multiple declarations allowed"}
+      , rest_servers{"rest-server", "[(https|http)://<address>:]<port>[/<prefix>] for incoming connections, multiple declarations allowed"}
+      , admin_rest_servers{"admin-rest-server", "[(https|http])://<address>:]<port>[/<prefix>] for incoming admin connections, multiple declarations allowed"}
       , rest_ssl_key{"rest-ssl-key", "<path> to PEM formatted SSL key for https REST server", ""}
       , rest_ssl_cert{"rest-ssl-certificate", "<path> to PEM formatted SSL certificate (chains supported) for https REST server", ""}
       , rest_threads{"rest-threads", "Number of threads to process REST connections", 1}
@@ -107,6 +109,7 @@ namespace
       command_line::add_arg(description, daemon_rpc);
       command_line::add_arg(description, daemon_sub);
       description.add_options()(rest_servers.name, boost::program_options::value<std::vector<std::string>>()->default_value({rest_default}, rest_default), rest_servers.description);
+      command_line::add_arg(description, admin_rest_servers);
       command_line::add_arg(description, rest_ssl_key);
       command_line::add_arg(description, rest_ssl_cert);
       command_line::add_arg(description, rest_threads);
@@ -123,6 +126,7 @@ namespace
   {
     std::string db_path;
     std::vector<std::string> rest_servers;
+    std::vector<std::string> admin_rest_servers;
     lws::rest_server::configuration rest_config;
     std::string daemon_rpc;
     std::string daemon_sub;
@@ -168,6 +172,7 @@ namespace
     program prog{
       command_line::get_arg(args, opts.db_path),
       command_line::get_arg(args, opts.rest_servers),
+      command_line::get_arg(args, opts.admin_rest_servers),
       lws::rest_server::configuration{
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
@@ -201,9 +206,13 @@ namespace
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();
 
-    lws::rest_server server{epee::to_span(prog.rest_servers), disk.clone(), std::move(client), std::move(prog.rest_config)};
+    lws::rest_server server{
+      epee::to_span(prog.rest_servers), prog.admin_rest_servers, disk.clone(), std::move(client), std::move(prog.rest_config)
+    };
     for (const std::string& address : prog.rest_servers)
       MINFO("Listening for REST clients at " << address);
+    for (const std::string& address : prog.admin_rest_servers)
+      MINFO("Listening for REST admin clients at " << address);
 
     // blocks until SIGINT
     lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads);

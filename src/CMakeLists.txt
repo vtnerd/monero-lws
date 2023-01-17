@@ -68,6 +68,7 @@ target_link_libraries(monero-lws-admin
     monero::libraries
     monero-lws-common
     monero-lws-db
+    monero-lws-rpc
     monero-lws-wire-json
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     Threads::Threads
