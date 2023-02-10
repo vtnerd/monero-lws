@@ -42,6 +42,7 @@ namespace lws
     bad_blockchain,             //!< Blockchain is invalid or wrong network type
     bad_client_tx,              //!< REST client submitted invalid transaction
     bad_daemon_response,        //!< RPC Response from daemon was invalid
+    bad_height,                 //!< Invalid blockchain height
     blockchain_reorg,           //!< Blockchain reorg after fetching/scanning block(s)
     configuration,              //!< Process configuration invalid
     crypto_failure,             //!< Cryptographic function failed

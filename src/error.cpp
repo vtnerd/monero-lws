@@ -57,6 +57,8 @@ namespace lws
         return "Received invalid transaction from REST client";
       case error::bad_daemon_response:
         return "Response from monerod daemon was bad/unexpected";
+      case error::bad_height:
+        return "Invalid blockchain height";
       case error::blockchain_reorg:
         return "A blockchain reorg has been detected";
       case error::configuration:
