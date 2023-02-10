@@ -43,6 +43,7 @@
 #include "lmdb/util.h"                 // monero/src
 #include "net/http_base.h"             // monero/contrib/epee/include
 #include "net/net_parse_helpers.h"     // monero/contrib/epee/include
+#include "rpc/admin.h"
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"       // monero/src
 #include "rpc/light_wallet.h"
@@ -51,6 +52,7 @@
 #include "util/gamma_picker.h"
 #include "util/random_outputs.h"
 #include "util/source_location.h"
+#include "wire/crypto.h"
 #include "wire/json.h"
 
 namespace lws
@@ -669,6 +671,56 @@ namespace lws
       return wire::json::to_bytes<response>(*resp);
     }
 
+    template<typename T>
+    struct admin
+    {
+      T params;
+      crypto::secret_key auth;
+    };
+
+    template<typename T>
+    void read_bytes(wire::json_reader& source, admin<T>& self)
+    {
+      wire::object(
+        source, wire::field("auth", std::ref(unwrap(unwrap(self.auth)))), WIRE_FIELD(params)
+      );
+    }
+    void read_bytes(wire::json_reader& source, admin<expect<void>>& self)
+    {
+      // params optional
+      wire::object(source, wire::field("auth", std::ref(unwrap(unwrap(self.auth)))));
+    }
+
+    template<typename E>
+    expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&)
+    {
+      using request = typename E::request;
+      const expect<admin<request>> req = wire::json::from_bytes<admin<request>>(std::move(root));
+      if (!req)
+        return req.error();
+
+      {
+        db::account_address address{};
+        if (!crypto::secret_key_to_public_key(req->auth, address.view_public))
+          return {error::crypto_failure};
+
+        auto reader = disk.start_read();
+        if (!reader)
+          return reader.error();
+        const auto account = reader->get_account(address);
+        if (!account)
+          return account.error();
+        if (account->first == db::account_status::inactive)
+          return {error::account_not_found};
+        if (!(account->second.flags & db::account_flags::admin_account))
+          return {error::account_not_found};
+      }
+
+      wire::json_slice_writer dest{};
+      MONERO_CHECK(E{}(dest, std::move(disk), req->params));
+      return dest.take_bytes();
+    }
+
     struct endpoint
     {
       char const* const name;
@@ -686,6 +738,17 @@ namespace lws
       {"/import_wallet_request", call<import_request>,   2 * 1024},
       {"/login",                 call<login>,            2 * 1024},
       {"/submit_raw_tx",         call<submit_raw_tx>,   50 * 1024}
+    };
+
+    constexpr const endpoint admin_endpoints[] =
+    {
+      {"/accept_requests",       call_admin<rpc::accept_requests_>, 50 * 1024},
+      {"/add_account",           call_admin<rpc::add_account_>,     50 * 1024},
+      {"/list_accounts",         call_admin<rpc::list_accounts_>,   100},
+      {"/list_requests",         call_admin<rpc::list_requests_>,   100},
+      {"/modify_account_status", call_admin<rpc::modify_account_>,  50 * 1024},
+      {"/reject_requests",       call_admin<rpc::reject_requests_>, 50 * 1024},
+      {"/rescan",                call_admin<rpc::rescan_>,          50 * 1024}
     };
 
     struct by_name_
@@ -716,23 +779,51 @@ namespace lws
   {
     db::storage disk;
     rpc::client client;
+    boost::optional<std::string> prefix;
+    boost::optional<std::string> admin_prefix;
 
     explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client)
       : lws::http_server_impl_base<rest_server::internal, context>(io_service)
       , disk(std::move(disk))
       , client(std::move(client))
+      , prefix()
+      , admin_prefix()
     {
       assert(std::is_sorted(std::begin(endpoints), std::end(endpoints), by_name));
+    }
+
+    const endpoint* get_endpoint(boost::string_ref uri) const
+    {
+      using span = epee::span<const endpoint>;
+      span handlers = nullptr;
+
+      if (admin_prefix && uri.starts_with(*admin_prefix))
+      {
+        uri.remove_prefix(admin_prefix->size());
+        handlers = span{admin_endpoints};
+      }
+      else if (prefix && uri.starts_with(*prefix))
+      {
+        uri.remove_prefix(prefix->size());
+        handlers = span{endpoints};
+      }
+      else
+        return nullptr;
+
+      const auto handler = std::lower_bound(
+        std::begin(handlers), std::end(handlers), uri, by_name
+      );
+      if (handler == std::end(handlers) || handler->name != uri)
+        return nullptr;
+      return handler;
     }
 
     virtual bool
     handle_http_request(const http::http_request_info& query, http::http_response_info& response, context& ctx)
     override final
     {
-      const auto handler = std::lower_bound(
-        std::begin(endpoints), std::end(endpoints), query.m_URI, by_name
-      );
-      if (handler == std::end(endpoints) || handler->name != query.m_URI)
+      endpoint const* const handler = get_endpoint(query.m_URI);
+      if (!handler)
       {
         response.m_response_code = 404;
         response.m_response_comment = "Not Found";
@@ -799,26 +890,28 @@ namespace lws
     }
   };
 
-  rest_server::rest_server(epee::span<const std::string> addresses, db::storage disk, rpc::client client, configuration config)
+  rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
     : io_service_(), ports_()
   {
-    ports_.emplace_back(io_service_, std::move(disk), std::move(client));
-
     if (addresses.empty())
       MONERO_THROW(common_error::kInvalidArgument, "REST server requires 1 or more addresses");
 
-    const auto init_port = [] (internal& port, const std::string& address, configuration config) -> bool
+    std::sort(admin.begin(), admin.end());
+    const auto init_port = [&admin] (internal& port, const std::string& address, configuration config, const bool is_admin) -> bool
     {
       epee::net_utils::http::url_content url{};
       if (!epee::net_utils::parse_url(address, url))
-        MONERO_THROW(lws::error::configuration, "REST Server URL/address is invalid");
+        MONERO_THROW(lws::error::configuration, "REST server URL/address is invalid");
 
       const bool https = url.schema == "https";
       if (!https && url.schema != "http")
         MONERO_THROW(lws::error::configuration, "Unsupported scheme, only http or https supported");
 
       if (std::numeric_limits<std::uint16_t>::max() < url.port)
-        MONERO_THROW(lws::error::configuration, "Specified port for rest server is out of range");
+        MONERO_THROW(lws::error::configuration, "Specified port for REST server is out of range");
+
+      if (!url.uri.empty() && url.uri.front() != '/')
+        MONERO_THROW(lws::error::configuration, "First path prefix character must be '/'");
 
       if (!https)
       {
@@ -834,6 +927,49 @@ namespace lws
       if (url.port == 0)
         url.port = https ? 8443 : 8080;
 
+      if (!is_admin)
+      {
+        epee::net_utils::http::url_content admin_url{};
+        const boost::string_ref start{address.c_str(), address.rfind(url.uri)};
+        while (true) // try to merge 1+ admin prefixes
+        {
+          const auto mergeable = std::lower_bound(admin.begin(), admin.end(), start);
+          if (mergeable == admin.end())
+            break;
+
+          if (!epee::net_utils::parse_url(*mergeable, admin_url))
+            MONERO_THROW(lws::error::configuration, "Admin REST URL/address is invalid");
+          if (admin_url.port == 0)
+            admin_url.port = https ? 8443 : 8080;
+          if (url.host != admin_url.host || url.port != admin_url.port)
+            break; // nothing is mergeable
+
+          if (port.admin_prefix)
+            MONERO_THROW(lws::error::configuration, "Two admin REST servers cannot be merged onto one REST server");
+
+          if (url.uri.size() < 2 || admin_url.uri.size() < 2)
+            MONERO_THROW(lws::error::configuration, "Cannot merge REST server and admin REST server - a prefix must be specified for both");
+          if (admin_url.uri.front() != '/')
+            MONERO_THROW(lws::error::configuration, "Admin REST first path prefix character must be '/'");
+          if (admin_url.uri != admin_url.m_uri_content.m_path)
+            MONERO_THROW(lws::error::configuration, "Admin REST server must have path only prefix");
+
+          MINFO("Merging admin and non-admin REST servers: " << address << " + " << *mergeable);
+          port.admin_prefix = admin_url.m_uri_content.m_path;
+          admin.erase(mergeable);
+        } // while multiple mergable admins
+      }
+
+      if (url.uri != url.m_uri_content.m_path)
+        MONERO_THROW(lws::error::configuration, "REST server must have path only prefix");
+
+      if (url.uri.size() < 2)
+        url.m_uri_content.m_path.clear();
+      if (is_admin)
+        port.admin_prefix = url.m_uri_content.m_path;
+      else
+        port.prefix = url.m_uri_content.m_path;
+
       epee::net_utils::ssl_options_t ssl_options = https ?
         epee::net_utils::ssl_support_t::e_ssl_support_enabled :
         epee::net_utils::ssl_support_t::e_ssl_support_disabled;
@@ -846,15 +982,20 @@ namespace lws
     };
 
     bool any_ssl = false;
-    for (std::size_t index = 1; index < addresses.size(); ++index)
+    for (const std::string& address : addresses)
     {
-      ports_.emplace_back(io_service_, ports_.front().disk.clone(), MONERO_UNWRAP(ports_.front().client.clone()));
-      any_ssl |= init_port(ports_.back(), addresses[index], config);
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()));
+      any_ssl |= init_port(ports_.back(), address, config, false);
+    }
+
+    for (const std::string& address : admin)
+    {
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()));
+      any_ssl |= init_port(ports_.back(), address, config, true);
     }
 
     const bool expect_ssl = !config.auth.private_key_path.empty();
     const std::size_t threads = config.threads;
-    any_ssl |= init_port(ports_.front(), addresses[0], std::move(config));
     if (!any_ssl && expect_ssl)
       MONERO_THROW(lws::error::configuration, "Specified SSL key/cert without specifying https capable REST server");
 
