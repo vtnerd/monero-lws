@@ -81,7 +81,7 @@ namespace db
   enum account_flags : std::uint8_t
   {
     default_account = 0,
-    admin_account   = 1,          //!< Not currently used, for future extensions
+    admin_account   = 1,          //!< Indicates `key` can be used for admin requests
     account_generated_locally = 2 //!< Flag sent by client on initial login request
   };
 
