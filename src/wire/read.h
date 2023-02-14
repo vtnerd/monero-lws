@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2020-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -299,14 +299,14 @@ namespace wire_read
     unpack_variant_field(index, source, dest.get_value(), static_cast< const wire::option<U>& >(dest)...);
   }
 
-  template<typename R, typename T>
-  inline void unpack_field(std::size_t, R& source, wire::field_<T, true>& dest)
+  template<typename R, typename T, unsigned I>
+  inline void unpack_field(std::size_t, R& source, wire::field_<T, true, I>& dest)
   {
     read_bytes(source, dest.get_value());
   }
 
-  template<typename R, typename T>
-  inline void unpack_field(std::size_t, R& source, wire::field_<T, false>& dest)
+  template<typename R, typename T, unsigned I>
+  inline void unpack_field(std::size_t, R& source, wire::field_<T, false, I>& dest)
   {
     dest.get_value().emplace();
     read_bytes(source, *dest.get_value());
@@ -322,7 +322,7 @@ namespace wire_read
   inline void expand_field_map(std::size_t index, wire::reader::key_map (&map)[N], const T& head, const U&... tail)
   {
     map[index].name = head.name;
-    map[index].id = 0;
+    map[index].id = head.id();
     expand_field_map(index + 1, map, tail...);
   }
 
