@@ -34,3 +34,4 @@ target_include_directories(monero-lws-wire PUBLIC "${LMDB_INCLUDE}")
 target_link_libraries(monero-lws-wire PRIVATE monero::libraries)
 
 add_subdirectory(json)
+add_subdirectory(msgpack)

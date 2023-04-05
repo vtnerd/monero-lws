@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023, The Monero Project
+# Copyright (c) 2023, The Monero Project
 #
 # All rights reserved.
 #
@@ -27,14 +27,11 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-add_subdirectory(json)
-add_subdirectory(msgpack)
-
-add_library(monero-lws-unit-wire OBJECT read.write.test.cpp read.test.cpp)
+add_library(monero-lws-unit-wire-msgpack OBJECT read.write.test.cpp)
 target_link_libraries(
-  monero-lws-unit-wire
+  monero-lws-unit-wire-msgpack
   monero-lws-unit-framework
-  monero-lws-wire
+  monero-lws-wire-msgpack
   monero::libraries
 )
-#add_test(monero-lws-unit)
+
