@@ -1,4 +1,4 @@
-// Copyright (c) 2022, The Monero Project
+// Copyright (c) 2022-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -34,6 +34,7 @@
 #include <vector>
 #include "wire.h"
 #include "wire/json.h"
+#include "wire/msgpack.h"
 #include "wire/vector.h"
 
 #include "wire/base.test.h"
@@ -93,7 +94,7 @@ namespace
   void fill(complex& self)
   {
     self.objects = std::vector<inner>{inner{0, limit<std::uint32_t>::max()}, inner{100, 200}, inner{44444, 83434}};
-    self.ints = std::vector<std::int16_t>{limit<std::int16_t>::min(), limit<std::int16_t>::max(), 0, 31234};
+    self.ints = std::vector<std::int16_t>{limit<std::int16_t>::min(), limit<std::int16_t>::max(), -3, 31234};
     self.uints = std::vector<std::uint64_t>{0, limit<std::uint64_t>::max(), 34234234, 33};
     self.blobs = {lws_test::blob_test1, lws_test::blob_test2, lws_test::blob_test3};
     self.strings = {"string1", "string2", "string3", "string4"};
@@ -113,7 +114,7 @@ namespace
     EXPECT(self.ints.size() == 4);
     EXPECT(self.ints.at(0) == limit<std::int16_t>::min());
     EXPECT(self.ints.at(1) == limit<std::int16_t>::max());
-    EXPECT(self.ints.at(2) == 0);
+    EXPECT(self.ints.at(2) == -3);
     EXPECT(self.ints.at(3) == 31234);
 
     EXPECT(self.uints.size() == 4);
@@ -136,7 +137,7 @@ namespace
     EXPECT(self.choice == true);
   }
 
-  template<typename T>
+  template<typename T, typename U>
   void run_complex(lest::env& lest_env)
   {
     SETUP("Complex test for " + boost::core::demangle(typeid(T).name()))
@@ -148,7 +149,7 @@ namespace
         const expect<epee::byte_slice> bytes = T::to_bytes(base);
         EXPECT(bytes);
 
-        const expect<complex> derived = T::template from_bytes<complex>(std::string{bytes->begin(), bytes->end()});
+        const expect<complex> derived = T::template from_bytes<complex>(U{std::string{bytes->begin(), bytes->end()}});
         EXPECT(derived);
         verify_initial(lest_env, *derived);
       }
@@ -159,7 +160,7 @@ namespace
         const expect<epee::byte_slice> bytes = T::to_bytes(base);
         EXPECT(bytes);
 
-        const expect<complex> derived = T::template from_bytes<complex>(std::string{bytes->begin(), bytes->end()});
+        const expect<complex> derived = T::template from_bytes<complex>(U{std::string{bytes->begin(), bytes->end()}});
         EXPECT(derived);
         verify_filled(lest_env, *derived);
       }
@@ -180,7 +181,7 @@ namespace
   WIRE_DEFINE_OBJECT(big, big_map)
   WIRE_DEFINE_OBJECT(small, small_map)
 
-  template<typename T>
+  template<typename T, typename U>
   expect<small> round_trip(lest::env& lest_env, std::int64_t value)
   {
     expect<small> out = small{0};
@@ -188,43 +189,77 @@ namespace
     {
       const expect<epee::byte_slice> bytes = T::template to_bytes(big{value});
       EXPECT(bytes);
-      out = T::template from_bytes<small>(std::string{bytes->begin(), bytes->end()});
+      out = T::template from_bytes<small>(U{std::string{bytes->begin(), bytes->end()}});
     }
     return out;
   }
 
-  template<typename T>
+  template<typename T, typename U>
   void not_overflow(lest::env& lest_env, std::int64_t value)
   {
-    const expect<small> result = round_trip<T>(lest_env, value);
+    const expect<small> result = round_trip<T, U>(lest_env, value);
     EXPECT(result);
     EXPECT(result->value == value);
   }
 
-  template<typename T>
+  template<typename T, typename U>
   void overflow(lest::env& lest_env, std::int64_t value, const std::error_code error)
   {
-    const expect<small> result = round_trip<T>(lest_env, value);
+    const expect<small> result = round_trip<T, U>(lest_env, value);
     EXPECT(result == error);
   }
 
-  template<typename T>
+  template<typename T, typename U>
   void run_overflow(lest::env& lest_env)
   {
     SETUP("Overflow test for " + boost::core::demangle(typeid(T).name()))
     {
-      not_overflow<T>(lest_env, limit<std::int32_t>::min());
-      not_overflow<T>(lest_env, 0);
-      not_overflow<T>(lest_env, limit<std::int32_t>::max());
+      not_overflow<T, U>(lest_env, limit<std::int32_t>::min());
+      not_overflow<T, U>(lest_env, 0);
+      not_overflow<T, U>(lest_env, limit<std::int32_t>::max());
 
-      overflow<T>(lest_env, std::int64_t(limit<std::int32_t>::min()) - 1, wire::error::schema::larger_integer);
-      overflow<T>(lest_env, std::int64_t(limit<std::int32_t>::max()) + 1, wire::error::schema::smaller_integer);
+      overflow<T, U>(lest_env, std::int64_t(limit<std::int32_t>::min()) - 1, wire::error::schema::larger_integer);
+      overflow<T, U>(lest_env, std::int64_t(limit<std::int32_t>::max()) + 1, wire::error::schema::smaller_integer);
     }
+  }
+
+  struct simple { bool choice; };
+  static void read_bytes(wire::reader& source, simple& self)
+  {
+    wire::object(source, WIRE_FIELD(choice));
+  }
+
+  template<typename T, typename U>
+  void run_skip(lest::env& lest_env)
+  {
+    complex base{};
+    verify_initial(lest_env, base);
+    fill(base);
+
+    const expect<epee::byte_slice> bytes = T::to_bytes(base);
+    EXPECT(bytes);
+
+    const expect<simple> derived = T::template from_bytes<simple>(U{std::string{bytes->begin(), bytes->end()}});
+    EXPECT(derived);
+    EXPECT(derived->choice);
   }
 }
 
-LWS_CASE("wire::reader and wire::writer")
+LWS_CASE("wire::reader and wire::writer complex")
 {
-  run_complex<wire::json>(lest_env);
-  run_overflow<wire::json>(lest_env);
+  run_complex<wire::json, std::string>(lest_env);
+  run_complex<wire::msgpack, epee::byte_slice>(lest_env);
 }
+
+LWS_CASE("wire::reader and wire::writer overflow")
+{
+  run_overflow<wire::json, std::string>(lest_env);
+  run_overflow<wire::msgpack, epee::byte_slice>(lest_env);
+}
+
+LWS_CASE("wire::reader and wire::writer skip")
+{
+  run_skip<wire::json, std::string>(lest_env);
+  run_skip<wire::msgpack, epee::byte_slice>(lest_env);
+}
+

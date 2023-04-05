@@ -33,5 +33,5 @@ target_link_libraries(monero-lws-unit-framework)
 add_subdirectory(wire)
 
 add_executable(monero-lws-unit main.cpp)
-target_link_libraries(monero-lws-unit monero-lws-unit-framework monero-lws-unit-wire monero-lws-unit-wire-json)
+target_link_libraries(monero-lws-unit monero-lws-unit-framework monero-lws-unit-wire monero-lws-unit-wire-json monero-lws-unit-wire-msgpack)
 add_test(NAME monero-lws-unit COMMAND monero-lws-unit -v)
