@@ -29,8 +29,11 @@
 #include <cstring>
 #include <memory>
 
-#include "wire/crypto.h"
 #include "wire.h"
+#include "wire/crypto.h"
+#include "wire/json/write.h"
+#include "wire/msgpack.h"
+#include "wire/uuid.h"
 
 namespace lws
 {
@@ -99,7 +102,7 @@ namespace db
     template<typename F, typename T>
     void map_transaction_link(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD(height), WIRE_FIELD(tx_hash));
+      wire::object(format, WIRE_FIELD_ID(0, height), WIRE_FIELD_ID(1, tx_hash));
     }
   }
   WIRE_DEFINE_OBJECT(transaction_link, map_transaction_link);
@@ -124,19 +127,19 @@ namespace db
       nullptr : std::addressof(payment_bytes);
 
     wire::object(dest,
-      wire::field("id", std::cref(self.spend_meta.id)),
-      wire::field("block", self.link.height),
-      wire::field("index", self.spend_meta.index),
-      wire::field("amount", self.spend_meta.amount),
-      wire::field("timestamp", self.timestamp),
-      wire::field("tx_hash", std::cref(self.link.tx_hash)),
-      wire::field("tx_prefix_hash", std::cref(self.tx_prefix_hash)),
-      wire::field("tx_public", std::cref(self.spend_meta.tx_public)),
-      wire::optional_field("rct_mask", rct_mask),
-      wire::optional_field("payment_id", payment_id),
-      wire::field("unlock_time", self.unlock_time),
-      wire::field("mixin_count", self.spend_meta.mixin_count),
-      wire::field("coinbase", coinbase)
+      wire::field<0>("id", std::cref(self.spend_meta.id)),
+      wire::field<1>("block", self.link.height),
+      wire::field<2>("index", self.spend_meta.index),
+      wire::field<3>("amount", self.spend_meta.amount),
+      wire::field<4>("timestamp", self.timestamp),
+      wire::field<5>("tx_hash", std::cref(self.link.tx_hash)),
+      wire::field<6>("tx_prefix_hash", std::cref(self.tx_prefix_hash)),
+      wire::field<7>("tx_public", std::cref(self.spend_meta.tx_public)),
+      wire::optional_field<8>("rct_mask", rct_mask),
+      wire::optional_field<9>("payment_id", payment_id),
+      wire::field<10>("unlock_time", self.unlock_time),
+      wire::field<11>("mixin_count", self.spend_meta.mixin_count),
+      wire::field<12>("coinbase", coinbase)
     );
   }
 
@@ -206,9 +209,99 @@ namespace db
     );
   }
 
+  namespace
+  {
+    constexpr const char* map_webhook_type[] = {"tx-confirmation"};
+
+    template<typename F, typename T>
+    void map_webhook_key(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, user), WIRE_FIELD_ID(1, type));
+    }
+
+    template<typename F, typename T>
+    void map_webhook_data(F& format, T& self)
+    {
+      wire::object(format,
+        WIRE_FIELD_ID(0, url),
+        WIRE_FIELD_ID(1, token),
+        WIRE_FIELD_ID(2, confirmations)
+      );
+    }
+
+    template<typename F, typename T>
+    void map_webhook_value(F& format, T& self, crypto::hash8& payment_id)
+    {
+      static_assert(sizeof(payment_id) == sizeof(self.first.payment_id), "bad memcpy");
+      wire::object(format,
+        wire::field<0>("payment_id", std::ref(payment_id)),
+        wire::field<1>("event_id", std::ref(self.first.event_id)),
+        wire::field<2>("token", std::ref(self.second.token)),
+        wire::field<3>("confirmations", self.second.confirmations),
+        wire::field<4>("url", std::ref(self.second.url))
+      );
+    }
+  }
+  WIRE_DEFINE_ENUM(webhook_type, map_webhook_type);
+  WIRE_DEFINE_OBJECT(webhook_key, map_webhook_key);
+  WIRE_MSGPACK_DEFINE_OBJECT(webhook_data, map_webhook_data);
+
+  void read_bytes(wire::reader& source, webhook_value& dest)
+  {
+    crypto::hash8 payment_id{};
+    map_webhook_value(source, dest, payment_id);
+    std::memcpy(std::addressof(dest.first.payment_id), std::addressof(payment_id), sizeof(payment_id));
+  }
+  void write_bytes(wire::writer& dest, const webhook_value& source)
+  {
+    crypto::hash8 payment_id;
+    std::memcpy(std::addressof(payment_id), std::addressof(source.first.payment_id), sizeof(payment_id));
+    map_webhook_value(dest, source, payment_id);
+  }
+
+  void write_bytes(wire::json_writer& dest, const webhook_tx_confirmation& self)
+  {
+    crypto::hash8 payment_id;
+    static_assert(sizeof(payment_id) == sizeof(self.value.first.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(payment_id), std::addressof(self.value.first.payment_id), sizeof(payment_id));
+    // to be sent to remote url
+    wire::object(dest,
+      wire::field<0>("event", std::cref(self.key.type)),
+      wire::field<1>("payment_id", std::cref(payment_id)),
+      wire::field<2>("token", std::cref(self.value.second.token)),
+      wire::field<3>("confirmations", std::cref(self.value.second.confirmations)),
+      wire::field<4>("event_id", std::cref(self.value.first.event_id)),
+      WIRE_FIELD_ID(5, tx_info)
+    );
+  }
+
+  void write_bytes(wire::json_writer& dest, const webhook_event& self)
+  {
+    crypto::hash8 payment_id;
+    static_assert(sizeof(payment_id) == sizeof(self.link_webhook.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(payment_id), std::addressof(self.link_webhook.payment_id), sizeof(payment_id));
+    wire::object(dest,
+      wire::field<0>("tx_info", std::cref(self.link.tx)),
+      wire::field<1>("output_id", std::cref(self.link.out)),
+      wire::field<2>("payment_id", std::cref(payment_id)),
+      wire::field<3>("event_id", std::cref(self.link_webhook.event_id))
+    );
+  }
+
+  bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept
+  {
+    return left.payment_id == right.payment_id ?
+      std::memcmp(std::addressof(left.event_id), std::addressof(right.event_id), sizeof(left.event_id)) < 0 :
+      left.payment_id < right.payment_id;
+  }
+
   /*! TODO consider making an `operator<` for `crypto::tx_hash`. Not known to be
     needed elsewhere yet. */
-
+  bool operator==(transaction_link const& left, transaction_link const& right) noexcept
+  {
+    return left.height == right.height &&
+      std::memcmp(std::addressof(left.tx_hash), std::addressof(right.tx_hash), sizeof(left.tx_hash)) == 0;
+  }
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept
   {
     return left.height == right.height ?

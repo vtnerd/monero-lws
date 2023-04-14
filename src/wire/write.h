@@ -170,15 +170,19 @@ namespace wire_write
   template<typename W, typename T, unsigned I>
   inline bool field(W& dest, const wire::field_<T, true, I> elem)
   {
-    dest.key(I, elem.name);
-    write_bytes(dest, elem.get_value());
+    // Arrays always optional, see `wire/field.h`
+    if (wire::available(elem))
+    {
+      dest.key(I, elem.name);
+      write_bytes(dest, elem.get_value());
+    }
     return true;
   }
 
   template<typename W, typename T, unsigned I>
   inline bool field(W& dest, const wire::field_<T, false, I> elem)
   {
-    if (bool(elem.get_value()))
+    if (wire::available(elem))
     {
       dest.key(I, elem.name);
       write_bytes(dest, *elem.get_value());

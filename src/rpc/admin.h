@@ -27,9 +27,11 @@
 
 #pragma once
 
+#include <boost/optional/optional.hpp>
 #include <string>
 #include <vector>
 #include "common/expect.h" // monero/src
+#include "crypto/crypto.h" // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "wire/fwd.h"
@@ -67,6 +69,29 @@ namespace rpc
     db::block_id height;
   };
   void read_bytes(wire::reader&, rescan_req&);
+
+  struct webhook_add_req
+  {
+    std::string url;
+    boost::optional<std::string> token;
+    boost::optional<db::account_address> address;
+    boost::optional<crypto::hash8> payment_id;
+    boost::optional<std::uint32_t> confirmations;
+    db::webhook_type type;
+  };
+  void read_bytes(wire::reader&, webhook_add_req&);
+
+  struct webhook_delete_req
+  {
+    std::vector<db::account_address> addresses;
+  };
+  void read_bytes(wire::reader&, webhook_delete_req&);
+
+  struct webhook_delete_uuid_req
+  {
+    std::vector<boost::uuids::uuid> event_ids;
+  };
+  void read_bytes(wire::reader&, webhook_delete_uuid_req&);
 
 
   struct accept_requests_
@@ -121,5 +146,36 @@ namespace rpc
     expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
   };
   constexpr const rescan_ rescan{};
+
+  struct webhook_add_
+  {
+    using request = webhook_add_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, request&& req) const;
+  };
+  constexpr const webhook_add_ webhook_add{};
+
+  struct webhook_delete_
+  {
+    using request = webhook_delete_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
+  };
+  constexpr const webhook_delete_ webhook_delete{};
+
+  struct webhook_del_uuid_
+  {
+    using request = webhook_delete_uuid_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, request req) const;
+  };
+  constexpr const webhook_del_uuid_ webhook_delete_uuid{};
+
+
+  struct webhook_list_
+  {
+    using request = expect<void>;
+    expect<void> operator()(wire::writer& dest, db::storage disk) const;
+    expect<void> operator()(wire::writer& dest, db::storage disk, const request&) const
+    { return (*this)(dest, std::move(disk)); }
+  };
+  constexpr const webhook_list_ webhook_list{};
 
 }} // lws // rpc
