@@ -33,6 +33,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <limits>
 
 #include "wire/field.h"
 #include "wire/msgpack/base.h"
