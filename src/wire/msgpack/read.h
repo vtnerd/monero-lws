@@ -33,7 +33,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <limits>
 
 #include "wire/field.h"
 #include "wire/msgpack/base.h"
@@ -58,7 +57,7 @@ namespace wire
       else
         throw_logic_error();
     }
-    
+
     //! Skips next value. \throw wire::exception if invalid JSON syntax.
     void skip_value();
 
