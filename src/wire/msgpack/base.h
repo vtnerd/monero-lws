@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <limits>
 #include <tuple>
 
 #include "byte_slice.h"

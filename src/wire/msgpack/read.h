@@ -57,7 +57,7 @@ namespace wire
       else
         throw_logic_error();
     }
-    
+
     //! Skips next value. \throw wire::exception if invalid JSON syntax.
     void skip_value();
 
