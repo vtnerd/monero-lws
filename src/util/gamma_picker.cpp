@@ -68,14 +68,21 @@ namespace lws
 
   bool gamma_picker::is_valid() const noexcept
   {
-    return CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE < rct_offsets.size();
+    static_assert(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > 0);
+    return CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1 < rct_offsets.size();
   }
 
   std::uint64_t gamma_picker::spendable_upper_bound() const noexcept
   {
     if (!is_valid())
       return 0;
-    return *(rct_offsets.end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1);
+    return *(rct_offsets.end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE);
+    /* Assume block indexes: [0, 1, ..., n-2, n-1]
+       where n is the number of blocks in the chain
+       A user can spend an output starting in block index n - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE
+       The total number of spendable outputs is the cumulative count stored at that block
+       rct_offsets.end() points to index n
+       Therefore we need to return index rct_offets.end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE */
   }
 
   std::uint64_t gamma_picker::operator()()
@@ -85,7 +92,8 @@ namespace lws
 
     static_assert(std::is_empty<crypto::random_device>(), "random_device is no longer cheap to construct");
     static constexpr const crypto::random_device engine{};
-    const auto end = offsets().end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE;
+    static_assert(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > 0);
+    const auto end = offsets().end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE + 1;
     const uint64_t num_rct_outputs = spendable_upper_bound();
 
     for (unsigned tries = 0; tries < 100; ++tries)
