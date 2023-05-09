@@ -1,4 +1,4 @@
-# Copyright (c) 2020, The Monero Project
+# Copyright (c) 2020-2023, The Monero Project
 #
 # All rights reserved.
 #
@@ -35,3 +35,4 @@ target_link_libraries(monero-lws-wire PRIVATE monero::libraries)
 
 add_subdirectory(json)
 add_subdirectory(msgpack)
+add_subdirectory(wrapper)

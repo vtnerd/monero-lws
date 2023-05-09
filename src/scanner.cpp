@@ -460,7 +460,12 @@ namespace lws
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
 
-          auto fetched = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_blocks_fast>::response>(std::move(*resp)));
+          rpc::json<rpc::get_blocks_fast>::response fetched{};
+          {
+            const std::error_code error = wire::json::from_bytes(std::move(*resp), fetched);
+            if (error)
+              throw std::system_error{error};
+          }
           if (fetched.result.blocks.empty())
             throw std::runtime_error{"Daemon unexpectedly returned zero blocks"};
 

@@ -40,6 +40,7 @@ namespace wire
 {
   struct json;
   class json_reader;
+  class json_slice_writer;
   class json_writer;
 }
 

@@ -30,4 +30,4 @@ set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp li
 set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h fwd.h json.h light_wallet.h rates.h)
 
 add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})
-target_link_libraries(monero-lws-rpc monero::libraries monero-lws-wire-json)
+target_link_libraries(monero-lws-rpc monero::libraries monero-lws-wire-json monero-lws-wire-wrapper)

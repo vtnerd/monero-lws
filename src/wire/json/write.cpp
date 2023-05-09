@@ -54,10 +54,11 @@ namespace wire
     if (!formatter_.IsComplete())
       throw std::logic_error{"json_writer::take_json() failed with incomplete JSON tree"};
   }
-  epee::byte_slice json_writer::take_json()
+  epee::byte_stream json_writer::take_json()
   {
     check_complete();
-    epee::byte_slice out{std::move(bytes_)};
+    epee::byte_stream out{std::move(bytes_)};
+    bytes_.clear();
     formatter_.Reset(bytes_);
     return out;
   }

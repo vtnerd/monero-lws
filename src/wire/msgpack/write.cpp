@@ -147,10 +147,10 @@ namespace wire
     if (expected_)
       throw std::logic_error{"msgpack_writer::take_msgpack() failed with incomplete tree"};
   }
-  epee::byte_slice msgpack_writer::take_msgpack()
+  epee::byte_stream msgpack_writer::take_msgpack()
   {
     check_complete();
-    epee::byte_slice out{std::move(bytes_)};
+    epee::byte_stream out{std::move(bytes_)};
     bytes_.clear();
     return out;
   }

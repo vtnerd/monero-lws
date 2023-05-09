@@ -86,16 +86,17 @@ namespace
   {
     SETUP("Basic (string keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
-      const auto result =
-        wire::msgpack::from_bytes<basic_object<T>>(epee::byte_slice{{basic_msgpack}});
-      EXPECT(result);
-      EXPECT(result->utf8 == basic_string);
+      basic_object<T> result{};
+      const std::error_code error =
+        wire::msgpack::from_bytes(epee::byte_slice{{basic_msgpack}}, result);
+      EXPECT(!error);
+      EXPECT(result.utf8 == basic_string);
       {
         const std::vector<T> expected{0, 127};
-        EXPECT(result->vec == expected);
+        EXPECT(result.vec == expected);
       }
-      EXPECT(result->data == lws_test::blob_test1);
-      EXPECT(result->choice);
+      EXPECT(result.data == lws_test::blob_test1);
+      EXPECT(result.choice);
     }
   }
 
@@ -104,16 +105,17 @@ namespace
   {
     SETUP("Advanced (integer keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
-      const auto result =
-        wire::msgpack::from_bytes<basic_object<T>>(epee::byte_slice{{advanced_msgpack}});
-      EXPECT(result);
-      EXPECT(result->utf8 == basic_string);
+      basic_object<T> result{};
+      const std::error_code error =
+        wire::msgpack::from_bytes(epee::byte_slice{{advanced_msgpack}}, result);
+      EXPECT(!error);
+      EXPECT(result.utf8 == basic_string);
       {
         const std::vector<T> expected{0, 127};
-        EXPECT(result->vec == expected);
+        EXPECT(result.vec == expected);
       }
-      EXPECT(result->data == lws_test::blob_test1);
-      EXPECT(result->choice);
+      EXPECT(result.data == lws_test::blob_test1);
+      EXPECT(result.choice);
     }
   }
 
@@ -123,7 +125,9 @@ namespace
     SETUP("Basic (string keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
       const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, true};
-      const auto result = wire::msgpack::to_bytes(val);
+      epee::byte_slice result{};
+      const std::error_code error = wire::msgpack::to_bytes(result, val);
+      EXPECT(!error);
       EXPECT(boost::range::equal(result, epee::byte_slice{{basic_msgpack}}));
     }
   }
@@ -134,7 +138,12 @@ namespace
     SETUP("Advanced (integer keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
       const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, true};
-      const auto result = wire_write::to_bytes(wire::msgpack_slice_writer{true}, val);
+      epee::byte_slice result{};
+      {
+        wire::msgpack_slice_writer out{true};
+        wire_write::bytes(out, val);
+        result = epee::byte_slice{out.take_sink()};
+      }
       EXPECT(boost::range::equal(result, epee::byte_slice{{advanced_msgpack}}));
     }
   }

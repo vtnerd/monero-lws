@@ -1,4 +1,5 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2022, The Monero Project
+//
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,63 +26,15 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "daemon_pub.h"
+#include "wire/wrapper/variant.h"
 
-#include "wire/crypto.h"
+#include <boost/core/demangle.hpp>
 #include "wire/error.h"
-#include "wire/field.h"
-#include "wire/traits.h"
-#include "wire/json/read.h"
-
-namespace
-{
-  struct dummy_chain_array
-  {
-    using value_type = crypto::hash;
-
-    std::uint64_t count;
-    std::reference_wrapper<crypto::hash> id;
-
-    void clear() noexcept {}
-    void reserve(std::size_t) noexcept {}
-
-    crypto::hash& back() noexcept { return id; }
-    void emplace_back() { ++count; }
-  };
-}
 
 namespace wire
 {
-  template<>
-  struct is_array<dummy_chain_array>
-    : std::true_type
-  {};
-}
-
-namespace lws
-{
-namespace rpc
-{
-  static void read_bytes(wire::json_reader& src, minimal_chain_pub& self)
+  [[noreturn]] void throw_variant_exception(wire::error::schema type, const char* variant_name)
   {
-    dummy_chain_array chain{0, std::ref(self.top_block_id)};
-    wire::object(src,
-      wire::field("first_height", std::ref(self.top_block_height)),
-      wire::field("ids", std::ref(chain))
-    );
-
-    self.top_block_height += chain.count - 1;
-    if (chain.count == 0)
-      WIRE_DLOG_THROW(wire::error::schema::binary, "expected at least one block hash");
+    WIRE_DLOG_THROW(type, "error with variant type: " << boost::core::demangle(variant_name));
   }
-
-  expect<minimal_chain_pub> minimal_chain_pub::from_json(std::string&& source)
-  {
-    minimal_chain_pub out{};
-    std::error_code err = wire::json::from_bytes(std::move(source), out);
-    if (err)
-      return err;
-    return {std::move(out)};
-  }
-}
 }

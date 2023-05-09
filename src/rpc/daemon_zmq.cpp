@@ -32,6 +32,7 @@
 #include "rpc/message_data_structs.h" // monero/src
 #include "wire/crypto.h"
 #include "wire/json.h"
+#include "wire/wrapper/variant.h"
 #include "wire/vector.h"
 
 namespace
@@ -103,14 +104,13 @@ namespace cryptonote
   }
   static void read_bytes(wire::json_reader& source, tx_out& self)
   {
+    auto variant = wire::variant(std::ref(self.target));
     wire::object(source,
       WIRE_FIELD(amount),
-      wire::variant_field("transaction output variant", std::ref(self.target),
-        wire::option<txout_to_key>{"to_key"},
-        wire::option<txout_to_tagged_key>{"to_tagged_key"},
-        wire::option<txout_to_script>{"to_script"},
-        wire::option<txout_to_scripthash>{"to_scripthash"}
-      )
+      WIRE_OPTION("to_key", txout_to_key, variant),
+      WIRE_OPTION("to_tagged_key", txout_to_tagged_key, variant),
+      WIRE_OPTION("to_script", txout_to_script, variant),
+      WIRE_OPTION("to_scripthash", txout_to_scripthash, variant)
     );
   }
 
@@ -132,13 +132,12 @@ namespace cryptonote
   }
   static void read_bytes(wire::json_reader& source, txin_v& self)
   {
+    auto variant = wire::variant(std::ref(self));
     wire::object(source,
-      wire::variant_field("transaction input variant", std::ref(self),
-        wire::option<txin_to_key>{"to_key"},
-        wire::option<txin_gen>{"gen"},
-        wire::option<txin_to_script>{"to_script"},
-        wire::option<txin_to_scripthash>{"to_scripthash"}
-      )
+      WIRE_OPTION("to_key", txin_to_key, variant),
+      WIRE_OPTION("gen", txin_gen, variant),
+      WIRE_OPTION("to_script", txin_to_script, variant),
+      WIRE_OPTION("to_scripthash", txin_to_scripthash, variant)
     );
   }
 
