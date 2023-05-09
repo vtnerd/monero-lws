@@ -41,7 +41,7 @@ namespace  db
       address.spend_public, address.view_public
     };
     return cryptonote::get_account_address_as_str(
-      lws::config::network, false, address_
+      lws::config::network, address.is_subaddress, address_
     );
   }
   expect<account_address>
@@ -51,11 +51,11 @@ namespace  db
 
     if (!cryptonote::get_account_address_from_str(info, lws::config::network, std::string{address}))
       return {lws::error::bad_address};
-    if (info.is_subaddress || info.has_payment_id)
+    if (info.has_payment_id)
       return {lws::error::bad_address};
 
     return account_address{
-      info.address.m_view_public_key, info.address.m_spend_public_key
+      info.address.m_view_public_key, info.address.m_spend_public_key, info.is_subaddress
     };
   }
 } // db

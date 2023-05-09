@@ -59,7 +59,7 @@ namespace db
     template<typename F, typename T>
     void map_account_address(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD(spend_public), WIRE_FIELD(view_public));
+      wire::object(format, WIRE_FIELD(spend_public), WIRE_FIELD(view_public), WIRE_FIELD(is_subaddress));
     }
   }
   WIRE_DEFINE_OBJECT(account_address, map_account_address);
@@ -220,6 +220,14 @@ namespace db
     return right.height == left.height ?
       std::memcmp(std::addressof(left.tx_hash), std::addressof(right.tx_hash), sizeof(left.tx_hash)) <= 0 :
       left.height < right.height;
+  }
+
+  crypto::secret_key get_secret_view_key(const lws::db::view_key key)
+  {
+    crypto::secret_key copy{};
+    static_assert(sizeof(copy) == sizeof(key), "bad memcpy");
+    std::memcpy(std::addressof(unwrap(copy)), std::addressof(key), sizeof(copy));
+    return copy;
   }
 } // db
 } // lws

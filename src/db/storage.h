@@ -45,6 +45,19 @@ namespace lws
 {
 namespace db
 {
+  struct tables_
+  {
+    MDB_dbi blocks;
+    MDB_dbi accounts;
+    MDB_dbi accounts_ba;
+    MDB_dbi accounts_bh;
+    MDB_dbi outputs;
+    MDB_dbi spends;
+    MDB_dbi images;
+    MDB_dbi requests;
+    MDB_dbi properties;
+  };
+
   namespace cursor
   {
     MONERO_CURSOR(accounts);
