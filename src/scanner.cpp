@@ -158,9 +158,15 @@ namespace lws
       if (uri.empty())
         uri = "/";
 
+      epee::byte_slice bytes{};
       const std::string& url = event.value.second.url;
-      const epee::byte_slice bytes = wire::json::to_bytes(event);
+      const std::error_code json_error = wire::json::to_bytes(bytes, event);
       const net::http::http_response_info* info = nullptr;
+      if (json_error)
+      {
+        MERROR("Failed to generate webhook JSON: " << json_error.message());
+        return;
+      }
 
       MINFO("Sending webhook to " << url);
       if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))

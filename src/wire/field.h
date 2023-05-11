@@ -114,10 +114,6 @@ namespace wire
     static constexpr std::size_t count() noexcept { return 1; }
     static constexpr unsigned id() noexcept { return I; }
 
-    //! \return True if field is forced optional when `get_value().empty()`.
-    static constexpr bool optional_on_empty() noexcept
-    { return is_optional_on_empty<value_type>::value; }
-
     const char* name;
     T value;
 

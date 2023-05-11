@@ -47,6 +47,7 @@ namespace wire
 {
   WIRE_DECLARE_BLOB(crypto::ec_scalar);
   WIRE_DECLARE_BLOB(crypto::hash);
+  WIRE_DECLARE_BLOB(crypto::hash8);
   WIRE_DECLARE_BLOB(crypto::key_derivation);
   WIRE_DECLARE_BLOB(crypto::key_image);
   WIRE_DECLARE_BLOB(crypto::public_key);

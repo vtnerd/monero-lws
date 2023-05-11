@@ -288,24 +288,6 @@ namespace wire_read
     dest.get_value().reset();
   }
 
-  template<typename T, bool Required, typename... U>
-  inline void reset_field(wire::variant_field_<T, Required, U...>& dest)
-  {}
-
-  template<typename T, unsigned I>
-  inline void reset_field(wire::field_<T, true, I>& dest)
-  {
-    // array fields are always optional, see `wire/field.h`
-    if (dest.optional_on_empty())
-      wire::clear(dest.get_value());
-  }
-
-  template<typename T, unsigned I>
-  inline void reset_field(wire::field_<T, false, I>& dest)
-  {
-    dest.get_value().reset();
-  }
-
   template<typename R, typename T, unsigned I>
   inline void unpack_field(std::size_t, R& source, wire::field_<T, true, I>& dest)
   {

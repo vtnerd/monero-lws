@@ -708,11 +708,11 @@ namespace lws
 
       if (!disable_auth)
       {
-        if (!req->auth)
+        if (!req.auth)
           return {error::account_not_found};
 
         db::account_address address{};
-        if (!crypto::secret_key_to_public_key(req.auth, address.view_public))
+        if (!crypto::secret_key_to_public_key(*(req.auth), address.view_public))
           return {error::crypto_failure};
 
         auto reader = disk.start_read();
@@ -728,7 +728,7 @@ namespace lws
       }
 
       wire::json_slice_writer dest{};
-      MONERO_CHECK(E{}(dest, std::move(disk), req.params));
+      MONERO_CHECK(E{}(dest, std::move(disk), std::move(req.params)));
       return epee::byte_slice{dest.take_sink()};
     }
 
