@@ -28,10 +28,10 @@
 
 include_directories(.)
 
+add_subdirectory(wire)
 add_subdirectory(db)
 add_subdirectory(rpc)
 add_subdirectory(util)
-add_subdirectory(wire)
 
 # For both the server and admin utility.
 set(monero-lws-common_sources config.cpp error.cpp)

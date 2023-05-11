@@ -86,8 +86,12 @@ namespace wire
     }
 
   protected:
+    msgpack_writer(epee::byte_stream&& initial, bool integer_keys, bool needs_flush)
+      : writer(), bytes_(std::move(initial)), expected_(1), integer_keys_(integer_keys), needs_flush_(needs_flush)
+    {}
+
     msgpack_writer(bool integer_keys, bool needs_flush)
-      : writer(), bytes_(), expected_(1), integer_keys_(integer_keys), needs_flush_(needs_flush)
+      : msgpack_writer(epee::byte_stream{}, integer_keys, needs_flush)
     {}
 
     //! \throw std::logic_error if tree was not completed
@@ -153,6 +157,10 @@ namespace wire
   //! Buffers entire JSON message in memory
   struct msgpack_slice_writer final : msgpack_writer
   {
+    msgpack_slice_writer(epee::byte_stream&& initial, bool integer_keys = false)
+      : msgpack_writer(std::move(initial), integer_keys, false)
+    {}
+
     explicit msgpack_slice_writer(bool integer_keys = false)
       : msgpack_writer(integer_keys, false)
     {}

@@ -299,6 +299,24 @@ namespace wire_read
     unpack_variant_field(index, source, dest.get_value(), static_cast< const wire::option<U>& >(dest)...);
   }
 
+  template<typename T, bool Required, typename... U>
+  inline void reset_field(wire::variant_field_<T, Required, U...>& dest)
+  {}
+
+  template<typename T, unsigned I>
+  inline void reset_field(wire::field_<T, true, I>& dest)
+  {
+    // array fields are always optional, see `wire/field.h`
+    if (dest.optional_on_empty())
+      wire::clear(dest.get_value());
+  }
+
+  template<typename T, unsigned I>
+  inline void reset_field(wire::field_<T, false, I>& dest)
+  {
+    dest.get_value().reset();
+  }
+
   template<typename R, typename T, unsigned I>
   inline void unpack_field(std::size_t, R& source, wire::field_<T, true, I>& dest)
   {
@@ -377,6 +395,14 @@ namespace wire_read
       read_ = true;
       return 1 + is_required();
     }
+
+    //! Reset optional fields that were skipped
+    bool reset_omitted()
+    {
+      if (!is_required() && !read_)
+        reset_field(field_);
+      return true;
+    }
   };
 
   // `expand_tracker_map` writes all `tracker` types to a table
@@ -427,6 +453,7 @@ namespace wire_read
       throw_exception(wire::error::schema::missing_key, "", missing);
     }
 
+    wire::sum(fields.reset_omitted()...);
     source.end_object();
   }
 } // wire_read

@@ -67,6 +67,8 @@ namespace
     const command_line::arg_descriptor<unsigned> create_queue_max;
     const command_line::arg_descriptor<std::chrono::minutes::rep> rates_interval;
     const command_line::arg_descriptor<unsigned short> log_level;
+    const command_line::arg_descriptor<bool> disable_admin_auth;
+    const command_line::arg_descriptor<std::string> webhook_ssl_verification;
 
     static std::string get_default_zmq()
     {
@@ -99,6 +101,8 @@ namespace
       , create_queue_max{"create-queue-max", "Set pending create account requests maximum", 10000}
       , rates_interval{"exchange-rate-interval", "Retrieve exchange rates in minute intervals from cryptocompare.com if greater than 0", 0}
       , log_level{"log-level", "Log level [0-4]", 1}
+      , disable_admin_auth{"disable-admin-auth", "Make auth field optional in HTTP-REST requests", false}
+      , webhook_ssl_verification{"webhook-ssl-verification", "[<none|system_ca>] specify SSL verification mode for webhooks", "system_ca"}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -119,6 +123,8 @@ namespace
       command_line::add_arg(description, create_queue_max);
       command_line::add_arg(description, rates_interval);
       command_line::add_arg(description, log_level);
+      command_line::add_arg(description, disable_admin_auth);
+      command_line::add_arg(description, webhook_ssl_verification);
     }
   };
 
@@ -130,6 +136,7 @@ namespace
     lws::rest_server::configuration rest_config;
     std::string daemon_rpc;
     std::string daemon_sub;
+    std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
     unsigned create_queue_max;
@@ -177,10 +184,12 @@ namespace
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
-        command_line::get_arg(args, opts.external_bind)
+        command_line::get_arg(args, opts.external_bind),
+        command_line::get_arg(args, opts.disable_admin_auth)
       },
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),
+      command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
       command_line::get_arg(args, opts.create_queue_max),
@@ -215,7 +224,7 @@ namespace
       MINFO("Listening for REST admin clients at " << address);
 
     // blocks until SIGINT
-    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads);
+    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, prog.webhook_ssl_verification);
   }
 } // anonymous
 
