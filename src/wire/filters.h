@@ -27,12 +27,10 @@
 
 #pragma once
 
-#include <boost/range/adaptor/transformed.hpp>
 #include <cassert>
 #include <type_traits>
 
 #include "lmdb/util.h"
-#include "wire/wrapper/array.h"
 
 // These functions are to be used with `wire::as_object(...)` key filtering
 
