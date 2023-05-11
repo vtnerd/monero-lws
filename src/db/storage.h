@@ -56,6 +56,9 @@ namespace db
     MONERO_CURSOR(blocks);
     MONERO_CURSOR(accounts_by_address);
     MONERO_CURSOR(accounts_by_height);
+  
+    MONERO_CURSOR(webhooks);
+    MONERO_CURSOR(events);
   }
 
   struct storage_internal;
@@ -129,6 +132,10 @@ namespace db
     //! \return A specific request from `address` of `type`.
     expect<request_info>
       get_request(request type, account_address const& address, cursor::requests cur = nullptr) noexcept;
+
+    //! \return All webhooks in the DB
+    expect<std::vector<std::pair<webhook_key, std::vector<webhook_value>>>>
+      get_webhooks(cursor::webhooks cur = nullptr);
 
     //! Dump the contents of the database in JSON format to `out`.
     expect<void> json_debug(std::ostream& out, bool show_keys);
@@ -229,7 +236,28 @@ namespace db
 
       \return True iff LMDB successfully committed the update.
     */
-    expect<std::size_t> update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts);
+    expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>>
+      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts);
+
+    /*!
+      Add webhook to be tracked in the database. The webhook will "call"
+      the specified URL with JSON/msgpack information when the event occurs.
+     
+      \param type The webhook event type to be tracked by the DB.
+      \param address is required for `type == tx_confirmation`, and is not
+        not needed for all other types (use default construction of zeroes).
+      \param event Additional information for the webhook. A valid "http"
+        or "https" URL must be provided (or else error). All other information
+        is optional.
+     */
+    expect<void> add_webhook(webhook_type type, const account_address& address, const webhook_value& event);
+
+    /*! Delete all webhooks associated with every value in `addresses`. This is
+      likely only valid for `tx_confirmation` event types. */
+    expect<void> clear_webhooks(epee::span<const account_address> addressses);
+
+    //! Delete all webhooks associated with every value in `ids`
+    expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
     expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;

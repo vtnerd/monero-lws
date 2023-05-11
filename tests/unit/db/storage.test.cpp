@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -24,36 +24,47 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#pragma once
 
-#include <atomic>
-#include <boost/optional/optional.hpp>
-#include <cstdint>
-#include <string>
 
-#include "db/storage.h"
-#include "rpc/client.h"
+#include "storage.test.h"
 
-namespace lws
+#include <boost/filesystem/operations.hpp>
+#include "common/util.h"   // monero/src/
+
+namespace lws { namespace db { namespace test
 {
-  //! Scans all active `db::account`s. Detects if another process changes active list.
-  class scanner
+  namespace
   {
-    static std::atomic<bool> running;
+    boost::filesystem::path get_db_location()
+    {
+      return tools::get_default_data_dir() + "light_wallet_server_unit_testing";
+    }
+  }
 
-    scanner() = delete;
+  cleanup_db::~cleanup_db()
+  {
+    boost::filesystem::remove_all(get_db_location());
+  }
 
-  public:
-    //! Use `client` to sync blockchain data, and \return client if successful.
-    static expect<rpc::client> sync(db::storage disk, rpc::client client);
+  storage get_fresh_db()
+  {
+    const boost::filesystem::path location = get_db_location();
+    boost::filesystem::remove_all(location);
+    boost::filesystem::create_directories(location);
+    return storage::open(location.c_str(), 5);
+  }
 
-    //! Poll daemon until `stop()` is called, using `thread_count` threads.
-    static void run(db::storage disk, rpc::context ctx, std::size_t thread_count, boost::string_ref webhook_ssl_verification);
+  db::account make_db_account(const account_address& pubs, const crypto::secret_key& key)
+  {
+    view_key converted_key{};
+    std::memcpy(std::addressof(converted_key), std::addressof(unwrap(unwrap(key))), sizeof(key));
+    return {
+      account_id(1), account_time(0), pubs, converted_key
+    };
+  }
 
-    //! \return True if `stop()` has never been called.
-    static bool is_running() noexcept { return running; }
-
-    //! Stops all scanner instances globally.
-    static void stop() noexcept { running = false; }
-  };
-} // lws
+  lws::account make_account(const account_address& pubs, const crypto::secret_key& key)
+  {
+    return lws::account{make_db_account(pubs, key), {}, {}};
+  }
+}}} // lws // db // test

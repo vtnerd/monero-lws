@@ -28,6 +28,7 @@
 #include "admin.h"
 
 #include <boost/range/iterator_range.hpp>
+#include <boost/uuid/random_generator.hpp>
 #include <functional>
 #include <utility>
 #include "db/string.h"
@@ -38,7 +39,16 @@
 #include "wire/error.h"
 #include "wire/json/write.h"
 #include "wire/traits.h"
+#include "wire/uuid.h"
 #include "wire/vector.h"
+
+namespace wire
+{
+  static void write_bytes(wire::writer& dest, const std::pair<lws::db::webhook_key, std::vector<lws::db::webhook_value>>& self)
+  {
+    wire::object(dest, wire::field<0>("key", self.first), wire::field<1>("value", self.second));
+  }
+}
 
 namespace
 {
@@ -103,11 +113,11 @@ namespace
     return success();
   }
 
-  template<typename T, typename U>
-  void read_addresses(wire::reader& source, T& self, U field)
+  template<typename T, typename... U>
+  void read_addresses(wire::reader& source, T& self, U... field)
   {
     std::vector<std::string> addresses;
-    wire::object(source, wire::field("addresses", std::ref(addresses)), std::move(field));
+    wire::object(source, wire::field("addresses", std::ref(addresses)), std::move(field)...);
 
     self.addresses.reserve(addresses.size());
     for (const auto& elem : addresses)
@@ -150,6 +160,31 @@ namespace lws { namespace rpc
   void read_bytes(wire::reader& source, rescan_req& self)
   {
     read_addresses(source, self, WIRE_FIELD(height));
+  }
+  void read_bytes(wire::reader& source, webhook_add_req& self)
+  {
+    boost::optional<std::string> address;
+    wire::object(source,
+      WIRE_FIELD_ID(0, type),
+      WIRE_FIELD_ID(1, url),
+      WIRE_OPTIONAL_FIELD_ID(2, token),
+      wire::optional_field<3>("address", std::ref(address)),
+      WIRE_OPTIONAL_FIELD_ID(4, payment_id),
+      WIRE_OPTIONAL_FIELD_ID(5, confirmations)
+    );
+    if (address)
+      self.address = wire_unwrap(*address);
+    else
+      self.address.reset();
+  }
+  void read_bytes(wire::reader& source, webhook_delete_req& self)
+  {
+    read_addresses(source, self);
+  }
+
+  void read_bytes(wire::reader& source, webhook_delete_uuid_req& self)
+  {
+    wire::object(source, WIRE_FIELD_ID(0, event_ids));
   }
 
   expect<void> accept_requests_::operator()(wire::writer& dest, db::storage disk, const request& req) const
@@ -194,5 +229,61 @@ namespace lws { namespace rpc
   expect<void> rescan_::operator()(wire::writer& dest, db::storage disk, const request& req) const
   {
     return write_addresses(dest, disk.rescan(req.height, epee::to_span(req.addresses)));
+  }
+
+  expect<void> webhook_add_::operator()(wire::writer& dest, db::storage disk, request&& req) const
+  {
+    if (req.address)
+    {
+      std::uint64_t payment_id = 0;
+      static_assert(sizeof(payment_id) == sizeof(crypto::hash8), "invalid memcpy");
+      if (req.payment_id)
+        std::memcpy(std::addressof(payment_id), std::addressof(*req.payment_id), sizeof(payment_id));
+      db::webhook_value event{
+        db::webhook_dupsort{payment_id, boost::uuids::random_generator{}()},
+        db::webhook_data{
+          std::move(req.url),
+          std::move(req.token).value_or(std::string{}),
+          req.confirmations.value_or(1)
+        }
+      };
+
+      MONERO_CHECK(disk.add_webhook(req.type, *req.address, event));
+      write_bytes(dest, event);
+    }
+    else if (req.type == db::webhook_type::tx_confirmation)
+      return {error::bad_webhook};
+    return success();
+  }
+
+  expect<void> webhook_delete_::operator()(wire::writer& dest, db::storage disk, const request& req) const
+  {
+    MONERO_CHECK(disk.clear_webhooks(epee::to_span(req.addresses)));
+    wire::object(dest); // write empty object
+    return success();
+  }
+
+  expect<void> webhook_del_uuid_::operator()(wire::writer& dest, db::storage disk, request req) const
+  {
+    MONERO_CHECK(disk.clear_webhooks(std::move(req.event_ids)));
+    wire::object(dest); // write empty object
+    return success();
+  }
+  
+  expect<void> webhook_list_::operator()(wire::writer& dest, db::storage disk) const
+  {
+    std::vector<std::pair<db::webhook_key, std::vector<db::webhook_value>>> data;
+    {
+      auto reader = disk.start_read();
+      if (!reader)
+        return reader.error();
+      auto data_ = reader->get_webhooks();
+      if (!data_)
+        return data_.error();
+      data = std::move(*data_);
+    }
+
+    wire::object(dest, wire::field<0>("webhooks", data));
+    return success();
   }
 }} // lws // rpc

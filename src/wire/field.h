@@ -46,8 +46,12 @@
   ::wire::field( #name , self . name )
 
 //! The optional field has the same key name and C/C++ name
-#define WIRE_OPTIONAL_FIELD(name)                               \
-  ::wire::optional_field( #name , std::ref( self . name ))
+#define WIRE_OPTIONAL_FIELD_ID(id, name)                         \
+  ::wire::optional_field< id >( #name , std::ref( self . name ))
+
+//! The optional field has the same key name and C/C++ name
+#define WIRE_OPTIONAL_FIELD(name) \
+  WIRE_OPTIONAL_FIELD_ID(0, name)
 
 namespace wire
 {
@@ -72,6 +76,10 @@ namespace wire
     static constexpr bool is_required() noexcept { return Required; }
     static constexpr std::size_t count() noexcept { return 1; }
     static constexpr unsigned id() noexcept { return I; }
+
+    //! \return True if field is forced optional when `get_value().empty()`.
+    static constexpr bool optional_on_empty() noexcept
+    { return is_optional_on_empty<value_type>::value; }
 
     const char* name;
     T value;
@@ -250,9 +258,9 @@ namespace wire
 
 
   template<typename T, unsigned I>
-  inline constexpr bool available(const field_<T, true, I>&) noexcept
+  inline constexpr bool available(const field_<T, true, I>& elem) noexcept
   {
-    return true;
+    return elem.is_required() || (elem.optional_on_empty() && !wire::empty(elem.get_value()));
   }
   template<typename T, unsigned I>
   inline bool available(const field_<T, false, I>& elem)
@@ -268,19 +276,6 @@ namespace wire
   inline constexpr bool available(const variant_field_<T, false, U...>& elem)
   {
     return elem != nullptr;
-  }
-
-
-  // example usage : `wire::sum(std::size_t(wire::available(fields))...)`
-
-  inline constexpr int sum() noexcept
-  {
-    return 0;
-  }
-  template<typename T, typename... U>
-  inline constexpr T sum(const T head, const U... tail) noexcept
-  {
-    return head + sum(tail...);
   }
 }
 

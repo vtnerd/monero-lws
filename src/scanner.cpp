@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+ // Copyright (c) 2018-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -37,6 +37,7 @@
 #include <cstring>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "common/error.h"                             // monero/src
 #include "crypto/crypto.h"                            // monero/src
@@ -47,6 +48,8 @@
 #include "db/data.h"
 #include "error.h"
 #include "misc_log_ex.h"             // monero/contrib/epee/include
+#include "net/http_client.h"
+#include "net/net_parse_helpers.h"
 #include "rpc/daemon_messages.h"     // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
@@ -74,6 +77,8 @@ namespace lws
 
   namespace
   {
+    namespace net = epee::net_utils;
+
     constexpr const std::chrono::seconds account_poll_interval{10};
     constexpr const std::chrono::minutes block_rpc_timeout{2};
     constexpr const std::chrono::seconds send_timeout{30};
@@ -88,13 +93,14 @@ namespace lws
 
     struct thread_data
     {
-      explicit thread_data(rpc::client client, db::storage disk, std::vector<lws::account> users)
-        : client(std::move(client)), disk(std::move(disk)), users(std::move(users))
+      explicit thread_data(rpc::client client, db::storage disk, std::vector<lws::account> users, net::ssl_verification_t webhook_verify)
+        : client(std::move(client)), disk(std::move(disk)), users(std::move(users)), webhook_verify(webhook_verify)
       {}
 
       rpc::client client;
       db::storage disk;
       std::vector<lws::account> users;
+      net::ssl_verification_t webhook_verify;
     };
 
     // until we have a signal-handler safe notification system
@@ -145,6 +151,80 @@ namespace lws
         MONERO_THROW(sent.error(), "Failed to send ZMQ RPC message");
       }
       return true;
+    }
+
+    void send_via_http(net::http::http_simple_client& client, boost::string_ref uri, const db::webhook_tx_confirmation& event, const net::http::fields_list& params, const std::chrono::milliseconds timeout)
+    {
+      if (uri.empty())
+        uri = "/";
+
+      const std::string& url = event.value.second.url;
+      const epee::byte_slice bytes = wire::json::to_bytes(event);
+      const net::http::http_response_info* info = nullptr;
+
+      MINFO("Sending webhook to " << url);
+      if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
+      {
+        MERROR("Failed to invoke http request to  " << url);
+        return;
+      }
+
+      if (!info)
+      {
+        MERROR("Failed to invoke http request to  " << url << ", internal error (null response ptr)");
+        return;
+      }
+
+      if (info->m_response_code != 200)
+      {
+        MERROR("Failed to invoke http request to  " << url << ", wrong response code: " << info->m_response_code);
+        return;
+      }
+    }
+
+    void send_via_http(const epee::span<const db::webhook_tx_confirmation> events, const std::chrono::milliseconds timeout, net::ssl_verification_t verify_mode)
+    {
+      if (events.empty())
+        return;
+
+      net::http::url_content url{};
+      net::http::http_simple_client client{};
+
+      net::http::fields_list params;
+      params.emplace_back("Content-Type", "application/json; charset=utf-8");
+
+      for (const db::webhook_tx_confirmation& event : events)
+      {
+        if (event.value.second.url.empty() || !net::parse_url(event.value.second.url, url))
+        {
+          MERROR("Bad URL for webhook event: " << event.value.second.url);
+          continue;
+        }
+
+        const bool https = (url.schema == "https");
+        if (!https && url.schema != "http")
+        {
+          MERROR("Only http or https connections: " << event.value.second.url);
+          continue;
+        }
+
+        const net::ssl_support_t ssl_mode = https ?
+          net::ssl_support_t::e_ssl_support_enabled : net::ssl_support_t::e_ssl_support_disabled;
+        net::ssl_options_t ssl_options{ssl_mode};
+        if (https)
+          ssl_options.verification = verify_mode;
+
+        if (url.port == 0)
+          url.port = https ? 443 : 80;
+
+        client.set_server(url.host, std::to_string(url.port), boost::none, std::move(ssl_options));
+        if (client.connect(timeout))
+          send_via_http(client, url.uri, event, params, timeout);
+        else
+          MERROR("Unable to send webhook to " << event.value.second.url);
+
+        client.disconnect();
+      }
     }
 
     struct by_height
@@ -335,6 +415,7 @@ namespace lws
         rpc::client client{std::move(data->client)};
         db::storage disk{std::move(data->disk)};
         std::vector<lws::account> users{std::move(data->users)};
+        const net::ssl_verification_t webhook_verify = data->webhook_verify;
 
         assert(!users.empty());
         assert(std::is_sorted(users.begin(), users.end(), by_height{}));
@@ -478,18 +559,13 @@ namespace lws
             blockchain.push_back(cryptonote::get_block_hash(block));
           } // for each block
 
-          expect<std::size_t> updated = disk.update(
+          auto updated = disk.update(
             users.front().scan_height(), epee::to_span(blockchain), epee::to_span(users)
           );
           if (!updated)
           {
             if (updated == lws::error::blockchain_reorg)
             {
-              epee::byte_stream dest{};
-              {
-                rapidjson::Writer<epee::byte_stream> out{dest};
-                cryptonote::json::toJsonValue(out, blocks[998]);
-              }
               MINFO("Blockchain reorg detected, resetting state");
               return;
             }
@@ -497,9 +573,10 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          if (*updated != users.size())
+          send_via_http(epee::to_span(updated->second), std::chrono::seconds{5}, webhook_verify);
+          if (updated->first != users.size())
           {
-            MWARNING("Only updated " << *updated << " account(s) out of " << users.size() << ", resetting");
+            MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
             return;
           }
 
@@ -523,7 +600,7 @@ namespace lws
       Launches `thread_count` threads to run `scan_loop`, and then polls for
       active account changes in background
     */
-    void check_loop(db::storage disk, rpc::context& ctx, std::size_t thread_count, std::vector<lws::account> users, std::vector<db::account_id> active)
+    void check_loop(db::storage disk, rpc::context& ctx, std::size_t thread_count, std::vector<lws::account> users, std::vector<db::account_id> active, const net::ssl_verification_t webhook_verify)
     {
       assert(0 < thread_count);
       assert(0 < users.size());
@@ -585,7 +662,7 @@ namespace lws
         client.watch_scan_signals();
 
         auto data = std::make_shared<thread_data>(
-          std::move(client), disk.clone(), std::move(thread_users)
+          std::move(client), disk.clone(), std::move(thread_users), webhook_verify
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
       }
@@ -596,7 +673,7 @@ namespace lws
         client.watch_scan_signals();
 
         auto data = std::make_shared<thread_data>(
-          std::move(client), disk.clone(), std::move(users)
+          std::move(client), disk.clone(), std::move(users), webhook_verify
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
       }
@@ -739,9 +816,15 @@ namespace lws
     return {std::move(client)};
   }
 
-  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count)
+  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const boost::string_ref webhook_ssl_verification)
   {
     thread_count = std::max(std::size_t(1), thread_count);
+
+    net::ssl_verification_t webhook_verify = net::ssl_verification_t::none;
+    if (webhook_ssl_verification == "system_ca")
+      webhook_verify = net::ssl_verification_t::system_ca;
+    else if (webhook_ssl_verification != "none")
+      MONERO_THROW(lws::error::configuration, "Invalid webhook ssl verification mode");
 
     rpc::client client{};
     for (;;)
@@ -791,7 +874,7 @@ namespace lws
         checked_wait(account_poll_interval - (std::chrono::steady_clock::now() - last));
       }
       else
-        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active));
+        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active), webhook_verify);
 
       if (!scanner::is_running())
         return;

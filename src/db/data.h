@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+  // Copyright (c) 2018-2020, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -26,15 +26,19 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/uuid/uuid.hpp>
 #include <cassert>
 #include <cstdint>
 #include <iosfwd>
+#include <string>
 #include <utility>
 
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
 #include "wire/fwd.h"
+#include "wire/json/fwd.h"
+#include "wire/msgpack/fwd.h"
 #include "wire/traits.h"
 
 namespace lws
@@ -237,6 +241,76 @@ namespace db
   static_assert(sizeof(request_info) == 64 + 32 + 8 + (4 * 2), "padding in request_info");
   void write_bytes(wire::writer& dest, const request_info& self, bool show_key = false);
 
+  enum class webhook_type : std::uint8_t
+  {
+    tx_confirmation = 0,
+    // unconfirmed_tx,
+    // new_block
+    // confirmed_tx,
+    // double_spend_tx,
+    // tx_confidence
+  };
+  WIRE_DECLARE_ENUM(webhook_type);
+
+  //! Key for upcoming webhooks or in-progress webhooks
+  struct webhook_key
+  {
+    account_id user;
+    webhook_type type;
+    char reserved[3];
+  };
+  static_assert(sizeof(webhook_key) == 4 + 1 + 3, "padding in webhook_key");
+  WIRE_DECLARE_OBJECT(webhook_key);
+
+  //! Webhook values used to sort by duplicate keys
+  struct webhook_dupsort
+  {
+    std::uint64_t payment_id; //!< Only used with `tx_confirmation` type.
+    boost::uuids::uuid event_id;
+  };
+  static_assert(sizeof(webhook_dupsort) == 8 + 16, "padding in webhoook");
+
+  //! Variable length data for a webhook key/event
+  struct webhook_data
+  {
+    std::string url;
+    std::string token;
+    std::uint32_t confirmations;
+  };
+  WIRE_MSGPACK_DECLARE_OBJECT(webhook_data);
+
+  //! Compatible with lmdb::table code
+  using webhook_value = std::pair<webhook_dupsort, webhook_data>;
+  WIRE_DECLARE_OBJECT(webhook_value);
+
+  //! Returned by DB when a webhook event "tripped"
+  struct webhook_tx_confirmation
+  {
+    webhook_key key;
+    webhook_value value;
+    output tx_info;
+  };
+  void write_bytes(wire::json_writer&, const webhook_tx_confirmation&);
+
+  //! References a specific output that triggered a webhook
+  struct webhook_output
+  {
+    transaction_link tx;
+    output_id out;
+  };
+
+  //! References all info from a webhook that triggered
+  struct webhook_event
+  {
+    webhook_output link;
+    webhook_dupsort link_webhook;
+  };
+  void write_bytes(wire::json_writer&, const webhook_event&);
+
+  bool operator==(transaction_link const& left, transaction_link const& right) noexcept;
+  bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
+  bool operator<=(transaction_link const& left, transaction_link const& right) noexcept;
+
   inline constexpr bool operator==(output_id left, output_id right) noexcept
   {
     return left.high == right.high && left.low == right.low;
@@ -255,9 +329,28 @@ namespace db
     return left.high == right.high ?
       left.low <= right.low : left.high < right.high;
   }
+  inline constexpr bool operator<(const webhook_key& left, const webhook_key& right) noexcept
+  {
+    return left.user == right.user ?
+      left.type < right.type : left.user < right.user;
+  }
 
-  bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
-  bool operator<=(transaction_link const& left, transaction_link const& right) noexcept;
+  bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept;
+
+  inline bool operator==(const webhook_output& left, const webhook_output& right) noexcept
+  {
+    return left.out == right.out && left.tx == right.tx;
+  }
+  inline bool operator<(const webhook_output& left, const webhook_output& right) noexcept
+  {
+    return left.tx == right.tx ? left.out < right.out : left.tx < right.tx;
+  }
+  inline bool operator<(const webhook_event& left, const webhook_event& right) noexcept
+  {
+    return left.link == right.link ?
+      left.link_webhook < right.link_webhook : left.link < right.link;
+  }
+
 
   /*!
     Write `address` to `out` in base58 format using `lws::config::network` to

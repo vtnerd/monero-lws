@@ -54,6 +54,7 @@ namespace lws
       std::vector<std::string> access_controls;
       std::size_t threads;
       bool allow_external;
+      bool disable_admin_auth;
     };
     
     explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);

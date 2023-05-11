@@ -42,5 +42,53 @@ namespace wire
   template<typename T>
   struct is_blob : std::false_type
   {};
-}
 
+/*! Forces field to be optional when empty. Concept requirements for `T` when
+    `is_optional_on_empty<T>::value == true`:
+      * must have an `empty()` method that toggles whether the associated
+        `wire::field_<...>` is omitted by the `wire::writer`.
+      * must have a `clear()` method where `empty() == true` upon completion,
+        used by the `wire::reader` when the `wire::field_<...>` is omitted. */
+  template<typename T>
+  struct is_optional_on_empty
+    : is_array<T> // all array types in old output engine were optional when empty
+  {};
+
+  // example usage : `wire::sum(std::size_t(wire::available(fields))...)`
+
+  inline constexpr int sum() noexcept
+  {
+    return 0;
+  }
+  template<typename T, typename... U>
+  inline constexpr T sum(const T head, const U... tail) noexcept
+  {
+    return head + sum(tail...);
+  }
+
+
+  //! If `T` has no `empty()` function, this function is used
+  template<typename... T>
+  inline constexpr bool empty(const T&...) noexcept
+  {
+    static_assert(sum(is_optional_on_empty<T>::value...) == 0, "type needs empty method");
+    return false;
+  }
+
+  //! `T` has `empty()` function, use it
+  template<typename T>
+  inline auto empty(const T& container) -> decltype(container.empty())
+  { return container.empty(); }
+
+  //! If `T` has no `clear()` function, this function is used
+  template<typename... T>
+  inline void clear(const T&...) noexcept
+  {
+    static_assert(sum(is_optional_on_empty<T>::value...) == 0, "type needs clear method");
+  }
+
+  //! `T` has `clear()` function, use it
+  template<typename T>
+  inline auto clear(T& container) -> decltype(container.clear())
+  { return container.clear(); }
+}
