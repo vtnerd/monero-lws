@@ -23,6 +23,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: set apt conf
+      run: ${{env.APT_SET_CONF}}
+    - name: update apt
+      run: sudo apt update
+    - name: install monero dependencies
+      run: ${{env.APT_INSTALL_LINUX}}
+  
     - uses: actions/checkout@v3
       with:
         repository: monero-project/monero
