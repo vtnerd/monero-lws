@@ -1,0 +1,49 @@
+name: CMake
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+  APT_INSTALL_LINUX: 'sudo apt -y install build-essential cmake libboost-all-dev miniupnpc libunbound-dev graphviz doxygen libunwind8-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libnorm-dev libusb-1.0-0-dev libpgm-dev libprotobuf-dev protobuf-compiler ccache'
+  APT_SET_CONF: |
+        echo "Acquire::Retries \"3\";"         | sudo tee -a /etc/apt/apt.conf.d/80-custom
+        echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
+        echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
+
+jobs:
+  build:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        repository: monero-project/monero
+        path: ${{github.workspace}}/monero/
+        
+    - name: Configure Monero
+      run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
+    
+    - name: Build Monero
+      run: cd ${{github.workspac}}/monero/build && make daemon lmdb_lib multisig 
+      
+    - uses: actions/checkout@v3
+      with:
+        path: ${{github.workspace}}/lws
+
+    - name: Configure LWS
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{gitub.workspace}}/lws
+
+    - name: Build LWS
+      # Build your program with the given configuration
+      run: cd ${{github.workspac}}/lws/build && make
+
