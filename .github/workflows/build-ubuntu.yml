@@ -52,5 +52,5 @@ jobs:
 
     - name: Build LWS
       # Build your program with the given configuration
-      run: cd ${{github.workspac}}/lws/build && make
+      run: cd ${{github.workspace}}/lws/build && make
 
