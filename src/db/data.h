@@ -196,9 +196,10 @@ namespace db
       crypto::hash8 short_;  //!< Decrypted short payment id
       crypto::hash long_;    //!< Long version of payment id (always decrypted)
     } payment_id;
+    std::uint64_t fee;       //!< Total fee for transaction
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32,
+    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8,
     "padding in output"
   );
   void write_bytes(wire::writer&, const output&);
