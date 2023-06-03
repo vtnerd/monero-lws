@@ -34,6 +34,7 @@
 #include "crypto/hash.h"   // monero/src
 #include "wire/json/fwd.h"
 
+namespace cryptonote { class transaction; }
 namespace lws
 {
 namespace rpc
@@ -45,6 +46,13 @@ namespace rpc
     crypto::hash top_block_id;
 
     static expect<minimal_chain_pub> from_json(std::string&&);
+  };
+
+  struct full_txpool_pub
+  {
+    std::vector<cryptonote::transaction> txes;
+
+    static expect<full_txpool_pub> from_json(std::string&&);
   };
 }
 }

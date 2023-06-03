@@ -34,6 +34,7 @@
 #include "wire/json/write.h"
 #include "wire/msgpack.h"
 #include "wire/uuid.h"
+#include "wire/wrapper/defaulted.h"
 
 namespace lws
 {
@@ -126,9 +127,11 @@ namespace db
     const auto payment_id = payment_bytes.empty() ?
       nullptr : std::addressof(payment_bytes);
 
+    // defaulted will omit "id" and "block" when the output is in the
+    // txpool with no valid values.
     wire::object(dest,
-      wire::field<0>("id", std::cref(self.spend_meta.id)),
-      wire::field<1>("block", self.link.height),
+      wire::optional_field<0>("id", wire::defaulted(std::cref(self.spend_meta.id), output_id::txpool())),
+      wire::optional_field<1>("block", wire::defaulted(self.link.height, block_id::txpool)),
       wire::field<2>("index", self.spend_meta.index),
       wire::field<3>("amount", self.spend_meta.amount),
       wire::field<4>("timestamp", self.timestamp),

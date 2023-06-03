@@ -133,6 +133,10 @@ namespace db
     expect<request_info>
       get_request(request type, account_address const& address, cursor::requests cur = nullptr) noexcept;
 
+    //! \return All webhook values associated with user `key` and `payment_id`.
+    expect<std::vector<webhook_value>>
+      find_webhook(webhook_key const& key, crypto::hash8 const& payment_id, cursor::webhooks cur = nullptr);
+
     //! \return All webhooks in the DB
     expect<std::vector<std::pair<webhook_key, std::vector<webhook_value>>>>
       get_webhooks(cursor::webhooks cur = nullptr);

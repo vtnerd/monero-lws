@@ -40,6 +40,9 @@ namespace crypto
 
 namespace cryptonote
 {
+  class transaction;
+  void read_bytes(wire::json_reader& source, transaction& self);
+
   namespace rpc
   {
     struct block_with_transactions;
