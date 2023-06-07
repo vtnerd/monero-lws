@@ -46,12 +46,13 @@ namespace
   expect<epee::byte_slice> call_endpoint(lws::db::storage disk, std::string json)
   {
     using request_type = typename T::request;
-    expect<request_type> req = wire::json::from_bytes<request_type>(std::move(json));
-    if (!req)
-      return req.error();
+    request_type req{};
+    const std::error_code error = wire::json::from_bytes(std::move(json), req);
+    if (error)
+      return error;
     wire::json_slice_writer out{};
-    MONERO_CHECK(T{}(out, std::move(disk), std::move(*req)));
-    return out.take_bytes();
+    MONERO_CHECK(T{}(out, std::move(disk), std::move(req)));
+    return epee::byte_slice{out.take_sink()};
   }
 }
 
@@ -138,7 +139,7 @@ LWS_CASE("rpc::admin")
     {
       wire::json_slice_writer out{};
       EXPECT(lws::rpc::webhook_list(out, db.clone()));
-      expect<epee::byte_slice> bytes = out.take_bytes();
+      expect<epee::byte_slice> bytes = epee::byte_slice{out.take_sink()};
       EXPECT(!bytes.has_error());
 
       {

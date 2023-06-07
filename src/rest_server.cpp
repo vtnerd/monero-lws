@@ -661,14 +661,19 @@ namespace lws
       using request = typename E::request;
       using response = typename E::response;
 
-      expect<request> req = wire::json::from_bytes<request>(std::move(root));
-      if (!req)
-        return req.error();
+      request req{};
+      std::error_code error = wire::json::from_bytes(std::move(root), req);
+      if (error)
+        return error;
 
-      expect<response> resp = E::handle(std::move(*req), std::move(disk), gclient);
+      expect<response> resp = E::handle(std::move(req), std::move(disk), gclient);
       if (!resp)
         return resp.error();
-      return wire::json::to_bytes<response>(*resp);
+
+      epee::byte_slice out{};
+      if ((error = wire::json::to_bytes(out, *resp)))
+        return error;
+      return {std::move(out)};
     }
 
     template<typename T>
@@ -693,17 +698,21 @@ namespace lws
     expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&, const bool disable_auth)
     {
       using request = typename E::request;
-      expect<admin<request>> req = wire::json::from_bytes<admin<request>>(std::move(root));
-      if (!req)
-        return req.error();
+      
+      admin<request> req{};
+      {
+        const std::error_code error = wire::json::from_bytes(std::move(root), req);
+        if (error)
+          return error;
+      }
 
       if (!disable_auth)
       {
-        if (!req->auth)
+        if (!req.auth)
           return {error::account_not_found};
 
         db::account_address address{};
-        if (!crypto::secret_key_to_public_key(*(req->auth), address.view_public))
+        if (!crypto::secret_key_to_public_key(*(req.auth), address.view_public))
           return {error::crypto_failure};
 
         auto reader = disk.start_read();
@@ -719,8 +728,8 @@ namespace lws
       }
 
       wire::json_slice_writer dest{};
-      MONERO_CHECK(E{}(dest, std::move(disk), std::move(req->params)));
-      return dest.take_bytes();
+      MONERO_CHECK(E{}(dest, std::move(disk), std::move(req.params)));
+      return epee::byte_slice{dest.take_sink()};
     }
 
     struct endpoint

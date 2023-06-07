@@ -72,7 +72,11 @@ namespace lws
 
     expect<lws::rates> crypto_compare_::operator()(std::string&& body) const
     {
-      return wire::json::from_bytes<lws::rates>(std::move(body));
+      lws::rates out{};
+      const std::error_code error = wire::json::from_bytes(std::move(body), out);
+      if (error)
+        return error;
+      return {std::move(out)};
     }
   } // rpc
 } // lws

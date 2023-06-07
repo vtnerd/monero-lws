@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2022-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -28,23 +28,31 @@
 #pragma once
 
 #include <string>
+#include <system_error>
 
-#include "byte_slice.h"
-#include "common/expect.h"
+#include "byte_stream.h"
 #include "wire/json/fwd.h"
+#include "wire/read.h"
+#include "wire/write.h"
 
 namespace wire
 {
   struct json
   {
     using input_type = json_reader;
-    using output_type = json_writer;
+    using output_type = json_slice_writer;
 
     template<typename T>
-    static expect<T> from_bytes(std::string&& source);
+    static std::error_code from_bytes(std::string&& source, T& dest)
+    {
+      return wire_read::from_bytes<input_type>(std::move(source), dest);
+    }
 
-    template<typename T>
-    static epee::byte_slice to_bytes(const T& source);
+    template<typename T, typename U>
+    static std::error_code to_bytes(T& dest, const U& source)
+    {
+      return wire_write::to_bytes<output_type>(dest, source);
+    }
   };
 }
 

@@ -86,19 +86,15 @@ namespace wire
     }
 
   protected:
-    msgpack_writer(epee::byte_stream&& initial, bool integer_keys, bool needs_flush)
-      : writer(), bytes_(std::move(initial)), expected_(1), integer_keys_(integer_keys), needs_flush_(needs_flush)
-    {}
-
-    msgpack_writer(bool integer_keys, bool needs_flush)
-      : msgpack_writer(epee::byte_stream{}, integer_keys, needs_flush)
+    msgpack_writer(epee::byte_stream&& sink, bool integer_keys, bool needs_flush)
+      : writer(), bytes_(std::move(sink)), expected_(1), integer_keys_(integer_keys), needs_flush_(needs_flush)
     {}
 
     //! \throw std::logic_error if tree was not completed
     void check_complete();
 
     //! \throw std::logic_error if incomplete msgpack tree. \return msgpack bytes
-    epee::byte_slice take_msgpack();
+    epee::byte_stream take_msgpack();
 
     //! Flush bytes in local buffer to `do_flush(...)`
     void flush()
@@ -157,22 +153,22 @@ namespace wire
   //! Buffers entire JSON message in memory
   struct msgpack_slice_writer final : msgpack_writer
   {
-    msgpack_slice_writer(epee::byte_stream&& initial, bool integer_keys = false)
-      : msgpack_writer(std::move(initial), integer_keys, false)
+    explicit msgpack_slice_writer(epee::byte_stream&& sink, bool integer_keys = false)
+      : msgpack_writer(std::move(sink), integer_keys, false)
     {}
 
     explicit msgpack_slice_writer(bool integer_keys = false)
-      : msgpack_writer(integer_keys, false)
+      : msgpack_slice_writer(epee::byte_stream{}, integer_keys)
     {}
 
     //! \throw std::logic_error if incomplete JSON tree \return JSON bytes
-    epee::byte_slice take_bytes()
+    epee::byte_stream take_sink()
     {
       return msgpack_writer::take_msgpack();
     }
   };
 
-  //! Periodically flushes JSON data to `std::ostream`
+  //! Periodically flushes MsgPack data to `std::ostream`
   class msgpack_stream_writer final : public msgpack_writer
   {
     std::ostream& dest;
@@ -180,7 +176,7 @@ namespace wire
     virtual void do_flush(epee::span<const std::uint8_t>) override final;
   public:
     explicit msgpack_stream_writer(std::ostream& dest, bool integer_keys = false)
-      : msgpack_writer(integer_keys, true), dest(dest)
+      : msgpack_writer(epee::byte_stream{}, integer_keys, true), dest(dest)
     {}
 
     //! Flush remaining bytes to stream \throw std::logic_error if incomplete JSON tree
@@ -190,44 +186,4 @@ namespace wire
       flush();
     }
   };
-
-  template<typename T>
-  epee::byte_slice msgpack::to_bytes(const T& source)
-  {
-    return wire_write::to_bytes<msgpack_slice_writer>(source);
-  }
-
-  template<typename T, typename F = identity_>
-  inline void array(msgpack_writer& dest, const T& source, F filter = F{})
-  {
-    wire_write::array(dest, source, source.size(), std::move(filter));
-  }
-  template<typename T, typename F>
-  inline void write_bytes(msgpack_writer& dest, as_array_<T, F> source)
-  {
-    wire::array(dest, source.get_value(), std::move(source.filter));
-  }
-  template<typename T>
-  inline enable_if<is_array<T>::value> write_bytes(msgpack_writer& dest, const T& source)
-  {
-    wire::array(dest, source);
-  }
-
-  template<typename T, typename F = identity_, typename G = identity_>
-  inline void dynamic_object(msgpack_writer& dest, const T& source, F key_filter = F{}, G value_filter = G{})
-  {
-    // works with "lazily" computed ranges
-    wire_write::dynamic_object(dest, source, 0, std::move(key_filter), std::move(value_filter));
-  }
-  template<typename T, typename F, typename G>
-  inline void write_bytes(msgpack_writer& dest, as_object_<T, F, G> source)
-  {
-    wire::dynamic_object(dest, source.get_map(), std::move(source.key_filter), std::move(source.value_filter));
-  }
-
-  template<typename... T>
-  inline void object(msgpack_writer& dest, T... fields)
-  {
-    wire_write::object(dest, std::move(fields)...);
-  }
 }

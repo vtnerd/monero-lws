@@ -45,48 +45,13 @@ namespace crypto
 
 namespace wire
 {
-  template<>
-  struct is_blob<crypto::ec_scalar>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::hash8>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::hash>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::key_derivation>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::key_image>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::public_key>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::signature>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<rct::key>
-    : std::true_type
-  {};
-
-  template<>
-  struct is_blob<crypto::view_tag>
-    : std::true_type
-  {};
+  WIRE_DECLARE_BLOB(crypto::ec_scalar);
+  WIRE_DECLARE_BLOB(crypto::hash);
+  WIRE_DECLARE_BLOB(crypto::hash8);
+  WIRE_DECLARE_BLOB(crypto::key_derivation);
+  WIRE_DECLARE_BLOB(crypto::key_image);
+  WIRE_DECLARE_BLOB(crypto::public_key);
+  WIRE_DECLARE_BLOB(crypto::signature);
+  WIRE_DECLARE_BLOB(crypto::view_tag);
+  WIRE_DECLARE_BLOB(rct::key);
 }
