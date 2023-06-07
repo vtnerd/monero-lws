@@ -31,6 +31,7 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/range/adaptor/filtered.hpp>
+#include <boost/range/adaptor/transformed.hpp>
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -54,6 +55,8 @@
 #include "wire/crypto.h"
 #include "wire/filters.h"
 #include "wire/json/write.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 namespace
 {
@@ -79,7 +82,7 @@ namespace
     const auto transform = [] (lws::db::account src)
     { return admin_display<lws::db::account>{std::move(src)}; };
 
-    wire::array(dest, (source.value | boost::adaptors::filtered(filter)), transform);
+    wire_write::bytes(dest, wire::array(source.value | boost::adaptors::filtered(filter) | boost::adaptors::transformed(transform)));
   }
 
   template<typename F, typename... T>

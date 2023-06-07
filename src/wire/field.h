@@ -55,46 +55,70 @@
 
 namespace wire
 {
-  template<typename T>
-  struct unwrap_reference
+  /*! Links `name` to a `value` and index `I` for object serialization.
+
+  `value_type` is `T` with optional `std::reference_wrapper` removed.
+  `value_type` needs a `read_bytes` function when parsing with a
+  `wire::reader` - see `read.h` for more info. `value_type` needs a
+  `write_bytes` function when parsing with a `wire::writer` - see `write.h`
+  for more info.
+
+  Any `value_type` where `is_optional_on_empty<value_type> == true`, will
+  automatically be converted to an optional field iff `value_type` has an
+  `empty()` method that returns `true`. The old output engine omitted fields
+  when an array was empty, and the standard input macro would ignore the
+  `false` return for the missing field. For compability reasons, the
+  input/output engine here matches that behavior. See `wrapper/array.h` to
+  enforce a required field even when the array is empty or specialize the
+  `is_optional_on_empty` trait. Only new fields should use this behavior.
+
+  Additional concept requirements for `value_type` when `Required == false`:
+    * must have an `operator*()` function.
+    * must have a conversion to bool function that returns true when
+      `operator*()` is safe to call (and implicitly when the associated field
+      should be written as opposed to skipped/omitted).
+  Additional concept requirements for `value_type` when `Required == false`
+  when reading:
+    * must have an `emplace()` method that ensures `operator*()` is safe to call.
+    * must have a `reset()` method to indicate a field was skipped/omitted.
+
+  If a standard type needs custom serialization, one "trick":
+  ```
+  struct custom_tag{};
+  void read_bytes(wire::reader&, boost::fusion::pair<custom_tag, std::string&>)
+  { ... }
+  void write_bytes(wire::writer&, boost::fusion::pair<custom_tag, const std::string&>)
+  { ... }
+
+  template<typename F, typename T>
+  void object_map(F& format, T& self)
   {
-    using type = T;
-  };
+    wire::object(format,
+      wire::field("foo", boost::fusion::make_pair<custom_tag>(std::ref(self.foo)))
+    );
+  }
+  ```
 
-  template<typename T>
-  struct unwrap_reference<std::reference_wrapper<T>>
-  {
-    using type = T;
-  };
-
-
-  //! Links `name` to a `value` for object serialization.
+  Basically each input/output format needs a unique type so that the compiler
+  knows how to "dispatch" the read/write calls. */
   template<typename T, bool Required, unsigned I = 0>
   struct field_
   {
-    using value_type = typename unwrap_reference<T>::type;
-    static constexpr bool is_required() noexcept { return Required; }
-    static constexpr std::size_t count() noexcept { return 1; }
-    static constexpr unsigned id() noexcept { return I; }
+    using value_type = unwrap_reference_t<T>;
 
     //! \return True if field is forced optional when `get_value().empty()`.
     static constexpr bool optional_on_empty() noexcept
     { return is_optional_on_empty<value_type>::value; }
 
+    static constexpr bool is_required() noexcept { return Required; }
+    static constexpr std::size_t count() noexcept { return 1; }
+    static constexpr unsigned id() noexcept { return I; }
+
     const char* name;
     T value;
 
-    //! \return `value` with `std::reference_wrapper` removed.
-    constexpr const value_type& get_value() const noexcept
-    {
-      return value;
-    }
-
-    //! \return `value` with `std::reference_wrapper` removed.
-    value_type& get_value() noexcept
-    {
-      return value;
-    }
+    constexpr const value_type& get_value() const noexcept { return value; }
+    value_type& get_value() noexcept { return value; }
   };
 
   //! Links `name` to `value`. Use `std::ref` if de-serializing.
@@ -109,76 +133,6 @@ namespace wire
   constexpr inline field_<T, false, I> optional_field(const char* name, T value)
   {
     return {name, std::move(value)};
-  }
-
-
-  //! Links `name` to a type `T` for variant serialization.
-  template<typename T>
-  struct option
-  {
-    static constexpr unsigned id() noexcept { return 0; }
-    const char* name;
-  };
-
-  //! \return Name associated with type `T` for variant `field`.
-  template<typename T, typename U>
-  constexpr const char* get_option_name(const U& field) noexcept
-  {
-    return static_cast< const option<T>& >(field).name;
-  }
-
-  //! Links each type in a variant to a string key.
-  template<typename T, bool Required, typename... U>
-  struct variant_field_ : option<U>...
-  {
-    using value_type = typename unwrap_reference<T>::type;
-    static constexpr bool is_required() noexcept { return Required; }
-    static constexpr std::size_t count() noexcept { return sizeof...(U); }
-
-    constexpr variant_field_(const char* name, T value, option<U>... opts)
-      : option<U>(std::move(opts))..., name(name), value(std::move(value))
-    {}
-
-    const char* name;
-    T value;
-
-    constexpr const value_type& get_value() const noexcept
-    {
-      return value;
-    }
-
-    value_type& get_value() noexcept
-    {
-      return value;
-    }
-
-    template<typename V>
-    struct wrap
-    {
-      using result_type = void;
-
-      variant_field_ self;
-      V visitor;
-
-      template<typename X>
-      void operator()(const X& value) const
-      {
-        visitor(get_option_name<X>(self), value);
-      }
-    };
-
-    template<typename V>
-    void visit(V visitor) const
-    {
-      apply_visitor(wrap<V>{*this, std::move(visitor)}, get_value());
-    }
-  };
-
-  //! Links variant `value` to a unique name per type in `opts`. Use `std::ref` for `value` if de-serializing.
-  template<typename T, typename... U>
-  constexpr inline variant_field_<T, true, U...> variant_field(const char* name, T value, option<U>... opts)
-  {
-    return {name, std::move(value), std::move(opts)...};
   }
 
 
@@ -260,22 +214,14 @@ namespace wire
   template<typename T, unsigned I>
   inline constexpr bool available(const field_<T, true, I>& elem) noexcept
   {
+    /* The old output engine always skipped fields when it was an empty array,
+       this follows that behavior. See comments for `field_`. */
     return elem.is_required() || (elem.optional_on_empty() && !wire::empty(elem.get_value()));
   }
   template<typename T, unsigned I>
   inline bool available(const field_<T, false, I>& elem)
   {
     return bool(elem.get_value());
-  }
-  template<typename T, typename... U>
-  inline constexpr bool available(const variant_field_<T, true, U...>&) noexcept
-  {
-    return true;
-  }
-  template<typename T, typename... U>
-  inline constexpr bool available(const variant_field_<T, false, U...>& elem)
-  {
-    return elem != nullptr;
   }
 }
 

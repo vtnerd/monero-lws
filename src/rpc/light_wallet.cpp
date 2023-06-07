@@ -28,6 +28,7 @@
 #include "light_wallet.h"
 
 #include <boost/range/adaptor/indexed.hpp>
+#include <boost/range/adaptor/transformed.hpp>
 #include <ctime>
 #include <limits>
 #include <stdexcept>
@@ -44,6 +45,8 @@
 #include "wire/json.h"
 #include "wire/traits.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 namespace
 {
@@ -261,7 +264,7 @@ namespace lws
       WIRE_FIELD_COPY(start_height),
       WIRE_FIELD_COPY(transaction_height),
       WIRE_FIELD_COPY(blockchain_height),
-      wire::field("transactions", wire::as_array(boost::adaptors::index(self.transactions)))
+      wire::field("transactions", wire::array(boost::adaptors::index(self.transactions)))
     );
   }
 
@@ -297,7 +300,7 @@ namespace lws
       WIRE_FIELD_COPY(per_byte_fee),
       WIRE_FIELD_COPY(fee_mask),
       WIRE_FIELD_COPY(amount),
-      wire::field("outputs", wire::as_array(std::cref(self.outputs), expand))
+      wire::field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand)))
     );
   }
 

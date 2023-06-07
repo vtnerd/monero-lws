@@ -146,23 +146,23 @@ namespace
       verify_initial(lest_env, base);
 
       {
-        const expect<epee::byte_slice> bytes = T::to_bytes(base);
-        EXPECT(bytes);
+        epee::byte_slice bytes{};
+        EXPECT(!T::to_bytes(bytes, base));
 
-        const expect<complex> derived = T::template from_bytes<complex>(U{std::string{bytes->begin(), bytes->end()}});
-        EXPECT(derived);
-        verify_initial(lest_env, *derived);
+        complex derived{};
+        EXPECT(!T::template from_bytes<complex>(U{std::string{bytes.begin(), bytes.end()}}, derived));
+        verify_initial(lest_env, derived);
       }
 
       fill(base);
 
       {
-        const expect<epee::byte_slice> bytes = T::to_bytes(base);
-        EXPECT(bytes);
+        epee::byte_slice bytes{};
+        EXPECT(!T::to_bytes(bytes, base));
 
-        const expect<complex> derived = T::template from_bytes<complex>(U{std::string{bytes->begin(), bytes->end()}});
-        EXPECT(derived);
-        verify_filled(lest_env, *derived);
+        complex derived{};
+        EXPECT(!T::template from_bytes<complex>(U{std::string{bytes.begin(), bytes.end()}}, derived));
+        verify_filled(lest_env, derived);
       }
     }
   }
@@ -184,12 +184,15 @@ namespace
   template<typename T, typename U>
   expect<small> round_trip(lest::env& lest_env, std::int64_t value)
   {
-    expect<small> out = small{0};
+    small out{0};
     SETUP("Testing round-trip with " + std::to_string(value))
     {
-      const expect<epee::byte_slice> bytes = T::template to_bytes(big{value});
-      EXPECT(bytes);
-      out = T::template from_bytes<small>(U{std::string{bytes->begin(), bytes->end()}});
+      epee::byte_slice bytes{};
+      EXPECT(!T::template to_bytes(bytes, big{value}));
+      const std::error_code error =
+        T::template from_bytes(U{std::string{bytes.begin(), bytes.end()}}, out);
+      if (error)
+        return error;
     }
     return out;
   }
@@ -236,12 +239,12 @@ namespace
     verify_initial(lest_env, base);
     fill(base);
 
-    const expect<epee::byte_slice> bytes = T::to_bytes(base);
-    EXPECT(bytes);
+    epee::byte_slice bytes{};
+    EXPECT(!T::to_bytes(bytes, base));
 
-    const expect<simple> derived = T::template from_bytes<simple>(U{std::string{bytes->begin(), bytes->end()}});
-    EXPECT(derived);
-    EXPECT(derived->choice);
+    simple derived{};
+    EXPECT(!T::template from_bytes<simple>(U{std::string{bytes.begin(), bytes.end()}}, derived));
+    EXPECT(derived.choice);
   }
 }
 

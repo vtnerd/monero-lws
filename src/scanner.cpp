@@ -158,9 +158,15 @@ namespace lws
       if (uri.empty())
         uri = "/";
 
+      epee::byte_slice bytes{};
       const std::string& url = event.value.second.url;
-      const epee::byte_slice bytes = wire::json::to_bytes(event);
+      const std::error_code json_error = wire::json::to_bytes(bytes, event);
       const net::http::http_response_info* info = nullptr;
+      if (json_error)
+      {
+        MERROR("Failed to generate webhook JSON: " << json_error.message());
+        return;
+      }
 
       MINFO("Sending webhook to " << url);
       if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
@@ -460,7 +466,12 @@ namespace lws
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
 
-          auto fetched = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_blocks_fast>::response>(std::move(*resp)));
+          rpc::json<rpc::get_blocks_fast>::response fetched{};
+          {
+            const std::error_code error = wire::json::from_bytes(std::move(*resp), fetched);
+            if (error)
+              throw std::system_error{error};
+          }
           if (fetched.result.blocks.empty())
             throw std::runtime_error{"Daemon unexpectedly returned zero blocks"};
 

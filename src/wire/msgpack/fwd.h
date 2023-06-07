@@ -40,6 +40,7 @@ namespace wire
 {
   struct msgpack;
   class msgpack_reader;
+  class msgpack_slice_writer;
   class msgpack_writer;
 }
 

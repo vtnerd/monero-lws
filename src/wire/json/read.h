@@ -107,28 +107,4 @@ namespace wire
         \return True if another value to read. */
     bool key(epee::span<const key_map> map, std::size_t&, std::size_t& index) override final;
   };
-
-
-  // Don't call `read` directly in this namespace, do it from `wire_read`.
-
-  template<typename T>
-  expect<T> json::from_bytes(std::string&& bytes)
-  {
-    json_reader source{std::move(bytes)};
-    return wire_read::to<T>(source);
-  }
-
-  // specialization prevents type "downgrading" to base type in cpp files
-
-  template<typename T>
-  inline void array(json_reader& source, T& dest)
-  {
-    wire_read::array(source, dest);
-  }
-
-  template<typename... T>
-  inline void object(json_reader& source, T... fields)
-  {
-    wire_read::object(source, wire_read::tracker<T>{std::move(fields)}...);
-  }
 } // wire

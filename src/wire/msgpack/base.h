@@ -36,13 +36,15 @@
 #include "byte_slice.h"
 #include "common/expect.h"
 #include "wire/msgpack/fwd.h"
+#include "wire/read.h"
+#include "wire/write.h"
 
 namespace wire
 {
   struct msgpack
   {
     using input_type = msgpack_reader;
-    using output_type = msgpack_writer;
+    using output_type = msgpack_slice_writer;
 
     //! Tags that do not require bitmask to identify
     enum class tag : std::uint8_t
@@ -162,12 +164,18 @@ namespace wire
     using object16 = type<std::uint16_t, tag::object16>;
     using object32 = type<std::uint32_t, tag::object32>;
     using object_types = std::tuple<object16, object32>;
-
+    
     template<typename T>
-    static expect<T> from_bytes(epee::byte_slice&& source);
+    static std::error_code from_bytes(epee::byte_slice&& source, T& dest)
+    {
+      return wire_read::from_bytes<input_type>(std::move(source), dest);
+    }
 
-    template<typename T>
-    static epee::byte_slice to_bytes(const T& source);
+    template<typename T, typename U>
+    static std::error_code to_bytes(T& dest, const U& source)
+    {
+      return wire_write::to_bytes<output_type>(dest, source);
+    }
   };
 }
 

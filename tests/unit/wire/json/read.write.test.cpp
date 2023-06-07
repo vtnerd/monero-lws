@@ -47,16 +47,15 @@ namespace
   {
     SETUP("Basic values with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
-      const auto result =
-        wire::json::from_bytes<basic_object<T>>(std::string{basic_json});
-      EXPECT(result);
-      EXPECT(result->utf8 == basic_string);
+      basic_object<T> result{};
+      EXPECT(!wire::json::from_bytes(std::string{basic_json}, result));
+      EXPECT(result.utf8 == basic_string);
       {
         const std::vector<T> expected{0, 127};
-        EXPECT(result->vec == expected);
+        EXPECT(result.vec == expected);
       }
-      EXPECT(result->data == lws_test::blob_test1);
-      EXPECT(result->choice);
+      EXPECT(result.data == lws_test::blob_test1);
+      EXPECT(result.choice);
     }
   }
 
@@ -66,7 +65,8 @@ namespace
     SETUP("Basic values with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
       const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, true};
-      const auto result = wire::json::to_bytes(val);
+      epee::byte_slice result{};
+      EXPECT(!wire::json::to_bytes(result, val));
       EXPECT(boost::range::equal(result, std::string{basic_json}));
     }
   }
@@ -91,9 +91,11 @@ LWS_CASE("wire::json_reader")
     i64_limit::max() <= std::numeric_limits<std::uintmax_t>::max(),
     "expected int64_t::max <= uintmax_t::max"
   );
+  std::uint64_t one = 0;
+  std::int64_t two = 0;
   std::string big_number = std::to_string(std::uintmax_t(i64_limit::max()) + 1);
-  EXPECT(wire::json::from_bytes<std::uint64_t>(negative_number) == wire::error::schema::larger_integer);
-  EXPECT(wire::json::from_bytes<std::int64_t>(std::move(big_number)) == wire::error::schema::smaller_integer);
+  EXPECT(wire::json::from_bytes(negative_number, one) == wire::error::schema::larger_integer);
+  EXPECT(wire::json::from_bytes(std::move(big_number), two) == wire::error::schema::smaller_integer);
 }
 
 LWS_CASE("wire::json_writer")

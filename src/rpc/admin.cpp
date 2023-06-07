@@ -27,6 +27,7 @@
 
 #include "admin.h"
 
+#include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/iterator_range.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <functional>
@@ -41,6 +42,8 @@
 #include "wire/traits.h"
 #include "wire/uuid.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 namespace wire
 {
@@ -94,7 +97,7 @@ namespace
   void write_bytes(wire::json_writer& dest, const truncated<boost::iterator_range<lmdb::value_iterator<V>>> self)
   {
     const auto truncate = [] (V src) { return truncated<V>{std::move(src)}; };
-    wire::array(dest, std::move(self.value), truncate);
+    wire_write::bytes(dest, wire::array(boost::adaptors::transform(std::move(self.value), truncate)));
   }
 
   template<typename K, typename V, typename C>
@@ -127,7 +130,10 @@ namespace
   void write_addresses(wire::writer& dest, epee::span<const lws::db::account_address> self)
   {
     // writes an array of monero base58 address strings
-    wire::object(dest, wire::field("updated", wire::as_array(self, lws::db::address_string)));
+
+    wire::object(dest,
+      wire::field("updated", wire::array(boost::adaptors::transform(self, lws::db::address_string)))
+    );
   }
 
   expect<void> write_addresses(wire::writer& dest, const expect<std::vector<lws::db::account_address>>& self)
