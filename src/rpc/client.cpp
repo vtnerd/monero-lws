@@ -53,7 +53,7 @@ namespace rpc
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const int daemon_zmq_linger = 0;
     constexpr const std::chrono::seconds chain_poll_timeout{20};
-    constexpr const std::chrono::minutes chain_sub_timeout{2};
+    constexpr const std::chrono::minutes chain_sub_timeout{4};
 
     struct terminate
     {
