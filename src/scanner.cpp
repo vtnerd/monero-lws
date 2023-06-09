@@ -517,9 +517,9 @@ namespace lws
     void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, rpc::client& client, const net::ssl_verification_t verify_mode)
     {
       // uint64::max is for txpool
-      static const std::vector<std::uint64_t> fake_outs{
+      static const std::vector<std::uint64_t> fake_outs(
         256, std::numeric_limits<std::uint64_t>::max()
-      };
+      );
 
       const auto parsed = rpc::full_txpool_pub::from_json(std::move(txpool_msg));
       if (!parsed)
