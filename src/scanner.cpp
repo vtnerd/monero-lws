@@ -52,7 +52,8 @@
 #include "misc_log_ex.h"             // monero/contrib/epee/include
 #include "net/http_client.h"
 #include "net/net_parse_helpers.h"
-#include "rpc/daemon_messages.h"     // monero/src
+#include "rpc/daemon_messages.h"      // monero/src
+#include "rpc/message_data_structs.h" // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
 #include "util/source_location.h"
@@ -269,9 +270,17 @@ namespace lws
     struct send_webhook
     {
       db::storage const& disk_;
+      rpc::client& client_;
       net::ssl_verification_t verify_mode_;
-      bool operator()(lws::account& user, const db::output& out) const
+      std::unordered_map<crypto::hash, crypto::hash> txpool_;
+
+      bool operator()(lws::account& user, const db::output& out)
       {
+        /* Upstream monerod does not send all fields for a transaction, so
+           mempool notifications cannot compute tx_hash correctly (it is not
+           sent separately, a further blunder). Instead, if there are matching
+           outputs with webhooks, fetch mempool to compare tx_prefix_hash and
+           then use corresponding tx_hash. */
         const db::webhook_key key{user.id(), db::webhook_type::tx_confirmation};
         std::vector<db::webhook_value> hooks{};
         {
@@ -290,11 +299,37 @@ namespace lws
           hooks = std::move(*found);
         }
 
+        if (!hooks.empty() && txpool_.empty())
+        {
+          cryptonote::rpc::GetTransactionPool::Request req{};
+          if (!send(client_, rpc::client::make_message("get_transaction_pool", req)))
+          {
+            MERROR("Unable to compute tx hash for webhook, aborting");
+            return false;
+          }
+          auto resp = client_.get_message(std::chrono::seconds{3});
+          if (!resp)
+          {
+            MERROR("Unable to get txpool: " << resp.error().message());
+            return false;
+          }
+
+          auto txpool = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_transaction_pool>::response>(std::move(*resp)));
+          for (auto& tx : txpool.result.transactions)
+            txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
+        }
+
         std::vector<db::webhook_tx_confirmation> events{};
         for (auto& hook : hooks)
         {
           events.push_back(db::webhook_tx_confirmation{key, std::move(hook), out});
           events.back().value.second.confirmations = 0;
+
+          const auto hash = txpool_.find(out.tx_prefix_hash);
+          if (hash != txpool_.end())
+            events.back().tx_info.link.tx_hash = hash->second;
+          else
+            events.pop_back(); //cannot compute tx_hash
         }
         send_via_http(epee::to_span(events), std::chrono::seconds{5}, verify_mode_);
         return true;
@@ -479,7 +514,7 @@ namespace lws
       scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, add_spend{}, add_output{});
     }
 
-    void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, const net::ssl_verification_t verify_mode)
+    void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, rpc::client& client, const net::ssl_verification_t verify_mode)
     {
       // uint64::max is for txpool
       static const std::vector<std::uint64_t> fake_outs{
@@ -496,10 +531,11 @@ namespace lws
       const auto time =
         boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
+      send_webhook sender{disk, client, verify_mode};
       for (const auto& tx : parsed->txes)
       {
         const crypto::hash hash = cryptonote::get_transaction_hash(tx);
-        scan_transaction_base(users, db::block_id::txpool, time, hash, tx, fake_outs, null_spend{}, send_webhook{disk, verify_mode});
+        scan_transaction_base(users, db::block_id::txpool, time, hash, tx, fake_outs, null_spend{}, sender);
       }
     }
 
@@ -606,7 +642,7 @@ namespace lws
               {
                 if (message->first != rpc::client::topic::txpool)
                   break; // inner for loop
-                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, webhook_verify);
+                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, webhook_verify);
               }
 
               for ( ; message != new_pubs->end(); ++message)

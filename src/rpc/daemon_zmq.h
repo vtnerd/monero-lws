@@ -46,6 +46,7 @@ namespace cryptonote
   namespace rpc
   {
     struct block_with_transactions;
+    struct tx_in_pool;
   }
 }
 
@@ -74,5 +75,21 @@ namespace rpc
     using response = get_blocks_fast_response;
   };
   void read_bytes(wire::json_reader&, get_blocks_fast_response&);
+
+  struct get_transaction_pool_request
+  {
+    get_transaction_pool_request() = delete;
+  };
+  struct get_transaction_pool_response
+  {
+    get_transaction_pool_response() = delete;
+    std::vector<cryptonote::rpc::tx_in_pool> transactions;
+  };
+  struct get_transaction_pool
+  {
+    using request = get_transaction_pool_request;
+    using response = get_transaction_pool_response;
+  };
+  void read_bytes(wire::json_reader&, get_transaction_pool_response&);
 } // rpc
 } // lws
