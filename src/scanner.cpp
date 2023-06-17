@@ -533,10 +533,7 @@ namespace lws
 
       send_webhook sender{disk, client, verify_mode};
       for (const auto& tx : parsed->txes)
-      {
-        const crypto::hash hash = cryptonote::get_transaction_hash(tx);
-        scan_transaction_base(users, db::block_id::txpool, time, hash, tx, fake_outs, null_spend{}, sender);
-      }
+        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, null_spend{}, sender);
     }
 
     void update_rates(rpc::context& ctx)
