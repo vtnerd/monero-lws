@@ -93,7 +93,11 @@ namespace rpc
 
   expect<full_txpool_pub> full_txpool_pub::from_json(std::string&& source)
   {
-    return wire::json::from_bytes<full_txpool_pub>(std::move(source));
+    full_txpool_pub out{};
+    std::error_code err = wire::json::from_bytes(std::move(source), out);
+    if (err)
+      return err;
+    return {std::move(out)};
   }
 
   static void read_bytes(wire::json_reader& source, full_txpool_pub& self)

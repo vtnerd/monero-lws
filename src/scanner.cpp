@@ -314,7 +314,10 @@ namespace lws
             return false;
           }
 
-          auto txpool = MONERO_UNWRAP(wire::json::from_bytes<rpc::json<rpc::get_transaction_pool>::response>(std::move(*resp)));
+          rpc::json<rpc::get_transaction_pool>::response txpool{};
+          const std::error_code err = wire::json::from_bytes(std::move(*resp), txpool);
+          if (err)
+            MONERO_THROW(err, "Invalid json-rpc");
           for (auto& tx : txpool.result.transactions)
             txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
         }
