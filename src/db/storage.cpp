@@ -27,6 +27,7 @@
 #include "storage.h"
 
 #include <boost/container/static_vector.hpp>
+#include <boost/core/demangle.hpp>
 #include <boost/range/adaptor/reversed.hpp>
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/counting_range.hpp>
@@ -66,6 +67,43 @@ namespace lws
 {
 namespace db
 {
+  namespace v0
+  {
+    //! Orignal DB value, with no txn fee
+    struct output
+    {
+      transaction_link link;        //! Orders and links `output` to `spend`s.
+
+      //! Data that a linked `spend` needs in some REST endpoints.
+      struct spend_meta_
+      {
+        output_id id;             //!< Unique id for output within monero
+        // `link` and `id` must be in this order for LMDB optimizations
+        std::uint64_t amount;
+        std::uint32_t mixin_count;//!< Ring-size of TX
+        std::uint32_t index;      //!< Offset within a tx
+        crypto::public_key tx_public;
+      } spend_meta;
+
+      std::uint64_t timestamp;
+      std::uint64_t unlock_time; //!< Not always a timestamp; mirrors chain value.
+      crypto::hash tx_prefix_hash;
+      crypto::public_key pub;    //!< One-time spendable public key.
+      rct::key ringct_mask;      //!< Unencrypted CT mask
+      char reserved[7];
+      extra_and_length extra;    //!< Extra info + length of payment id
+      union payment_id_
+      {
+        crypto::hash8 short_;  //!< Decrypted short payment id
+        crypto::hash long_;    //!< Long version of payment id (always decrypted)
+      } payment_id;
+    };
+    static_assert(
+      sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32,
+      "padding in output"
+    );
+  }
+
   namespace
   {
     //! Used for finding `account` instances by other indexes.
@@ -196,8 +234,11 @@ namespace db
     constexpr const lmdb::basic_table<block_id, account_lookup> accounts_by_height(
       "accounts_by_height,id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(account_lookup, id)
     );
+    constexpr const lmdb::basic_table<account_id, v0::output> outputs_v0{
+      "outputs_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
+    };
     constexpr const lmdb::basic_table<account_id, output> outputs{
-      "outputs_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
+      "outputs_v1_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
     };
     constexpr const lmdb::basic_table<account_id, spend> spends{
       "spends_by_account_id,block_id,tx_hash,image", (MDB_CREATE | MDB_DUPSORT), &spend_compare
@@ -252,6 +293,46 @@ namespace db
         values.remove_prefix(value_bytes[1].mv_size + (err == MDB_KEYEXIST ? 1 : 0));
       }
       return success();
+    }
+
+    //! Convert table to new format, then delete old table
+    template<typename X, typename Y>
+    expect<void> convert_table(MDB_txn& txn, MDB_dbi old, MDB_dbi current)
+    {
+      MINFO("DB update: " + boost::core::demangle(typeid(X).name()) + " to " + boost::core::demangle(typeid(Y).name()));
+
+      cursor::outputs old_cur;
+      cursor::outputs current_cur;
+      MONERO_CHECK(check_cursor(txn, old, old_cur));
+      MONERO_CHECK(check_cursor(txn, current, current_cur));
+
+      MDB_val key{};
+      MDB_val value{};
+      int err = mdb_cursor_get(old_cur.get(), &key, &value, MDB_FIRST);
+      for (;;)
+      {
+        if (err)
+        {
+          if (err == MDB_NOTFOUND)
+          {
+            // Remove old table entirely
+            MONERO_LMDB_CHECK(mdb_drop(&txn, old, 1));
+            return success();
+          }
+          return {lmdb::error(err)};
+        }
+
+        static_assert(sizeof(Y) >= sizeof(X), "unexpected sizeof");
+        if (sizeof(X) != value.mv_size)
+          return {lmdb::error(MDB_CORRUPTED)};
+
+        Y transition{};
+        std::memcpy(std::addressof(transition), value.mv_data, value.mv_size);
+
+        value = lmdb::to_val(transition);
+        MONERO_LMDB_CHECK(mdb_cursor_put(current_cur.get(), &key, &value, 0));
+        err = mdb_cursor_get(old_cur.get(), &key, &value, MDB_NEXT);
+      }
     }
 
     //! \return a single instance of compiled-in checkpoints for lws
@@ -486,6 +567,12 @@ namespace db
       tables.requests    = requests.open(*txn).value();
       tables.webhooks    = webhooks.open(*txn).value();
       tables.events      = events_by_account_id.open(*txn).value();
+
+      const auto v0_outputs = outputs_v0.open(*txn);
+      if (v0_outputs)
+        MONERO_UNWRAP(convert_table<v0::output, output>(*txn, *v0_outputs, tables.outputs));
+      else if (v0_outputs != lmdb::error(MDB_NOTFOUND))
+        MONERO_THROW(v0_outputs.error(), "Error opening old outputs table");
 
       check_blockchain(*txn, tables.blocks);
 
