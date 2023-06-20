@@ -139,7 +139,8 @@ namespace db
       wire::optional_field<9>("payment_id", payment_id),
       wire::field<10>("unlock_time", self.unlock_time),
       wire::field<11>("mixin_count", self.spend_meta.mixin_count),
-      wire::field<12>("coinbase", coinbase)
+      wire::field<12>("coinbase", coinbase),
+      wire::field<13>("fee", self.fee)
     );
   }
 
