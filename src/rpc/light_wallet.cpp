@@ -245,6 +245,7 @@ namespace lws
         wire::field("timestamp", iso_timestamp(self.value().info.timestamp)),
         wire::field("total_received", safe_uint64(self.value().info.spend_meta.amount)),
         wire::field("total_sent", safe_uint64(self.value().spent)),
+        wire::field("fee", safe_uint64(self.value().info.fee)),
         wire::field("unlock_time", self.value().info.unlock_time),
         wire::field("height", self.value().info.link.height),
         wire::optional_field("payment_id", payment_id),
