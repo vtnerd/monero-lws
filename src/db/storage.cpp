@@ -749,6 +749,42 @@ namespace db
     return requests.get_value<request_info>(value);
   }
 
+  expect<std::vector<webhook_value>>
+  storage_reader::find_webhook(webhook_key const& key, crypto::hash8 const& payment_id, cursor::webhooks cur)
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+    MONERO_CHECK(check_cursor(*txn, db->tables.webhooks, cur));
+
+    webhook_dupsort dup{};
+
+    static_assert(sizeof(dup.payment_id) == sizeof(payment_id), "bad memcpy");
+    std::memcpy(std::addressof(dup.payment_id), std::addressof(payment_id), sizeof(payment_id));
+
+    MDB_val lkey = lmdb::to_val(key);
+    MDB_val lvalue = lmdb::to_val(dup);
+
+    std::vector<webhook_value> result{};
+    int err = mdb_cursor_get(cur.get(), &lkey, &lvalue, MDB_GET_BOTH_RANGE);
+    for (;;)
+    {
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          break;
+        return {lmdb::error(err)};
+      }
+
+      if (webhooks.get_fixed_value<MONERO_FIELD(webhook_dupsort, payment_id)>(lvalue) != dup.payment_id)
+        break;
+
+      result.push_back(MONERO_UNWRAP(webhooks.get_value(lvalue)));
+      err = mdb_cursor_get(cur.get(), &lkey, &lvalue, MDB_NEXT_DUP);
+    }
+
+    return result;
+  }
+
   expect<std::vector<std::pair<webhook_key, std::vector<webhook_value>>>>
   storage_reader::get_webhooks(cursor::webhooks cur)
   {

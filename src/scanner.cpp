@@ -35,6 +35,8 @@
 #include <cassert>
 #include <chrono>
 #include <cstring>
+#include <functional>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -50,7 +52,8 @@
 #include "misc_log_ex.h"             // monero/contrib/epee/include
 #include "net/http_client.h"
 #include "net/net_parse_helpers.h"
-#include "rpc/daemon_messages.h"     // monero/src
+#include "rpc/daemon_messages.h"      // monero/src
+#include "rpc/message_data_structs.h" // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
 #include "util/source_location.h"
@@ -119,9 +122,16 @@ namespace lws
       }
     }
 
-    bool is_new_block(db::storage& disk, const account& user, const rpc::minimal_chain_pub& chain)
+    bool is_new_block(std::string&& chain_msg, db::storage& disk, const account& user)
     {
-      if (user.scan_height() < db::block_id(chain.top_block_height))
+      const auto chain = rpc::minimal_chain_pub::from_json(std::move(chain_msg));
+      if (!chain)
+      {
+        MERROR("Unable to parse blockchain notification: " << chain.error());
+        return false;
+      }
+
+      if (user.scan_height() < db::block_id(chain->top_block_height))
         return true;
 
       auto reader = disk.start_read();
@@ -132,8 +142,8 @@ namespace lws
       }
 
       // check possible chain rollback daemon side
-      const expect<crypto::hash> id = reader->get_block_hash(db::block_id(chain.top_block_height));
-      if (!id || *id != chain.top_block_id)
+      const expect<crypto::hash> id = reader->get_block_hash(db::block_id(chain->top_block_height));
+      if (!id || *id != chain->top_block_id)
         return true;
 
       // check possible chain rollback from other thread
@@ -241,13 +251,103 @@ namespace lws
       }
     };
 
-    void scan_transaction(
+    struct add_spend
+    {
+      void operator()(lws::account& user, const db::spend& spend) const
+      { user.add_spend(spend); }
+    };
+    struct add_output
+    {
+      bool operator()(lws::account& user, const db::output& out) const
+      { return user.add_out(out); }
+    };
+
+    struct null_spend
+    {
+      void operator()(lws::account&, const db::spend&) const noexcept
+      {}
+    };
+    struct send_webhook
+    {
+      db::storage const& disk_;
+      rpc::client& client_;
+      net::ssl_verification_t verify_mode_;
+      std::unordered_map<crypto::hash, crypto::hash> txpool_;
+
+      bool operator()(lws::account& user, const db::output& out)
+      {
+        /* Upstream monerod does not send all fields for a transaction, so
+           mempool notifications cannot compute tx_hash correctly (it is not
+           sent separately, a further blunder). Instead, if there are matching
+           outputs with webhooks, fetch mempool to compare tx_prefix_hash and
+           then use corresponding tx_hash. */
+        const db::webhook_key key{user.id(), db::webhook_type::tx_confirmation};
+        std::vector<db::webhook_value> hooks{};
+        {
+          auto reader = disk_.start_read();
+          if (!reader)
+          {
+            MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
+            return false;
+          }
+          auto found = reader->find_webhook(key, out.payment_id.short_);
+          if (!found)
+          {
+            MERROR("Failed db lookup for webhooks: " << found.error().message());
+            return false;
+          }
+          hooks = std::move(*found);
+        }
+
+        if (!hooks.empty() && txpool_.empty())
+        {
+          cryptonote::rpc::GetTransactionPool::Request req{};
+          if (!send(client_, rpc::client::make_message("get_transaction_pool", req)))
+          {
+            MERROR("Unable to compute tx hash for webhook, aborting");
+            return false;
+          }
+          auto resp = client_.get_message(std::chrono::seconds{3});
+          if (!resp)
+          {
+            MERROR("Unable to get txpool: " << resp.error().message());
+            return false;
+          }
+
+          rpc::json<rpc::get_transaction_pool>::response txpool{};
+          const std::error_code err = wire::json::from_bytes(std::move(*resp), txpool);
+          if (err)
+            MONERO_THROW(err, "Invalid json-rpc");
+          for (auto& tx : txpool.result.transactions)
+            txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
+        }
+
+        std::vector<db::webhook_tx_confirmation> events{};
+        for (auto& hook : hooks)
+        {
+          events.push_back(db::webhook_tx_confirmation{key, std::move(hook), out});
+          events.back().value.second.confirmations = 0;
+
+          const auto hash = txpool_.find(out.tx_prefix_hash);
+          if (hash != txpool_.end())
+            events.back().tx_info.link.tx_hash = hash->second;
+          else
+            events.pop_back(); //cannot compute tx_hash
+        }
+        send_via_http(epee::to_span(events), std::chrono::seconds{5}, verify_mode_);
+        return true;
+      }
+    };
+
+    void scan_transaction_base(
       epee::span<lws::account> users,
       const db::block_id height,
       const std::uint64_t timestamp,
       crypto::hash const& tx_hash,
       cryptonote::transaction const& tx,
-      std::vector<std::uint64_t> const& out_ids)
+      std::vector<std::uint64_t> const& out_ids,
+      std::function<void(lws::account&, const db::spend&)> spend_action,
+      std::function<bool(lws::account&, const db::output&)> output_action)
     {
       if (2 < tx.version)
         throw std::runtime_error{"Unsupported tx version"};
@@ -302,7 +402,8 @@ namespace lws
               goffset += offset;
               if (user.has_spendable(db::output_id{in_data->amount, goffset}))
               {
-                user.add_spend(
+                spend_action(
+                  user,
                   db::spend{
                     db::transaction_link{height, tx_hash},
                     in_data->k_image,
@@ -377,7 +478,8 @@ namespace lws
             }
           }
 
-          const bool added = user.add_out(
+          const bool added = output_action(
+            user,
             db::output{
               db::transaction_link{height, tx_hash},
               db::output::spend_meta_{
@@ -403,6 +505,39 @@ namespace lws
             MWARNING("Output not added, duplicate public key encountered");
         } // for all tx outs
       } // for all users
+    }
+
+    void scan_transaction(
+      epee::span<lws::account> users,
+      const db::block_id height,
+      const std::uint64_t timestamp,
+      crypto::hash const& tx_hash,
+      cryptonote::transaction const& tx,
+      std::vector<std::uint64_t> const& out_ids)
+    {
+      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, add_spend{}, add_output{});
+    }
+
+    void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, rpc::client& client, const net::ssl_verification_t verify_mode)
+    {
+      // uint64::max is for txpool
+      static const std::vector<std::uint64_t> fake_outs(
+        256, std::numeric_limits<std::uint64_t>::max()
+      );
+
+      const auto parsed = rpc::full_txpool_pub::from_json(std::move(txpool_msg));
+      if (!parsed)
+      {
+        MERROR("Failed parsing txpool pub: " << parsed.error().message());
+        return;
+      }
+
+      const auto time =
+        boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+
+      send_webhook sender{disk, client, verify_mode};
+      for (const auto& tx : parsed->txes)
+        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, null_spend{}, sender);
     }
 
     void update_rates(rpc::context& ctx)
@@ -489,20 +624,40 @@ namespace lws
           if (fetched.result.blocks.size() <= 1)
           {
             // synced to top of chain, wait for next blocks
-            for (;;)
+            for (bool wait_for_block = true; wait_for_block; )
             {
-              const expect<rpc::minimal_chain_pub> new_block = client.wait_for_block();
-              if (new_block.matches(std::errc::interrupted))
-                return;
-              if (!new_block || is_new_block(disk, users.front(), *new_block))
-                break;
-            }
+              expect<std::vector<std::pair<rpc::client::topic, std::string>>> new_pubs = client.wait_for_block();
+              if (new_pubs.matches(std::errc::interrupted))
+                return; // reset entire state (maybe shutdown)
+
+              if (!new_pubs)
+                break; // exit wait for block loop, and try fetching new blocks
+
+              // put txpool messages before block messages
+              static_assert(rpc::client::topic::block < rpc::client::topic::txpool, "bad sort");
+              std::sort(new_pubs->begin(), new_pubs->end(), std::greater<>{});
+
+              // process txpool first
+              auto message = new_pubs->begin();
+              for ( ; message != new_pubs->end(); ++message)
+              {
+                if (message->first != rpc::client::topic::txpool)
+                  break; // inner for loop
+                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, webhook_verify);
+              }
+
+              for ( ; message != new_pubs->end(); ++message)
+              {
+                if (message->first == rpc::client::topic::block && is_new_block(std::move(message->second), disk, users.front()))
+                  wait_for_block = false;
+              }
+            } // wait for block
 
             // request next chunk of blocks
             if (!send(client, block_request.clone()))
               return;
             continue; // to next get_blocks_fast read
-          }
+          } // if only one block was fetched
 
           // request next chunk of blocks
           if (!send(client, block_request.clone()))

@@ -30,6 +30,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iosfwd>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -63,12 +64,19 @@ namespace db
   WIRE_AS_INTEGER(account_time);
 
   //! References a block height
-  enum class block_id : std::uint64_t {};
+  enum class block_id : std::uint64_t
+  {
+    txpool = std::uint64_t(-1) //! Represents not-yet-a-block
+  };
   WIRE_AS_INTEGER(block_id);
 
   //! References a global output number, as determined by the public chain
   struct output_id
   {
+    //! \return Special ID for outputs not yet in a block.
+    static constexpr output_id txpool() noexcept
+    { return {0, std::numeric_limits<std::uint64_t>::max()}; }
+
     std::uint64_t high; //!< Amount on public chain; rct outputs are `0`
     std::uint64_t low;  //!< Offset within `amount` on the public chain
   };

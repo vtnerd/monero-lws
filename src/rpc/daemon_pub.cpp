@@ -27,6 +27,8 @@
 
 #include "daemon_pub.h"
 
+#include "cryptonote_basic/cryptonote_basic.h" // monero/src
+#include "rpc/daemon_zmq.h"
 #include "wire/crypto.h"
 #include "wire/error.h"
 #include "wire/field.h"
@@ -78,6 +80,20 @@ namespace rpc
   expect<minimal_chain_pub> minimal_chain_pub::from_json(std::string&& source)
   {
     minimal_chain_pub out{};
+    std::error_code err = wire::json::from_bytes(std::move(source), out);
+    if (err)
+      return err;
+    return {std::move(out)};
+  }
+
+  static void read_bytes(wire::json_reader& source, full_txpool_pub& self)
+  {
+    wire_read::array(source, self.txes);
+  }
+
+  expect<full_txpool_pub> full_txpool_pub::from_json(std::string&& source)
+  {
+    full_txpool_pub out{};
     std::error_code err = wire::json::from_bytes(std::move(source), out);
     if (err)
       return err;

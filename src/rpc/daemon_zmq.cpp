@@ -42,6 +42,7 @@ namespace
   constexpr const std::size_t default_inputs = 2;
   constexpr const std::size_t default_outputs = 4;
   constexpr const std::size_t default_txextra_size = 2048;
+  constexpr const std::size_t default_txpool_size = 32;
 }
 
 namespace rct
@@ -141,7 +142,7 @@ namespace cryptonote
     );
   }
 
-  static void read_bytes(wire::json_reader& source, transaction& self)
+  void read_bytes(wire::json_reader& source, transaction& self)
   {
     self.vin.reserve(default_inputs);
     self.vout.reserve(default_outputs);
@@ -177,6 +178,11 @@ namespace cryptonote
       self.transactions.reserve(default_transaction_count);
       wire::object(source, WIRE_FIELD(block), WIRE_FIELD(transactions));
     }
+
+    static void read_bytes(wire::json_reader& source, tx_in_pool& self)
+    {
+      wire::object(source, WIRE_FIELD(tx), WIRE_FIELD(tx_hash));
+    }
   } // rpc
 } // cryptonote
 
@@ -187,3 +193,8 @@ void lws::rpc::read_bytes(wire::json_reader& source, get_blocks_fast_response& s
   wire::object(source, WIRE_FIELD(blocks), WIRE_FIELD(output_indices), WIRE_FIELD(start_height), WIRE_FIELD(current_height));
 }
 
+void lws::rpc::read_bytes(wire::json_reader& source, get_transaction_pool_response& self)
+{
+  self.transactions.reserve(default_txpool_size);
+  wire::object(source, WIRE_FIELD(transactions));
+}

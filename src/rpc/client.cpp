@@ -51,6 +51,7 @@ namespace rpc
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
+    constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
     constexpr const std::chrono::seconds chain_poll_timeout{20};
     constexpr const std::chrono::minutes chain_sub_timeout{2};
@@ -225,10 +226,9 @@ namespace rpc
       if (out.daemon_sub.get() == nullptr)
         return net::zmq::get_error_code();
 
-      option = 1; // keep only last pub message from daemon
       MONERO_ZMQ_CHECK(zmq_connect(out.daemon_sub.get(), out.ctx->sub_addr.c_str()));
-      MONERO_ZMQ_CHECK(zmq_setsockopt(out.daemon_sub.get(), ZMQ_CONFLATE, &option, sizeof(option)));
       MONERO_CHECK(do_subscribe(out.daemon_sub.get(), minimal_chain_topic));
+      MONERO_CHECK(do_subscribe(out.daemon_sub.get(), full_txpool_topic));
     }
 
     out.signal_sub.reset(zmq_socket(out.ctx->comm.get(), ZMQ_SUB));
@@ -250,7 +250,7 @@ namespace rpc
     return do_subscribe(signal_sub.get(), abort_scan_signal);
   }
 
-  expect<minimal_chain_pub> client::wait_for_block()
+  expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(daemon != nullptr);
@@ -271,14 +271,45 @@ namespace rpc
         return ready.error();
       }
     }
-    expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
-    if (!pub)
-      return pub.error();
 
-    if (!boost::string_ref{*pub}.starts_with(minimal_chain_topic))
-      return {lws::error::bad_daemon_response};
-    pub->erase(0, sizeof(minimal_chain_topic));
-    return minimal_chain_pub::from_json(std::move(*pub));
+    std::vector<std::pair<topic, std::string>> messages{};
+    for (; /*every message */ ;)
+    {
+      expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+      if (!pub)
+      {
+        if (pub == net::zmq::make_error_code(EAGAIN))
+          return {std::move(messages)};
+      	return pub.error();
+      }
+      if (pub->size() < 5)
+        break; // for loop
+
+      switch (pub->at(5))
+      {
+        case 'm': // json-minimal-chain_main
+          if (boost::string_ref{*pub}.starts_with(minimal_chain_topic))
+          {
+            pub->erase(0, sizeof(minimal_chain_topic));
+            messages.emplace_back(topic::block, std::move(*pub));
+          }
+          else
+            MWARNING("Unexpected pub/sub message");
+          break;
+        case 'f': // json-full-txpool_add
+          if (boost::string_ref{*pub}.starts_with(full_txpool_topic))
+          {
+            pub->erase(0, sizeof(full_txpool_topic));
+            messages.emplace_back(topic::txpool, std::move(*pub));
+          }
+          else
+            MWARNING("Unexpected pub/sub message");
+          break;
+        default:
+          break;
+      }
+    } // for every message
+    return {lws::error::bad_daemon_response};
   }
 
   expect<void> client::send(epee::byte_slice message, std::chrono::seconds timeout) noexcept

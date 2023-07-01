@@ -75,6 +75,12 @@ namespace rpc
     expect<void> get_response(cryptonote::rpc::Message& response, std::chrono::seconds timeout, source_location loc);
 
   public:
+
+    enum class topic : std::uint8_t
+    {
+      block = 0, txpool
+    };
+
     //! A client with no connection (all send/receive functions fail).
     explicit client() noexcept
       : ctx(), daemon(), daemon_sub(), signal_sub()
@@ -110,7 +116,7 @@ namespace rpc
     expect<void> watch_scan_signals() noexcept;
 
     //! Wait for new block announce or internal timeout.
-    expect<minimal_chain_pub> wait_for_block();
+    expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
 
     //! \return A JSON message for RPC request `M`.
     template<typename M>
