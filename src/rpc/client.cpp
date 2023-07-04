@@ -135,15 +135,17 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, socket signal_pub, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
+      explicit context(zcontext comm, socket signal_pub, socket external_pub, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
+        , external_pub(std::move(external_pub))
         , daemon_addr(std::move(daemon_addr))
         , sub_addr(std::move(sub_addr))
         , rates_conn()
         , cache_time()
         , cache_interval(interval)
         , cached{}
+        , sync_pub()
         , sync_rates()
       {
         if (std::chrono::minutes{0} < cache_interval)
@@ -152,12 +154,14 @@ namespace rpc
 
       zcontext comm;
       socket signal_pub;
+      socket external_pub;
       const std::string daemon_addr;
       const std::string sub_addr;
       http::http_simple_client rates_conn;
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
       rates cached;
+      boost::mutex sync_pub;
       boost::mutex sync_rates;
     };
   } // detail
@@ -242,6 +246,11 @@ namespace rpc
 
   client::~client() noexcept
   {}
+
+  bool client::has_publish() const noexcept
+  {
+    return ctx && ctx->external_pub;
+  }
 
   expect<void> client::watch_scan_signals() noexcept
   {
@@ -330,6 +339,17 @@ namespace rpc
     return success();
   }
 
+  expect<void> client::publish(epee::byte_slice payload)
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(daemon != nullptr);
+    if (ctx->external_pub == nullptr)
+      return success();
+
+    const boost::unique_lock<boost::mutex> guard{ctx->sync_pub};
+    return net::zmq::send(std::move(payload), ctx->external_pub.get(), 0);
+  }
+
   expect<rates> client::get_rates() const
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -343,7 +363,7 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::string sub_addr, std::chrono::minutes rates_interval)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, std::chrono::minutes rates_interval)
   {
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
@@ -355,9 +375,19 @@ namespace rpc
     if (zmq_bind(pub.get(), signal_endpoint) < 0)
       MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
 
+    detail::socket external_pub = nullptr;
+    if (!pub_addr.empty())
+    {
+      external_pub = detail::socket{zmq_socket(comm.get(), ZMQ_PUB)};
+      if (external_pub == nullptr)
+        MONERO_THROW(net::zmq::get_error_code(), "zmq_socket");
+      if (zmq_bind(external_pub.get(), pub_addr.c_str()) < 0)
+        MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
+    }
+
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(daemon_addr), std::move(sub_addr), rates_interval
+        std::move(comm), std::move(pub), std::move(external_pub), std::move(daemon_addr), std::move(sub_addr), rates_interval
       )
     };
   }

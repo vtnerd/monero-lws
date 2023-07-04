@@ -56,6 +56,7 @@ namespace
   {
     const command_line::arg_descriptor<std::string> daemon_rpc;
     const command_line::arg_descriptor<std::string> daemon_sub;
+    const command_line::arg_descriptor<std::string> zmq_pub;
     const command_line::arg_descriptor<std::vector<std::string>> rest_servers;
     const command_line::arg_descriptor<std::vector<std::string>> admin_rest_servers;
     const command_line::arg_descriptor<std::string> rest_ssl_key;
@@ -90,6 +91,7 @@ namespace
       : lws::options()
       , daemon_rpc{"daemon", "<protocol>://<address>:<port> of a monerod ZMQ RPC", get_default_zmq()}
       , daemon_sub{"sub", "tcp://address:port or ipc://path of a monerod ZMQ Pub", ""}
+      , zmq_pub{"zmq-pub", "tcp://address:port or ipc://path of a bind location for ZMQ pub events", ""}
       , rest_servers{"rest-server", "[(https|http)://<address>:]<port>[/<prefix>] for incoming connections, multiple declarations allowed"}
       , admin_rest_servers{"admin-rest-server", "[(https|http])://<address>:]<port>[/<prefix>] for incoming admin connections, multiple declarations allowed"}
       , rest_ssl_key{"rest-ssl-key", "<path> to PEM formatted SSL key for https REST server", ""}
@@ -112,6 +114,7 @@ namespace
       lws::options::prepare(description);
       command_line::add_arg(description, daemon_rpc);
       command_line::add_arg(description, daemon_sub);
+      command_line::add_arg(description, zmq_pub);
       description.add_options()(rest_servers.name, boost::program_options::value<std::vector<std::string>>()->default_value({rest_default}, rest_default), rest_servers.description);
       command_line::add_arg(description, admin_rest_servers);
       command_line::add_arg(description, rest_ssl_key);
@@ -136,6 +139,7 @@ namespace
     lws::rest_server::configuration rest_config;
     std::string daemon_rpc;
     std::string daemon_sub;
+    std::string zmq_pub;
     std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
@@ -189,6 +193,7 @@ namespace
       },
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),
+      command_line::get_arg(args, opts.zmq_pub),
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
@@ -210,7 +215,7 @@ namespace
 
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
-    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), prog.rates_interval);
+    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), prog.rates_interval);
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();

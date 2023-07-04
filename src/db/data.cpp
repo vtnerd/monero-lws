@@ -263,7 +263,7 @@ namespace db
     map_webhook_value(dest, source, payment_id);
   }
 
-  void write_bytes(wire::json_writer& dest, const webhook_tx_confirmation& self)
+  void write_bytes(wire::writer& dest, const webhook_tx_confirmation& self)
   {
     crypto::hash8 payment_id;
     static_assert(sizeof(payment_id) == sizeof(self.value.first.payment_id), "bad memcpy");
