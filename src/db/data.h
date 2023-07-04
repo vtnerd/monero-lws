@@ -299,7 +299,7 @@ namespace db
     webhook_value value;
     output tx_info;
   };
-  void write_bytes(wire::json_writer&, const webhook_tx_confirmation&);
+  void write_bytes(wire::writer&, const webhook_tx_confirmation&);
 
   //! References a specific output that triggered a webhook
   struct webhook_output

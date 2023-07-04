@@ -2192,6 +2192,7 @@ namespace db
 
   expect<void> storage::add_webhook(const webhook_type type, const account_address& address, const webhook_value& event)
   {
+    if (event.second.url != "zmq")
     {
       epee::net_utils::http::url_content url{};
       if (event.second.url.empty() || !epee::net_utils::parse_url(event.second.url, url))

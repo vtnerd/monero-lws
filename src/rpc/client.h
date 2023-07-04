@@ -120,7 +120,7 @@ namespace rpc
       return ctx != nullptr;
     }
 
-    //! True if an external pub/sub was setup
+    //! \return True if an external pub/sub was setup
     bool has_publish() const noexcept;
 
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
@@ -142,6 +142,21 @@ namespace rpc
       `context::raise_abort_process()` is called.
     */
     expect<void> send(epee::byte_slice message, std::chrono::seconds timeout) noexcept;
+
+    //! Publish `payload` to ZMQ external pub socket.
+    expect<void> publish(epee::byte_slice payload);
+
+    //! Publish `data` after `topic` to ZMQ external pub socket.
+    template<typename F, typename T>
+    expect<void> publish(const boost::string_ref topic, const T& data)
+    {
+      epee::byte_stream bytes{};
+      bytes.write(topic.data(), topic.size());
+      const std::error_code err = F::to_bytes(bytes, data);
+      if (err)
+        return err;
+      return publish(epee::byte_slice{std::move(bytes)});
+    }
 
     //! \return Next available RPC message response from server
     expect<std::string> get_message(std::chrono::seconds timeout);
