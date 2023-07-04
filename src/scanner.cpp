@@ -243,6 +243,46 @@ namespace lws
       }
     }
 
+    struct zmq_index
+    {
+      const std::uint64_t index;
+      const epee::span<const db::webhook_tx_confirmation> events;
+    };
+
+    void write_bytes(wire::writer& dest, const zmq_index& self)
+    {
+      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(events));
+    }
+
+    void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
+    {
+      struct zmq_order
+      {
+        std::uint64_t current;
+        boost::mutex sync;
+
+        zmq_order()
+          : current(0), sync()
+        {}
+      };
+
+      static zmq_order ordering{};
+
+      //! \TODO monitor XPUB to cull the serialization
+      if (!events.empty() && client.has_publish())
+      {
+        // make sure the event is queued to zmq in order.
+        const boost::unique_lock<boost::mutex> guard{ordering.sync};
+        const zmq_index index{ordering.current++, events};
+        MINFO("Sending ZMQ/RMQ PUB topics json-full-hooks and msgpack-full-hooks");
+        expect<void> result = success();
+        if (!(result = client.publish<wire::json>("json-full-hooks:", index)))
+          MERROR("Failed to serialize+send json-full-hooks: " << result.error().message());
+        if (!(result = client.publish<wire::msgpack>("msgpack-full-hooks:", index)))
+          MERROR("Failed to serialize+send msgpack-full-hooks: " << result.error().message());
+      }
+    }
+
     struct by_height
     {
       bool operator()(account const& left, account const& right) const noexcept

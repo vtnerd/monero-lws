@@ -59,6 +59,14 @@ namespace rpc
     struct context;
   }
 
+  struct rmq_details
+  {
+    std::string address;
+    std::string credentials;
+    std::string exchange;
+    std::string routing;
+  };
+
   //! Abstraction for ZMQ RPC client. Only `get_rates()` thread-safe; use `clone()`.
   class client
   {
@@ -111,6 +119,9 @@ namespace rpc
     {
       return ctx != nullptr;
     }
+
+    //! True if an external pub/sub was setup
+    bool has_publish() const noexcept;
 
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
     expect<void> watch_scan_signals() noexcept;
@@ -171,10 +182,12 @@ namespace rpc
       \note All errors are exceptions; no recovery can occur.
 
       \param daemon_addr Location of ZMQ enabled `monerod` RPC.
+      \param pub_addr Bind location for publishing ZMQ events.
+      \param rmq_info Required information for RMQ publishing (if enabled)
       \param rates_interval Frequency to retrieve exchange rates. Set value to
         `<= 0` to disable exchange rate retrieval.
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::chrono::minutes rates_interval);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval);
 
     context(context&&) = default;
     context(context const&) = delete;
