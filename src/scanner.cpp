@@ -193,7 +193,7 @@ namespace lws
         return;
       }
 
-      if (info->m_response_code != 200)
+      if (info->m_response_code != 200 && info->m_response_code != 201)
       {
         MERROR("Failed to invoke http request to  " << url << ", wrong response code: " << info->m_response_code);
         return;
@@ -250,12 +250,13 @@ namespace lws
     struct zmq_index
     {
       const std::uint64_t index;
-      const epee::span<const db::webhook_tx_confirmation> events;
+      const boost::string_ref pattern;
+      const epee::span<const db::webhook_tx_confirmation> data;
     };
 
     void write_bytes(wire::writer& dest, const zmq_index& self)
     {
-      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(events));
+      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(pattern), WIRE_FIELD(data));
     }
 
     void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
@@ -277,7 +278,7 @@ namespace lws
       {
         // make sure the event is queued to zmq in order.
         const boost::unique_lock<boost::mutex> guard{ordering.sync};
-        const zmq_index index{ordering.current++, events};
+        const zmq_index index{ordering.current++, "handle-payment-webhook", events};
         MINFO("Sending ZMQ/RMQ PUB topics json-full-hooks and msgpack-full-hooks");
         expect<void> result = success();
         if (!(result = client.publish<wire::json>("json-full-hooks:", index)))

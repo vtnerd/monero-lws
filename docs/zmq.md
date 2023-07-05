@@ -26,7 +26,8 @@ Example of the "raw" output from ZMQ-SUB side:
 ```json
 json-full-hooks:{
   "index": 2,
-  "events": [
+  "pattern": "handle-payment-webhook",
+  "data": [
     {
       "event": "tx-confirmation",
       "payment_id": "4f695d197f2a3c54",
