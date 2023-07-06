@@ -7,24 +7,24 @@ Monero daemon, and ZeroMQ-PUB to notify external applications of payment_id
 ## External "pub" socket
 The bind location of the ZMQ-PUB socket is specified with the `--zmq-pub`
 option. Users are still required to "subscribe" to topics:
-  * `json-full-hooks`: A JSON array of webhook events that have recently
-    triggered (identical output as webhook).
-  * `msgpack-full-hooks`: A msgpack array of webhook events that have recently
-    triggered (identical output as webhook).
+  * `json-full-pyment_hook`: A JSON array of webhook payment events that have
+    recently triggered (identical output as webhook).
+  * `msgpack-full-payment_hook`: A msgpack array of webhook payment events that
+    have recently triggered (identical output as webhook).
 
 
-### `json-full-hooks`/`msgpack-full-hooks`i
+### `json-full-payment_hook`/`msgpack-full-payment_hook`
 These topics receive PUB messages when a webhook ([`webhook_add`](administration.md)),
 event is triggered. If the specified URL is `zmq`, then notifications are only
 done over the ZMQ-PUB socket, otherwise the notification is sent over ZMQ-PUB
 socket AND the specified URL. Invoking `webhook_add` with a `payment_id` of
 zeroes (the field is optional in `webhook_add), will match on all transactions
-that lack a payment_id`.
+that lack a `payment_id`.
 
 Example of the "raw" output from ZMQ-SUB side:
 
 ```json
-json-full-hooks:{
+json-full-payment_hook:{
   "index": 2,
   "event": {
     "event": "tx-confirmation",
@@ -55,7 +55,7 @@ json-full-hooks:{
 
 ```
 
-Notice the `json-full-hooks:` prefix - this is required for the ZMQ PUB/SUB
+Notice the `json-full-payment_hook:` prefix - this is required for the ZMQ PUB/SUB
 subscription model. The subscriber requests data from a certain "topic" where
 matching is done by string prefixes.
 

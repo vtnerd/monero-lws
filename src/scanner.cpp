@@ -281,12 +281,12 @@ namespace lws
         for (const auto& event : events)
         {
           const zmq_index_single index{ordering.current++, event};
-          MINFO("Sending ZMQ-PUB topics json-full-hooks and msgpack-full-hooks");
+          MINFO("Sending ZMQ-PUB topics json-full-payment_hook and msgpack-full-payment_hook");
           expect<void> result = success();
-          if (!(result = client.publish<wire::json>("json-full-hooks:", index)))
-            MERROR("Failed to serialize+send json-full-hooks: " << result.error().message());
-          if (!(result = client.publish<wire::msgpack>("msgpack-full-hooks:", index)))
-            MERROR("Failed to serialize+send msgpack-full-hooks: " << result.error().message());
+          if (!(result = client.publish<wire::json>("json-full-payment_hook:", index)))
+            MERROR("Failed to serialize+send json-full-payment_hook: " << result.error().message());
+          if (!(result = client.publish<wire::msgpack>("msgpack-full-payment_hook:", index)))
+            MERROR("Failed to serialize+send msgpack-full-payment_hook: " << result.error().message());
         }
       }
     }
