@@ -247,16 +247,15 @@ namespace lws
       }
     }
 
-    struct zmq_index
+    struct zmq_index_single
     {
       const std::uint64_t index;
-      const boost::string_ref pattern;
-      const epee::span<const db::webhook_tx_confirmation> data;
+      const db::webhook_tx_confirmation& event;
     };
 
-    void write_bytes(wire::writer& dest, const zmq_index& self)
+    void write_bytes(wire::writer& dest, const zmq_index_single& self)
     {
-      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(pattern), WIRE_FIELD(data));
+      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(event));
     }
 
     void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
@@ -278,13 +277,17 @@ namespace lws
       {
         // make sure the event is queued to zmq in order.
         const boost::unique_lock<boost::mutex> guard{ordering.sync};
-        const zmq_index index{ordering.current++, "handle-payment-webhook", events};
-        MINFO("Sending ZMQ/RMQ PUB topics json-full-hooks and msgpack-full-hooks");
-        expect<void> result = success();
-        if (!(result = client.publish<wire::json>("json-full-hooks:", index)))
-          MERROR("Failed to serialize+send json-full-hooks: " << result.error().message());
-        if (!(result = client.publish<wire::msgpack>("msgpack-full-hooks:", index)))
-          MERROR("Failed to serialize+send msgpack-full-hooks: " << result.error().message());
+
+        for (const auto& event : events)
+        {
+          const zmq_index_single index{ordering.current++, event};
+          MINFO("Sending ZMQ/RMQ PUB topics json-full-hooks and msgpack-full-hooks");
+          expect<void> result = success();
+          if (!(result = client.publish<wire::json>("json-full-hooks:", index)))
+            MERROR("Failed to serialize+send json-full-hooks: " << result.error().message());
+          if (!(result = client.publish<wire::msgpack>("msgpack-full-hooks:", index)))
+            MERROR("Failed to serialize+send msgpack-full-hooks: " << result.error().message());
+        }
       }
     }
 
