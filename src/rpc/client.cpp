@@ -54,7 +54,7 @@ namespace rpc
     constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
     constexpr const std::chrono::seconds chain_poll_timeout{20};
-    constexpr const std::chrono::minutes chain_sub_timeout{2};
+    constexpr const std::chrono::minutes chain_sub_timeout{4};
 
     struct terminate
     {
