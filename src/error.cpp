@@ -85,6 +85,8 @@ namespace lws
         return "Unspecified error when retrieving exchange rates";
       case error::http_server:
         return "HTTP server failed";
+      case error::json_rpc:
+        return "Error returned by JSON-RPC server";
       case error::exchange_rates_old:
         return "Exchange rates are older than cache interval";
       case error::not_enough_mixin:
