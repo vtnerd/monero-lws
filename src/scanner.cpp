@@ -191,7 +191,7 @@ namespace lws
         return;
       }
 
-      if (info->m_response_code != 200)
+      if (info->m_response_code != 200 && info->m_response_code != 201)
       {
         MERROR("Failed to invoke http request to  " << url << ", wrong response code: " << info->m_response_code);
         return;
