@@ -148,7 +148,7 @@ This is used to track events happening in the database: (1) a new payment to
 an optional payment_id, or (2) a new account creation. This endpoint always
 requires a URL for callback purposes.
 
-When the event type is `tx-confirmation, this endpint requires a web address
+When the event type is `tx-confirmation`, this endpint requires a web address
 for callback purposes, a primary (not integrated!) address, and finally the
 type ("tx-confirmation"). The event will remain in the database until one of
 the delete commands ([webhook_delete_uuid](#webhook_delete_uuid) or
@@ -156,7 +156,7 @@ the delete commands ([webhook_delete_uuid](#webhook_delete_uuid) or
 
 When the event type is `new-account`, this endpoint requires a web address
 for callback purposes, and the type ("new-account"). Spurious information
-will be returned for this endpoint to simplify the server informatin (i.e.
+will be returned for this endpoint to simplify the server implementation (i.e.
 several fields returned in the initial call are not useful to new account
 creations).
 
