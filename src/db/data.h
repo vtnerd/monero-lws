@@ -252,7 +252,8 @@ namespace db
 
   enum class webhook_type : std::uint8_t
   {
-    tx_confirmation = 0,
+    tx_confirmation = 0, // cannot change values - stored in DB
+    new_account
     // unconfirmed_tx,
     // new_block
     // confirmed_tx,
@@ -315,6 +316,14 @@ namespace db
     webhook_dupsort link_webhook;
   };
   void write_bytes(wire::json_writer&, const webhook_event&);
+
+  //! Returned by DB when a webhook event "tripped"
+  struct webhook_new_account
+  {
+    webhook_value value;
+    account_address account;
+  };
+  void write_bytes(wire::json_writer&, const webhook_new_account&);
 
   bool operator==(transaction_link const& left, transaction_link const& right) noexcept;
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept;

@@ -33,21 +33,23 @@
 #include <string>
 #include <utility>
 
-#include "common/error.h"                             // monero/src
-#include "common/expect.h"                            // monero/src
-#include "crypto/crypto.h"                            // monero/src
-#include "cryptonote_config.h"      // monero/src
+#include "common/error.h"          // monero/src
+#include "common/expect.h"         // monero/src
+#include "crypto/crypto.h"         // monero/src
+#include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "error.h"
-#include "lmdb/util.h"                 // monero/src
-#include "net/http_base.h"             // monero/contrib/epee/include
-#include "net/net_parse_helpers.h"     // monero/contrib/epee/include
+#include "lmdb/util.h"             // monero/src
+#include "net/http_base.h"         // monero/contrib/epee/include
+#include "net/net_parse_helpers.h" // monero/contrib/epee/include
+#include "net/net_ssl.h"           // monero/contrib/epee/include
 #include "rpc/admin.h"
 #include "rpc/client.h"
-#include "rpc/daemon_messages.h"       // monero/src
+#include "rpc/daemon_messages.h"   // monero/src
 #include "rpc/light_wallet.h"
 #include "rpc/rates.h"
+#include "rpc/webhook.h"
 #include "util/http_server.h"
 #include "util/gamma_picker.h"
 #include "util/random_outputs.h"
@@ -134,17 +136,20 @@ namespace lws
       return {std::make_pair(user->second, std::move(*reader))};
     }
 
-    namespace
+    std::atomic_flag rates_error_once = ATOMIC_FLAG_INIT;
+
+    struct runtime_options
     {
-      std::atomic_flag rates_error_once = ATOMIC_FLAG_INIT;
-    }
+      epee::net_utils::ssl_verification_t webhook_verify;
+      bool disable_admin_auth;
+    };
 
     struct get_address_info
     {
       using request = rpc::account_credentials;
       using response = rpc::get_address_info_response;
 
-      static expect<response> handle(const request& req, db::storage disk, rpc::client const& client)
+      static expect<response> handle(const request& req, db::storage disk, rpc::client const& client, runtime_options const&)
       {
         auto user = open_account(req, std::move(disk));
         if (!user)
@@ -217,7 +222,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_address_txs_response;
 
-      static expect<response> handle(const request& req, db::storage disk, rpc::client const&)
+      static expect<response> handle(const request& req, db::storage disk, rpc::client const&, runtime_options const&)
       {
         auto user = open_account(req, std::move(disk));
         if (!user)
@@ -340,7 +345,7 @@ namespace lws
       using request = rpc::get_random_outs_request;
       using response = rpc::get_random_outs_response;
 
-      static expect<response> handle(request req, const db::storage&, rpc::client const& gclient)
+      static expect<response> handle(request req, const db::storage&, rpc::client const& gclient, runtime_options const&)
       {
         using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
         using histogram_rpc = cryptonote::rpc::GetOutputHistogram;
@@ -482,7 +487,7 @@ namespace lws
       using request = rpc::get_unspent_outs_request;
       using response = rpc::get_unspent_outs_response;
 
-      static expect<response> handle(request req, db::storage disk, rpc::client const& gclient)
+      static expect<response> handle(request req, db::storage disk, rpc::client const& gclient, runtime_options const&)
       {
         using rpc_command = cryptonote::rpc::GetFeeEstimate;
 
@@ -554,7 +559,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::import_response;
 
-      static expect<response> handle(request req, db::storage disk, rpc::client const&)
+      static expect<response> handle(request req, db::storage disk, rpc::client const&, runtime_options const&)
       {
         bool new_request = false;
         bool fulfilled = false;
@@ -594,7 +599,7 @@ namespace lws
       using request = rpc::login_request;
       using response = rpc::login_response;
 
-      static expect<response> handle(request req, db::storage disk, rpc::client const&)
+      static expect<response> handle(request req, db::storage disk, rpc::client const&, runtime_options const& options)
       {
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
@@ -620,7 +625,10 @@ namespace lws
         }
 
         const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
-        MONERO_CHECK(disk.creation_request(req.creds.address, req.creds.key, flags));
+        const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags);
+        if (!hooks)
+          return hooks.error();
+        rpc::http_send(epee::to_span(*hooks), std::chrono::seconds{5}, options.webhook_verify);
         return response{true, req.generated_locally};
       }
     };
@@ -630,7 +638,7 @@ namespace lws
       using request = rpc::submit_raw_tx_request;
       using response = rpc::submit_raw_tx_response;
 
-      static expect<response> handle(request req, const db::storage& disk, const rpc::client& gclient)
+      static expect<response> handle(request req, const db::storage& disk, const rpc::client& gclient, const runtime_options&)
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
@@ -656,7 +664,7 @@ namespace lws
     };
 
     template<typename E>
-    expect<epee::byte_slice> call(std::string&& root, db::storage disk, const rpc::client& gclient, const bool)
+    expect<epee::byte_slice> call(std::string&& root, db::storage disk, const rpc::client& gclient, const runtime_options& options)
     {
       using request = typename E::request;
       using response = typename E::response;
@@ -666,7 +674,7 @@ namespace lws
       if (error)
         return error;
 
-      expect<response> resp = E::handle(std::move(req), std::move(disk), gclient);
+      expect<response> resp = E::handle(std::move(req), std::move(disk), gclient, options);
       if (!resp)
         return resp.error();
 
@@ -695,7 +703,7 @@ namespace lws
     }
 
     template<typename E>
-    expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&, const bool disable_auth)
+    expect<epee::byte_slice> call_admin(std::string&& root, db::storage disk, const rpc::client&, const runtime_options& options)
     {
       using request = typename E::request;
       
@@ -706,7 +714,7 @@ namespace lws
           return error;
       }
 
-      if (!disable_auth)
+      if (!options.disable_admin_auth)
       {
         if (!req.auth)
           return {error::account_not_found};
@@ -735,7 +743,7 @@ namespace lws
     struct endpoint
     {
       char const* const name;
-      expect<epee::byte_slice> (*const run)(std::string&&, db::storage, rpc::client const&, bool);
+      expect<epee::byte_slice> (*const run)(std::string&&, db::storage, rpc::client const&, const runtime_options&);
       const unsigned max_size;
     };
 
@@ -796,15 +804,15 @@ namespace lws
     rpc::client client;
     boost::optional<std::string> prefix;
     boost::optional<std::string> admin_prefix;
-    bool disable_auth;
+    runtime_options options;
 
-    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client, const bool disable_auth)
+    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client, runtime_options options)
       : lws::http_server_impl_base<rest_server::internal, context>(io_service)
       , disk(std::move(disk))
       , client(std::move(client))
       , prefix()
       , admin_prefix()
-      , disable_auth(disable_auth)
+      , options(std::move(options))
     {
       assert(std::is_sorted(std::begin(endpoints), std::end(endpoints), by_name));
     }
@@ -870,7 +878,7 @@ namespace lws
       }
 
       // \TODO remove copy of json string here :/
-      auto body = handler->run(std::string{query.m_body}, disk.clone(), client, disable_auth);
+      auto body = handler->run(std::string{query.m_body}, disk.clone(), client, options);
       if (!body)
       {
         MINFO(body.error().message() << " from " << ctx.m_remote_address.str() << " on " << handler->name);
@@ -999,15 +1007,16 @@ namespace lws
     };
 
     bool any_ssl = false;
+    const runtime_options options{config.webhook_verify, config.disable_admin_auth};
     for (const std::string& address : addresses)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), config.disable_admin_auth);
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);
       any_ssl |= init_port(ports_.back(), address, config, false);
     }
 
     for (const std::string& address : admin)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), config.disable_admin_auth);
+      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);
       any_ssl |= init_port(ports_.back(), address, config, true);
     }
 

@@ -1635,14 +1635,14 @@ namespace db
     });
   }
 
-  expect<void> storage::creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags) noexcept
+  expect<std::vector<webhook_new_account>> storage::creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags) noexcept
   {
     MONERO_PRECOND(db != nullptr);
 
     if (!db->create_queue_max)
       return {lws::error::create_queue_max};
 
-    return db->try_write([this, &address, &key, flags] (MDB_txn& txn) -> expect<void>
+    return db->try_write([this, &address, &key, flags] (MDB_txn& txn) -> expect<std::vector<webhook_new_account>>
     {
       const expect<db::account_time> current_time = get_account_time();
       if (!current_time)
@@ -1651,10 +1651,12 @@ namespace db
       cursor::accounts_by_address accounts_ba_cur;
       cursor::blocks blocks_cur;
       cursor::accounts requests_cur;
+      cursor::webhooks webhooks_cur;
 
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.blocks, blocks_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.requests, requests_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
 
       MDB_val keyv = lmdb::to_val(by_address_version);
       MDB_val value = lmdb::to_val(address);
@@ -1709,7 +1711,24 @@ namespace db
       if (err)
         return {lmdb::error(err)};
 
-      return success();
+      std::vector<webhook_new_account> hooks{};
+      webhook_key wkey{account_id::invalid, webhook_type::new_account};
+      keyv = lmdb::to_val(wkey);
+      err = mdb_cursor_get(webhooks_cur.get(), &keyv, &value, MDB_SET_KEY);
+      for (;;)
+      {
+        if (err)
+        {
+          if (err == MDB_NOTFOUND)
+            break;
+          return {lmdb::error(err)};
+        }
+
+        hooks.push_back(webhook_new_account{MONERO_UNWRAP(webhooks.get_value(value)), address});
+        err = mdb_cursor_get(webhooks_cur.get(), &keyv, &value, MDB_NEXT_DUP);
+      }
+
+      return hooks;
     });
   }
 
@@ -2190,7 +2209,7 @@ namespace db
     });
   }
 
-  expect<void> storage::add_webhook(const webhook_type type, const account_address& address, const webhook_value& event)
+  expect<void> storage::add_webhook(const webhook_type type, const boost::optional<account_address>& address, const webhook_value& event)
   {
     if (event.second.url != "zmq")
     {
@@ -2210,10 +2229,13 @@ namespace db
       MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
 
       webhook_key key{account_id::invalid, type};
-      MDB_val lmkey = lmdb::to_val(by_address_version);
-      MDB_val lmvalue = lmdb::to_val(address);
+      MDB_val lmkey{};
+      MDB_val lmvalue{};
 
+      if (address)
       {
+        lmkey = lmdb::to_val(by_address_version);
+        lmvalue = lmdb::to_val(*address);
         const int err = mdb_cursor_get(accounts_ba_cur.get(), &lmkey, &lmvalue, MDB_GET_BOTH);
         if (err && err != MDB_NOTFOUND)
           return {lmdb::error(err)};
