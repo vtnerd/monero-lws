@@ -38,6 +38,7 @@
 #include "rpc/message.h"   // monero/src
 #include "rpc/daemon_pub.h"
 #include "rpc/rates.h"
+#include "span.h"          // monero/contrib/epee/include
 #include "util/source_location.h"
 
 namespace lws
@@ -112,6 +113,9 @@ namespace rpc
       return ctx != nullptr;
     }
 
+    //! \return True if an external pub/sub was setup
+    bool has_publish() const noexcept;
+
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
     expect<void> watch_scan_signals() noexcept;
 
@@ -131,6 +135,21 @@ namespace rpc
       `context::raise_abort_process()` is called.
     */
     expect<void> send(epee::byte_slice message, std::chrono::seconds timeout) noexcept;
+
+    //! Publish `payload` to ZMQ external pub socket.
+    expect<void> publish(epee::byte_slice payload);
+
+    //! Publish `data` after `topic` to ZMQ external pub socket.
+    template<typename F, typename T>
+    expect<void> publish(const boost::string_ref topic, const T& data)
+    {
+      epee::byte_stream bytes{};
+      bytes.write(topic.data(), topic.size());
+      const std::error_code err = F::to_bytes(bytes, data);
+      if (err)
+        return err;
+      return publish(epee::byte_slice{std::move(bytes)});
+    }
 
     //! \return Next available RPC message response from server
     expect<std::string> get_message(std::chrono::seconds timeout);
@@ -171,10 +190,11 @@ namespace rpc
       \note All errors are exceptions; no recovery can occur.
 
       \param daemon_addr Location of ZMQ enabled `monerod` RPC.
+      \param pub_addr Bind location for publishing ZMQ events.
       \param rates_interval Frequency to retrieve exchange rates. Set value to
         `<= 0` to disable exchange rate retrieval.
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::chrono::minutes rates_interval);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, std::chrono::minutes rates_interval);
 
     context(context&&) = default;
     context(context const&) = delete;

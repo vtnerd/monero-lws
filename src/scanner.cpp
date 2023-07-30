@@ -58,7 +58,9 @@
 #include "rpc/json.h"
 #include "util/source_location.h"
 #include "util/transactions.h"
+#include "wire/adapted/span.h"
 #include "wire/json.h"
+#include "wire/msgpack.h"
 
 #include "serialization/json_object.h"
 
@@ -211,6 +213,8 @@ namespace lws
 
       for (const db::webhook_tx_confirmation& event : events)
       {
+        if (event.value.second.url == "zmq")
+          continue;
         if (event.value.second.url.empty() || !net::parse_url(event.value.second.url, url))
         {
           MERROR("Bad URL for webhook event: " << event.value.second.url);
@@ -240,6 +244,50 @@ namespace lws
           MERROR("Unable to send webhook to " << event.value.second.url);
 
         client.disconnect();
+      }
+    }
+
+    struct zmq_index_single
+    {
+      const std::uint64_t index;
+      const db::webhook_tx_confirmation& event;
+    };
+
+    void write_bytes(wire::writer& dest, const zmq_index_single& self)
+    {
+      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(event));
+    }
+
+    void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
+    {
+      struct zmq_order
+      {
+        std::uint64_t current;
+        boost::mutex sync;
+
+        zmq_order()
+          : current(0), sync()
+        {}
+      };
+
+      static zmq_order ordering{};
+
+      //! \TODO monitor XPUB to cull the serialization
+      if (!events.empty() && client.has_publish())
+      {
+        // make sure the event is queued to zmq in order.
+        const boost::unique_lock<boost::mutex> guard{ordering.sync};
+
+        for (const auto& event : events)
+        {
+          const zmq_index_single index{ordering.current++, event};
+          MINFO("Sending ZMQ-PUB topics json-full-payment_hook and msgpack-full-payment_hook");
+          expect<void> result = success();
+          if (!(result = client.publish<wire::json>("json-full-payment_hook:", index)))
+            MERROR("Failed to serialize+send json-full-payment_hook: " << result.error().message());
+          if (!(result = client.publish<wire::msgpack>("msgpack-full-payment_hook:", index)))
+            MERROR("Failed to serialize+send msgpack-full-payment_hook: " << result.error().message());
+        }
       }
     }
 
@@ -335,6 +383,7 @@ namespace lws
             events.pop_back(); //cannot compute tx_hash
         }
         send_via_http(epee::to_span(events), std::chrono::seconds{5}, verify_mode_);
+        send_via_zmq(client_, epee::to_span(events));
         return true;
       }
     };
@@ -741,6 +790,7 @@ namespace lws
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
           send_via_http(epee::to_span(updated->second), std::chrono::seconds{5}, webhook_verify);
+          send_via_zmq(client, epee::to_span(updated->second));
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
