@@ -146,23 +146,27 @@ height.
 ### webhook_add
 This is used to track a specific payment ID to an address or all general
 payments to an address (where payment ID is zero). Using this endpint requires
-a web address for callback purposes, a primary (not integrated!) address, and
-finally the type ("tx-confirmation"). The event will remain in the database
-until one of the delete commands ([webhook_delete_uuid](#webhook_delete_uuid)
-or [webhook_delete](#webhook_delete)) is used to remove it.
+a web address or `zmq` for callback purposes, a primary (not integrated!)
+address, and finally the type ("tx-confirmation"). The event will remain in the
+database until one of the delete commands ([webhook_delete_uuid](#webhook_delete_uuid)
+or [webhook_delete](#webhook_delete)) is used to remove it. All webhooks are
+published over the ZMQ socket specified by `--zmq-pub` (when enabled/specified
+on command line) in addition to any HTTP server specified in the callback.
 
 > The provided URL will use SSL/TLS if `https://` is prefixed in the URL and
-will use plaintext if `http://` is prefixed in the URL. SSL/TLS connections
-will use the system certificate authority (root-CAs) by default, and will
-ignore all authority checks if `--webhook-ssl-verification none` is provided
-on the command line when starting `monero-lws-daemon`. The webhook will fail
-if there is a mismatch of `http` and `https` between the two servers, and
-will also fail if `https` verification is mismatched. The rule is: (1) if
-the callback server has SSL/TLS disabled, the webhook should use `http://`,
-(2) if the callback server has a self-signed certificate, `https://` and
-`--webhook-ssl-verification none` should be used, and (3) if the callback
-server is using "Let's Encrypt" (or similar), then `https://` with no
-additional command line flag should be used.
+will use plaintext if `http://` is prefixed in the URL. If `zmq` is provided
+as the callback, notifications are performed _only_ over the ZMQ pub socket.
+SSL/TLS connections will use the system certificate authority (root-CAs) by
+default, and will ignore all authority checks if
+`--webhook-ssl-verification none` is provided on the command line when
+starting `monero-lws-daemon`. The webhook will fail if there is a mismatch of
+`http` and `https` between the two servers, and will also fail if `https`
+verification is mismatched. The rule is: (1) if the callback server has
+SSL/TLS disabled, the webhook should use `http://`, (2) if the callback server
+has a self-signed certificate, `https://` and `--webhook-ssl-verification none`
+should be used, and (3) if the callback server is using "Let's Encrypt"
+(or similar), then `https://` with no additional command line flag should be
+used.
 
 
 #### Initial Request to server
