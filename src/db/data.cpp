@@ -293,7 +293,7 @@ namespace db
     );
   }
 
-  void write_bytes(wire::json_writer& dest, const webhook_new_account& self)
+  void write_bytes(wire::writer& dest, const webhook_new_account& self)
   {
     wire::object(dest,
       wire::field<0>("event_id", std::cref(self.value.first.event_id)),

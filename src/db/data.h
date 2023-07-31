@@ -323,7 +323,7 @@ namespace db
     webhook_value value;
     account_address account;
   };
-  void write_bytes(wire::json_writer&, const webhook_new_account&);
+  void write_bytes(wire::writer&, const webhook_new_account&);
 
   bool operator==(transaction_link const& left, transaction_link const& right) noexcept;
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept;

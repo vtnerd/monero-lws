@@ -1,4 +1,5 @@
 
+#include <boost/thread/mutex.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <chrono>
 #include <string>
@@ -7,6 +8,7 @@
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "span.h"
 #include "wire/json.h"
+#include "wire/msgpack.h"
 
 namespace lws { namespace rpc
 {
@@ -94,4 +96,64 @@ namespace lws { namespace rpc
     }
   }
 
+  template<typename T>
+  struct zmq_index_single
+  {
+    const std::uint64_t index;
+    const T& event;
+  };
+
+  template<typename T>
+  void write_bytes(wire::writer& dest, const zmq_index_single<T>& self)
+  {
+    wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(event));
+  }
+
+  template<typename T>
+  void zmq_send(rpc::client& client, const epee::span<const T> events, const boost::string_ref json_topic, const boost::string_ref msgpack_topic)
+  {
+    // Each `T` should have a unique count. This is desired.
+    struct zmq_order
+    {
+      std::uint64_t current;
+      boost::mutex sync;
+
+      zmq_order()
+        : current(0), sync()
+      {}
+    };
+
+    static zmq_order ordering{};
+
+    //! \TODO monitor XPUB to cull the serialization
+    if (!events.empty() && client.has_publish())
+    {
+      // make sure the event is queued to zmq in order.
+      const boost::unique_lock<boost::mutex> guard{ordering.sync};
+
+      for (const auto& event : events)
+      {
+        const zmq_index_single<T> index{ordering.current++, event};
+        MINFO("Sending ZMQ-PUB topics " << json_topic << " and " << msgpack_topic);
+        expect<void> result = success();
+        if (!(result = client.publish<wire::json>(json_topic, index)))
+          MERROR("Failed to serialize+send " << json_topic << " " << result.error().message());
+        if (!(result = client.publish<wire::msgpack>(msgpack_topic, index)))
+          MERROR("Failed to serialize+send " << msgpack_topic << " " << result.error().message());
+      }
+    }
+  }
+
+  template<typename T>
+  void send_webhook(
+    rpc::client& client,
+    const epee::span<const T> events,
+    const boost::string_ref json_topic,
+    const boost::string_ref msgpack_topic,
+    const std::chrono::seconds timeout,
+    epee::net_utils::ssl_verification_t verify_mode)
+  {
+    http_send(events, timeout, verify_mode);
+    zmq_send(client, events, json_topic, msgpack_topic);
+  }
 }} // lws // rpc

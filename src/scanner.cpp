@@ -163,9 +163,9 @@ namespace lws
       return true;
     }
 
-    void send_payment_hook(const epee::span<const db::webhook_tx_confirmation>, net::ssl_verififcation_t verify_mode)
+    void send_payment_hook(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events, net::ssl_verification_t verify_mode)
     {
-      rpc::send_webhook(events, "json-full-payment_hook", "msgpack-full-payment_hook" std::chrono::seconds{5}, verify_mode);
+      rpc::send_webhook(client, events, "json-full-payment_hook:", "msgpack-full-payment_hook:", std::chrono::seconds{5}, verify_mode);
     }
 
     struct by_height
@@ -259,7 +259,7 @@ namespace lws
           else
             events.pop_back(); //cannot compute tx_hash
         }
-        send_payment_hook(epee::to_span(events), verify_mode_);
+        send_payment_hook(client_, epee::to_span(events), verify_mode_);
         return true;
       }
     };
@@ -665,7 +665,7 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_payment_hook(epee::to_span(updated->second), webhook_verify);
+          send_payment_hook(client, epee::to_span(updated->second), webhook_verify);
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");

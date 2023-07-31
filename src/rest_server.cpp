@@ -599,7 +599,7 @@ namespace lws
       using request = rpc::login_request;
       using response = rpc::login_response;
 
-      static expect<response> handle(request req, db::storage disk, rpc::client const&, runtime_options const& options)
+      static expect<response> handle(request req, db::storage disk, rpc::client const& gclient, runtime_options const& options)
       {
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
@@ -628,7 +628,16 @@ namespace lws
         const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags);
         if (!hooks)
           return hooks.error();
-        rpc::http_send(epee::to_span(*hooks), std::chrono::seconds{5}, options.webhook_verify);
+
+        if (!hooks->empty())
+        {
+          expect<rpc::client> client = gclient.clone();
+          if (!client)
+            return client.error();
+          rpc::send_webhook(
+            *client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:", std::chrono::seconds{5}, options.webhook_verify
+          );
+        }
         return response{true, req.generated_locally};
       }
     };

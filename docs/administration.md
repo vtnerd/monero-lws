@@ -305,7 +305,7 @@ Example response:
 ```json
 {
   "payment_id": "0000000000000000",
-  "event_id": "fa10a4db485145f1a24dc09c19a79d43",
+  "event_id": "c5a735e71b1e4f0a8bfaeff661d0b38a"",
   "token": "1234",
   "confirmations": 1,
   "url": "http://127.0.0.1:7000"
