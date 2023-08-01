@@ -34,14 +34,16 @@ jobs:
       with:
         repository: monero-project/monero
         path: ${{github.workspace}}/monero/
-        
-    - name: Configure Monero
+
+    - name: Checkout git dependencies
       run: (cd ${{github.workspace}} && git submodule update --init --force)
-           cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
-    
+
+    - name: Configure Monero
+      run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
+
     - name: Build Monero
       run: cd ${{github.workspace}}/monero/build && make daemon lmdb_lib multisig 
-      
+  
     - uses: actions/checkout@v3
       with:
         path: ${{github.workspace}}/lws
