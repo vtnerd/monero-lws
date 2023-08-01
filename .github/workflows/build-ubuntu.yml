@@ -36,7 +36,7 @@ jobs:
         path: ${{github.workspace}}/monero/
         
     - name: Configure Monero
-      run: (cd ${{github.workspace} && git submodule update --init --force)
+      run: (cd ${{github.workspace}} && git submodule update --init --force)
            cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
     
     - name: Build Monero
