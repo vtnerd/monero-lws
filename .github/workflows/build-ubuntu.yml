@@ -36,8 +36,8 @@ jobs:
         path: ${{github.workspace}}/monero/
         
     - name: Configure Monero
-      run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
-           git submodule update --init --force
+      run: git submodule update --init --force
+           cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
     
     - name: Build Monero
       run: cd ${{github.workspace}}/monero/build && make daemon lmdb_lib multisig 
