@@ -2,9 +2,9 @@ name: CMake
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "develop" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "develop" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -48,7 +48,7 @@ jobs:
     - name: Configure LWS
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{gitub.workspace}}/lws
+      run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{github.workspace}}/lws
 
     - name: Build LWS
       # Build your program with the given configuration
