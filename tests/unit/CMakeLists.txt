@@ -43,6 +43,6 @@ target_link_libraries(
   monero-lws-unit-wire
   monero-lws-unit-wire-json
   monero-lws-unit-wire-msgpack
-  ${Boost_PROGRAM_OPTIONS_LIBRARY}
+  Threads::Threads
 )
 add_test(NAME monero-lws-unit COMMAND monero-lws-unit -v)
