@@ -1,8 +1,8 @@
 # Initial base from https://github.com/sethforprivacy/monero-lws/blob/588c7f1965d3afbda8a65dc870645650e063e897/Dockerfile
 
 # Set monerod version to install from github
-ARG MONERO_BRANCH=v0.18.2.1
-ARG MONERO_COMMIT_HASH=4f47fd26269764ff702e87242d8a75ce4f1bce67
+ARG MONERO_BRANCH=v0.18.2.2
+ARG MONERO_COMMIT_HASH=e06129bb4d1076f4f2cebabddcee09f1e9e30dcc
 
 # Select ubuntu:20.04 for the build image base
 FROM ubuntu:20.04 as build
