@@ -1,4 +1,4 @@
-name: github-ci
+name: unix-ci
 
 on:
   push:
@@ -16,19 +16,19 @@ env:
         echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
 
 jobs:
-  build-ubuntu-tests:
+  build-tests:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-12, macos-11]
     steps:
-    - name: set apt conf
+    - name: set apt conf (Debian based Linux)
       if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: ${{env.APT_SET_CONF}}
-    - name: update apt
+    - name: update apt (Debian based Linux)
       if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: sudo apt update
-    - name: Install dependencies (Linux)
+    - name: Install dependencies (Debian based Linux)
       if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: ${{env.APT_INSTALL_LINUX}}
 
