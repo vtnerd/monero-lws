@@ -33,9 +33,7 @@ jobs:
       with:
         repository: monero-project/monero
         path: ${{github.workspace}}/monero/
-
-    - name: Checkout git dependencies
-      run: (cd ${{github.workspace}}/monero && git submodule update --init --force)
+        submodules: recursive
 
     - name: Configure Monero
       run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
