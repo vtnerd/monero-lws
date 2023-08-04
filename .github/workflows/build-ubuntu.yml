@@ -41,7 +41,7 @@ jobs:
       run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
 
     - name: Build Monero
-      run: cd ${{github.workspace}}/monero/build && make daemon lmdb_lib multisig 
+      run: cd ${{github.workspace}}/monero/build && make -j$(nproc) daemon lmdb_lib multisig 
   
     - uses: actions/checkout@v3
       with:
@@ -54,7 +54,7 @@ jobs:
 
     - name: Build LWS
       # Build your program with the given configuration
-      run: (cd ${{github.workspace}}/lws/build && make)
+      run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
       
     - name: Run Tests
       run: cd ${{github.workspace}}/lws/build && ctest
