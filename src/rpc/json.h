@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "wire/json.h"
+#include "wire/wrapper/variant.h"
 
 namespace lws
 {
@@ -65,6 +66,20 @@ namespace rpc
     wire::object(dest, WIRE_FIELD_COPY(id), WIRE_FIELD_COPY(jsonrpc), WIRE_FIELD_COPY(method), WIRE_FIELD(params));
   }
 
+  struct json_error
+  {
+    json_error()
+      : code(0), message()
+    {}
+
+    std::int32_t code;
+    std::string message;
+  };
+
+  inline void read_bytes(wire::json_reader& source, json_error& self)
+  {
+    wire::object(source, WIRE_FIELD(code), WIRE_FIELD(message));
+  }
 
   //! \tparam R implements the READ concept
   template<typename R>
@@ -73,13 +88,18 @@ namespace rpc
     json_response() = delete;
 
     unsigned id;
-    R result;
+    boost::variant<json_error, R> state;
   };
 
   template<typename R>
   inline void read_bytes(wire::json_reader& source, json_response<R>& self)
   {
-    wire::object(source, WIRE_FIELD(id), WIRE_FIELD(result));
+    auto state = wire::variant(std::ref(self.state));
+    wire::object(source,
+      WIRE_FIELD(id),
+      WIRE_OPTION("result", R, state),
+      WIRE_OPTION("error", json_error, state)
+    );
   }
 
 
@@ -92,5 +112,26 @@ namespace rpc
     using request = json_request<typename M::request, M>;
     using response = json_response<typename M::response>;
   };
+
+
+  //! \tparam M must implement the METHOD concept.
+  template<typename M, typename R = typename M::response>
+  inline expect<R> parse_json_response(std::string&& source)
+  {
+    json_response<R> out{};
+    std::error_code error = wire::json::from_bytes(std::move(source), out);
+    if (error)
+      return error;
+
+    json_error const* const rpc_error = boost::get<json_error>(std::addressof(out.state));
+    if (rpc_error)
+    {
+      MERROR("JSON-RPC server sent error code " << rpc_error->code << " with message: " << rpc_error->message);
+      return {error::json_rpc};
+    }
+
+    return {boost::get<R>(std::move(out.state))};
+  }
+
 } // rpc
 } // lws
