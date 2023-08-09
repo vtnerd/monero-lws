@@ -362,11 +362,10 @@ namespace lws
             return false;
           }
 
-          rpc::json<rpc::get_transaction_pool>::response txpool{};
-          const std::error_code err = wire::json::from_bytes(std::move(*resp), txpool);
-          if (err)
-            MONERO_THROW(err, "Invalid json-rpc");
-          for (auto& tx : txpool.result.transactions)
+          auto txpool = rpc::parse_json_response<rpc::get_transaction_pool>(std::move(*resp));
+          if (!txpool)
+            MONERO_THROW(txpool.error(), "Failed fetching transaction pool");
+          for (auto& tx : txpool->transactions)
             txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
         }
 
@@ -651,26 +650,27 @@ namespace lws
             MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
           }
 
-          rpc::json<rpc::get_blocks_fast>::response fetched{};
+          auto fetched = rpc::parse_json_response<rpc::get_blocks_fast>(std::move(*resp));
+          if (!fetched)
           {
-            const std::error_code error = wire::json::from_bytes(std::move(*resp), fetched);
-            if (error)
-              throw std::system_error{error};
+            MERROR("Failed to retrieve next blocks: " << fetched.error().message() << ". Resetting state and trying again");
+            return;
           }
-          if (fetched.result.blocks.empty())
+
+          if (fetched->blocks.empty())
             throw std::runtime_error{"Daemon unexpectedly returned zero blocks"};
 
-          if (fetched.result.start_height != req.start_height)
+          if (fetched->start_height != req.start_height)
           {
             MWARNING("Daemon sent wrong blocks, resetting state");
             return;
           }
 
           // prep for next blocks retrieval
-          req.start_height = fetched.result.start_height + fetched.result.blocks.size() - 1;
+          req.start_height = fetched->start_height + fetched->blocks.size() - 1;
           block_request = rpc::client::make_message("get_blocks_fast", req);
 
-          if (fetched.result.blocks.size() <= 1)
+          if (fetched->blocks.size() <= 1)
           {
             // synced to top of chain, wait for next blocks
             for (bool wait_for_block = true; wait_for_block; )
@@ -712,26 +712,26 @@ namespace lws
           if (!send(client, block_request.clone()))
             return;
 
-          if (fetched.result.blocks.size() != fetched.result.output_indices.size())
+          if (fetched->blocks.size() != fetched->output_indices.size())
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};
 
-          blockchain.push_back(cryptonote::get_block_hash(fetched.result.blocks.front().block));
+          blockchain.push_back(cryptonote::get_block_hash(fetched->blocks.front().block));
 
-          auto blocks = epee::to_span(fetched.result.blocks);
-          auto indices = epee::to_span(fetched.result.output_indices);
+          auto blocks = epee::to_span(fetched->blocks);
+          auto indices = epee::to_span(fetched->output_indices);
 
-          if (fetched.result.start_height != 1)
+          if (fetched->start_height != 1)
           {
             // skip overlap block
             blocks.remove_prefix(1);
             indices.remove_prefix(1);
           }
           else
-            fetched.result.start_height = 0;
+            fetched->start_height = 0;
 
           for (auto block_data : boost::combine(blocks, indices))
           {
-            ++(fetched.result.start_height);
+            ++(fetched->start_height);
 
             cryptonote::block const& block = boost::get<0>(block_data).block;
             auto const& txes = boost::get<0>(block_data).transactions;
@@ -749,7 +749,7 @@ namespace lws
 
             scan_transaction(
               epee::to_mut_span(users),
-              db::block_id(fetched.result.start_height),
+              db::block_id(fetched->start_height),
               block.timestamp,
               miner_tx_hash,
               block.miner_tx,
@@ -764,7 +764,7 @@ namespace lws
             {
               scan_transaction(
                 epee::to_mut_span(users),
-                db::block_id(fetched.result.start_height),
+                db::block_id(fetched->start_height),
                 block.timestamp,
                 boost::get<0>(tx_data),
                 boost::get<1>(tx_data),
@@ -798,7 +798,7 @@ namespace lws
           }
 
           for (account& user : users)
-            user.updated(db::block_id(fetched.result.start_height));
+            user.updated(db::block_id(fetched->start_height));
         }
       }
       catch (std::exception const& e)
