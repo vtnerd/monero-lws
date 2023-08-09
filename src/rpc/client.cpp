@@ -27,6 +27,7 @@
 
 #include "client.h"
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <cassert>
@@ -38,6 +39,10 @@
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
 #include "serialization/json_object.h" // monero/src
+#if MLWS_RMQ_ENABLED
+  #include <amqp.h>
+  #include <amqp_tcp_socket.h>
+#endif
 
 namespace lws
 {
@@ -71,6 +76,38 @@ namespace rpc
       }
     };
     using zcontext = std::unique_ptr<void, terminate>;
+
+#ifdef MLWS_RMQ_ENABLED
+    constexpr const unsigned rmq_channel = 1;
+    struct rdestroy
+    {
+      void operator()(amqp_connection_state_t ptr) const noexcept
+      {
+        if (ptr)
+        {
+          amqp_channel_close(ptr, rmq_channel, AMQP_REPLY_SUCCESS);
+          amqp_connection_close(ptr, AMQP_REPLY_SUCCESS);
+          amqp_destroy_connection(ptr);
+        }
+      }
+    };
+    struct rcontext
+    {
+      using connection = std::unique_ptr<amqp_connection_state_t_, rdestroy>;
+
+      bool is_available() const noexcept { return conn != nullptr; }
+
+      connection conn;
+      std::string exchange;
+      std::string routing;
+    };
+#else // !MLWS_RMQ_ENABLED
+
+    struct rcontext
+    {
+      static constexpr bool is_available() noexcept { return false; }
+    };
+#endif
 
     expect<void> do_wait(void* daemon, void* signal_sub, short events, std::chrono::milliseconds timeout) noexcept
     {
@@ -135,10 +172,11 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, socket signal_pub, socket external_pub, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
+      explicit context(zcontext comm, socket signal_pub, socket external_pub, rcontext rmq, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , external_pub(std::move(external_pub))
+        , rmq(std::move(rmq))
         , daemon_addr(std::move(daemon_addr))
         , sub_addr(std::move(sub_addr))
         , rates_conn()
@@ -155,6 +193,7 @@ namespace rpc
       zcontext comm;
       socket signal_pub;
       socket external_pub;
+      rcontext rmq;
       const std::string daemon_addr;
       const std::string sub_addr;
       http::http_simple_client rates_conn;
@@ -249,7 +288,7 @@ namespace rpc
 
   bool client::has_publish() const noexcept
   {
-    return ctx && ctx->external_pub;
+    return ctx && (ctx->external_pub || ctx->rmq.is_available());
   }
 
   expect<void> client::watch_scan_signals() noexcept
@@ -343,11 +382,33 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(daemon != nullptr);
-    if (ctx->external_pub == nullptr)
+    if (ctx->external_pub == nullptr && !ctx->rmq.is_available())
       return success();
 
+    expect<void> rc = success();
     const boost::unique_lock<boost::mutex> guard{ctx->sync_pub};
-    return net::zmq::send(std::move(payload), ctx->external_pub.get(), 0);
+    if (ctx->external_pub)
+      rc = net::zmq::send(payload.clone(), ctx->external_pub.get(), 0);
+
+#ifdef MLWS_RMQ_ENABLED
+    if (ctx->rmq.is_available() && boost::algorithm::starts_with(payload, boost::string_ref{payment_topic_json()}))
+    {
+      const auto topic = reinterpret_cast<const std::uint8_t*>(std::memchr(payload.data(), ':', payload.size()));
+      if (topic && topic >= payload.data())
+        payload.remove_prefix(topic - payload.data() + 1);
+
+      amqp_bytes_t message{};
+      message.len = payload.size();
+      message.bytes = const_cast<std::uint8_t*>(payload.data());
+      const int rmq_rc = amqp_basic_publish(ctx->rmq.conn.get(), rmq_channel, amqp_cstring_bytes(ctx->rmq.exchange.c_str()), amqp_cstring_bytes(ctx->rmq.routing.c_str()), 0, 0, nullptr,  message);
+      if (rmq_rc != 0)
+      {
+        MERROR("Failed RMQ Publish with return code: " << rmq_rc);
+        return {error::rmq_failure};
+      }
+    }
+#endif
+    return rc;
   }
 
   expect<rates> client::get_rates() const
@@ -363,7 +424,7 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, std::chrono::minutes rates_interval)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval)
   {
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
@@ -385,9 +446,63 @@ namespace rpc
         MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
     }
 
+    rcontext rmq{};
+#ifdef MLWS_RMQ_ENABLED
+    if (!rmq_info.address.empty())
+    {
+      rmq.exchange = std::move(rmq_info.exchange);
+      rmq.routing = std::move(rmq_info.routing);
+      epee::net_utils::http::url_content url{};
+      if (!epee::net_utils::parse_url(rmq_info.address, url))
+        MONERO_THROW(error::configuration, "Invalid URL spec given for RMQ");
+      if (url.port == 0)
+        MONERO_THROW(error::configuration, "No port specified for RMQ");
+      if (url.uri.empty())
+        url.uri = "/";
+
+      std::string user;
+      std::string pass;
+      boost::regex expression{"(\\w+):(\\w+)"};
+      boost::smatch matcher;
+      if (boost::regex_search(rmq_info.credentials, matcher, expression))
+      {
+         user = matcher[1];
+         pass = matcher[2];
+      }
+
+      rmq.conn.reset(amqp_new_connection());
+      const auto socket = amqp_tcp_socket_new(rmq.conn.get());
+      if (!socket)
+        MONERO_THROW(error::configuration, "Unable to create RMQ socket");
+
+      int status = amqp_socket_open(socket, url.host.c_str(), url.port);
+      if (status != 0)
+      {
+        MERROR("Unable to open RMQ socket: " << status);
+        MONERO_THROW(error::rmq_failure, "Unable to open RMQ socket");
+      }
+
+      if (!user.empty() || !pass.empty())
+      {
+        if (amqp_login(rmq.conn.get(), url.uri.c_str(), 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, user.c_str(), pass.c_str()).reply_type != AMQP_RESPONSE_NORMAL)
+          MONERO_THROW(error::rmq_failure, "Failure to login RMQ socket");
+      }
+      if (amqp_channel_open(rmq.conn.get(), rmq_channel) == nullptr)
+        MONERO_THROW(error::rmq_failure, "Unabe to open RMQ channel");
+
+      if (amqp_get_rpc_reply(rmq.conn.get()).reply_type != AMQP_RESPONSE_NORMAL)
+        MONERO_THROW(error::rmq_failure, "Failed receiving channel open reply");
+
+      MINFO("Connected to RMQ server " << url.host << ":" << url.port);
+    }
+#else // !MLWS_RMQ_ENABLED
+    if (!rmq_info.address.empty() || !rmq_info.exchange.empty() || !rmq_info.routing.empty() || !rmq_info.credentials.empty())
+      MONERO_THROW(error::configuration, "RabbitMQ support not enabled");
+#endif
+
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(external_pub), std::move(daemon_addr), std::move(sub_addr), rates_interval
+        std::move(comm), std::move(pub), std::move(external_pub), std::move(rmq), std::move(daemon_addr), std::move(sub_addr), rates_interval
       )
     };
   }
