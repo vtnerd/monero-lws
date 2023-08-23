@@ -196,6 +196,13 @@ namespace
     opts.set_network(args); // do this first, sets global variable :/
     mlog_set_log_level(command_line::get_arg(args, opts.log_level));
 
+    const auto webhook_verify_raw = command_line::get_arg(args, opts.webhook_ssl_verification);
+    epee::net_utils::ssl_verification_t webhook_verify = epee::net_utils::ssl_verification_t::none;
+    if (webhook_verify_raw == "system_ca")
+      webhook_verify = epee::net_utils::ssl_verification_t::system_ca;
+    else if (webhook_verify_raw != "none")
+      MONERO_THROW(lws::error::configuration, "Invalid webhook ssl verification mode");
+
     program prog{
       command_line::get_arg(args, opts.db_path),
       command_line::get_arg(args, opts.rest_servers),
@@ -204,6 +211,7 @@ namespace
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
+        webhook_verify,
         command_line::get_arg(args, opts.external_bind),
         command_line::get_arg(args, opts.disable_admin_auth)
       },
@@ -236,6 +244,7 @@ namespace
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();
 
+    const auto webhook_verify = prog.rest_config.webhook_verify;
     lws::rest_server server{
       epee::to_span(prog.rest_servers), prog.admin_rest_servers, disk.clone(), std::move(client), std::move(prog.rest_config)
     };
@@ -245,7 +254,7 @@ namespace
       MINFO("Listening for REST admin clients at " << address);
 
     // blocks until SIGINT
-    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, prog.webhook_ssl_verification);
+    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, webhook_verify);
   }
 } // anonymous
 

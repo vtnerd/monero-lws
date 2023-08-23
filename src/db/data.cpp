@@ -29,6 +29,7 @@
 #include <cstring>
 #include <memory>
 
+#include "db/string.h"
 #include "wire.h"
 #include "wire/crypto.h"
 #include "wire/json/write.h"
@@ -215,7 +216,7 @@ namespace db
 
   namespace
   {
-    constexpr const char* map_webhook_type[] = {"tx-confirmation"};
+    constexpr const char* map_webhook_type[] = {"tx-confirmation", "new-account"};
 
     template<typename F, typename T>
     void map_webhook_key(F& format, T& self)
@@ -289,6 +290,15 @@ namespace db
       wire::field<1>("output_id", std::cref(self.link.out)),
       wire::field<2>("payment_id", std::cref(payment_id)),
       wire::field<3>("event_id", std::cref(self.link_webhook.event_id))
+    );
+  }
+
+  void write_bytes(wire::writer& dest, const webhook_new_account& self)
+  {
+    wire::object(dest,
+      wire::field<0>("event_id", std::cref(self.value.first.event_id)),
+      wire::field<1>("token", std::cref(self.value.second.token)),
+      wire::field<2>("address", address_string(self.account))
     );
   }
 

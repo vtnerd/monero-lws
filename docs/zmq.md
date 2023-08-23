@@ -2,24 +2,28 @@
 Monero-lws uses ZeroMQ-RPC to retrieve information from a Monero daemon,
 ZeroMQ-SUB to get immediate notifications of blocks and transactions from a
 Monero daemon, and ZeroMQ-PUB to notify external applications of payment_id
-(web)hooks.
+and new account (web)hooks.
 
 ## External "pub" socket
 The bind location of the ZMQ-PUB socket is specified with the `--zmq-pub`
 option. Users are still required to "subscribe" to topics:
-  * `json-full-pyment_hook`: A JSON array of webhook payment events that have
-    recently triggered (identical output as webhook).
-  * `msgpack-full-payment_hook`: A msgpack array of webhook payment events that
-    have recently triggered (identical output as webhook).
+  * `json-full-payment_hook`: A JSON object of a single webhook payment event
+    that has recently triggered (identical output as webhook).
+  * `msgpack-full-payment_hook`: A msgpack object of a webhook payment events
+    that have recently triggered (identical output as webhook).
+  * `json-full-new_account_hook`: A JSON object of a single new account
+    creation that has recently triggered (identical output as webhook).
+  * `msgpack-full-new_account_hook`: A msgpack object of a single new account
+    creation that has recently triggered (identical output as webhook).
 
 
 ### `json-full-payment_hook`/`msgpack-full-payment_hook`
 These topics receive PUB messages when a webhook ([`webhook_add`](administration.md)),
-event is triggered. If the specified URL is `zmq`, then notifications are only
-done over the ZMQ-PUB socket, otherwise the notification is sent over ZMQ-PUB
-socket AND the specified URL. Invoking `webhook_add` with a `payment_id` of
-zeroes (the field is optional in `webhook_add), will match on all transactions
-that lack a `payment_id`.
+event is triggered for a payment (`tx-confirmation`). If the specified URL is
+`zmq`, then notifications are only done over the ZMQ-PUB socket, otherwise the
+notification is sent over ZMQ-PUB socket AND the specified URL. Invoking
+`webhook_add` with a `payment_id` of zeroes (the field is optional in
+`webhook_add`), will match on all transactions that lack a `payment_id`.
 
 Example of the "raw" output from ZMQ-SUB side:
 
@@ -63,3 +67,31 @@ matching is done by string prefixes.
 
 > The `block` and `id` fields in the above example are NOT present when
 `confirmations == 0`.
+
+### `json-full-new_account_hook`/`msgpack-full-new_account_hook`
+These topics receive PUB messages when a webhook ([`webhook_add`](administration.md)),
+event is triggered for a new account (`new-account`). If the specified URL is
+`zmq`, then notifications are only done over the ZMQ-PUB socket, otherwise the
+notification is sent over ZMQ-PUB socket AND the specified URL. Invoking
+`webhook_add` with a `payment_id` of zeroes (the field is optional in
+`webhook_add`), will match on all transactions that lack a `payment_id`.
+
+Example of the "raw" output from ZMQ-SUB side:
+
+```json
+json-full-new_account_hook:{
+  "index": 2,
+  "event": {
+    "event": "new-account",
+    "event_id": "c5a735e71b1e4f0a8bfaeff661d0b38a",
+    "token": "",
+    "address": "9zGwnfWRMTF9nFVW9DNKp46aJ43CRtQBWNFvPqFVSN3RUKHuc37u2RDi2GXGp1wRdSRo5juS828FqgyxkumDaE4s9qyyi9B"
+  }
+}
+```
+
+Notice the `json-full-new_account_hook:` prefix - this is required for the ZMQ
+PUB/SUB subscription model. The subscriber requests data from a certain "topic"
+where matching is done by string prefixes.
+
+> `index` is a counter used to detect dropped messages.

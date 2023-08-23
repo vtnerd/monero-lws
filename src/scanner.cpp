@@ -49,18 +49,16 @@
 #include "db/account.h"
 #include "db/data.h"
 #include "error.h"
-#include "misc_log_ex.h"             // monero/contrib/epee/include
-#include "net/http_client.h"
+#include "misc_log_ex.h"           // monero/contrib/epee/include
 #include "net/net_parse_helpers.h"
-#include "rpc/daemon_messages.h"      // monero/src
-#include "rpc/message_data_structs.h" // monero/src
+#include "net/net_ssl.h"           // monero/contrib/epee/include
+#include "rpc/daemon_messages.h"   // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
+#include "rpc/message_data_structs.h" // monero/src
+#include "rpc/webhook.h"
 #include "util/source_location.h"
 #include "util/transactions.h"
-#include "wire/adapted/span.h"
-#include "wire/json.h"
-#include "wire/msgpack.h"
 
 #include "serialization/json_object.h"
 
@@ -165,130 +163,9 @@ namespace lws
       return true;
     }
 
-    void send_via_http(net::http::http_simple_client& client, boost::string_ref uri, const db::webhook_tx_confirmation& event, const net::http::fields_list& params, const std::chrono::milliseconds timeout)
+    void send_payment_hook(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events, net::ssl_verification_t verify_mode)
     {
-      if (uri.empty())
-        uri = "/";
-
-      epee::byte_slice bytes{};
-      const std::string& url = event.value.second.url;
-      const std::error_code json_error = wire::json::to_bytes(bytes, event);
-      const net::http::http_response_info* info = nullptr;
-      if (json_error)
-      {
-        MERROR("Failed to generate webhook JSON: " << json_error.message());
-        return;
-      }
-
-      MINFO("Sending webhook to " << url);
-      if (!client.invoke(uri, "POST", std::string{bytes.begin(), bytes.end()}, timeout, std::addressof(info), params))
-      {
-        MERROR("Failed to invoke http request to  " << url);
-        return;
-      }
-
-      if (!info)
-      {
-        MERROR("Failed to invoke http request to  " << url << ", internal error (null response ptr)");
-        return;
-      }
-
-      if (info->m_response_code != 200 && info->m_response_code != 201)
-      {
-        MERROR("Failed to invoke http request to  " << url << ", wrong response code: " << info->m_response_code);
-        return;
-      }
-    }
-
-    void send_via_http(const epee::span<const db::webhook_tx_confirmation> events, const std::chrono::milliseconds timeout, net::ssl_verification_t verify_mode)
-    {
-      if (events.empty())
-        return;
-
-      net::http::url_content url{};
-      net::http::http_simple_client client{};
-
-      net::http::fields_list params;
-      params.emplace_back("Content-Type", "application/json; charset=utf-8");
-
-      for (const db::webhook_tx_confirmation& event : events)
-      {
-        if (event.value.second.url == "zmq")
-          continue;
-        if (event.value.second.url.empty() || !net::parse_url(event.value.second.url, url))
-        {
-          MERROR("Bad URL for webhook event: " << event.value.second.url);
-          continue;
-        }
-
-        const bool https = (url.schema == "https");
-        if (!https && url.schema != "http")
-        {
-          MERROR("Only http or https connections: " << event.value.second.url);
-          continue;
-        }
-
-        const net::ssl_support_t ssl_mode = https ?
-          net::ssl_support_t::e_ssl_support_enabled : net::ssl_support_t::e_ssl_support_disabled;
-        net::ssl_options_t ssl_options{ssl_mode};
-        if (https)
-          ssl_options.verification = verify_mode;
-
-        if (url.port == 0)
-          url.port = https ? 443 : 80;
-
-        client.set_server(url.host, std::to_string(url.port), boost::none, std::move(ssl_options));
-        if (client.connect(timeout))
-          send_via_http(client, url.uri, event, params, timeout);
-        else
-          MERROR("Unable to send webhook to " << event.value.second.url);
-
-        client.disconnect();
-      }
-    }
-
-    struct zmq_index_single
-    {
-      const std::uint64_t index;
-      const db::webhook_tx_confirmation& event;
-    };
-
-    void write_bytes(wire::writer& dest, const zmq_index_single& self)
-    {
-      wire::object(dest, WIRE_FIELD(index), WIRE_FIELD(event));
-    }
-
-    void send_via_zmq(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events)
-    {
-      struct zmq_order
-      {
-        std::uint64_t current;
-        boost::mutex sync;
-
-        zmq_order()
-          : current(0), sync()
-        {}
-      };
-
-      static zmq_order ordering{};
-
-      //! \TODO monitor XPUB to cull the serialization
-      if (!events.empty() && client.has_publish())
-      {
-        // make sure the event is queued to zmq in order.
-        const boost::unique_lock<boost::mutex> guard{ordering.sync};
-
-        for (const auto& event : events)
-        {
-          const zmq_index_single index{ordering.current++, event};
-          MINFO("Sending ZMQ-PUB topics json-full-payment_hook and msgpack-full-payment_hook");
-          expect<void> result = success();
-          if (!(result = client.publish<wire::json>("json-full-payment_hook:", index)))
-            MERROR("Failed to serialize+send json-full-payment_hook: " << result.error().message());
-          if (!(result = client.publish<wire::msgpack>("msgpack-full-payment_hook:", index)))
-            MERROR("Failed to serialize+send msgpack-full-payment_hook: " << result.error().message());
-        }
-      }
+      rpc::send_webhook(client, events, "json-full-payment_hook:", "msgpack-full-payment_hook:", std::chrono::seconds{5}, verify_mode);
     }
 
     struct by_height
@@ -381,8 +258,7 @@ namespace lws
           else
             events.pop_back(); //cannot compute tx_hash
         }
-        send_via_http(epee::to_span(events), std::chrono::seconds{5}, verify_mode_);
-        send_via_zmq(client_, epee::to_span(events));
+        send_payment_hook(client_, epee::to_span(events), verify_mode_);
         return true;
       }
     };
@@ -789,8 +665,7 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_via_http(epee::to_span(updated->second), std::chrono::seconds{5}, webhook_verify);
-          send_via_zmq(client, epee::to_span(updated->second));
+          send_payment_hook(client, epee::to_span(updated->second), webhook_verify);
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
@@ -1033,15 +908,9 @@ namespace lws
     return {std::move(client)};
   }
 
-  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const boost::string_ref webhook_ssl_verification)
+  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const epee::net_utils::ssl_verification_t webhook_verify)
   {
     thread_count = std::max(std::size_t(1), thread_count);
-
-    net::ssl_verification_t webhook_verify = net::ssl_verification_t::none;
-    if (webhook_ssl_verification == "system_ca")
-      webhook_verify = net::ssl_verification_t::system_ca;
-    else if (webhook_ssl_verification != "none")
-      MONERO_THROW(lws::error::configuration, "Invalid webhook ssl verification mode");
 
     rpc::client client{};
     for (;;)

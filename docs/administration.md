@@ -144,14 +144,21 @@ This tells the scanner to rescan specific account(s) from the specified
 height.
 
 ### webhook_add
-This is used to track a specific payment ID to an address or all general
-payments to an address (where payment ID is zero). Using this endpint requires
-a web address or `zmq` for callback purposes, a primary (not integrated!)
-address, and finally the type ("tx-confirmation"). The event will remain in the
-database until one of the delete commands ([webhook_delete_uuid](#webhook_delete_uuid)
-or [webhook_delete](#webhook_delete)) is used to remove it. All webhooks are
-published over the ZMQ socket specified by `--zmq-pub` (when enabled/specified
-on command line) in addition to any HTTP server specified in the callback.
+This is used to track events happening in the database: (1) a new payment to
+an optional payment_id, or (2) a new account creation. This endpoint always
+requires a URL for callback purposes.
+
+When the event type is `tx-confirmation`, this endpint requires a web address
+for callback purposes, a primary (not integrated!) address, and finally the
+type ("tx-confirmation"). The event will remain in the database until one of
+the delete commands ([webhook_delete_uuid](#webhook_delete_uuid) or
+[webhook_delete](#webhook_delete)) is used to remove it.
+
+When the event type is `new-account`, this endpoint requires a web address
+for callback purposes, and the type ("new-account"). Spurious information
+will be returned for this endpoint to simplify the server implementation (i.e.
+several fields returned in the initial call are not useful to new account
+creations).
 
 > The provided URL will use SSL/TLS if `https://` is prefixed in the URL and
 will use plaintext if `http://` is prefixed in the URL. If `zmq` is provided
@@ -169,7 +176,8 @@ should be used, and (3) if the callback server is using "Let's Encrypt"
 used.
 
 
-#### Initial Request to server
+#### `tx-confirmation`
+##### Initial Request to server
 Example where admin authentication is required (`--disable-admin-auth` NOT
 set on start which is the default):
 ```json
@@ -222,7 +230,7 @@ executable, the event should be listed in the
 event will remain in the database until an explicit
 [`webhook_delete_uuid`](#webhook_delete_uuid) is invoked.
 
-#### Callback from Server
+##### Callback from Server
 When the event "fires" due to a transaction, the provided URL is invoked
 with a JSON payload that looks like the below:
 
@@ -257,6 +265,71 @@ which is the same information provided by the user API. The database will
 contain an entry in the `webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id`
 field of the JSON object provided by the `debug_database` command. The
 entry will be removed when the number of confirmations has been reached.
+
+#### `new-account`
+##### Initial Request to server
+Example where admin authentication is required (`--disable-admin-auth` NOT
+set on start which is the default):
+```json
+{
+  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09",
+  "params": {
+    "type": "new-account",
+    "url": "http://127.0.0.1:7001",
+    "token": "1234"
+  }
+}
+```
+
+Example where admin authentication is not required (`--disable-admin-auth` set on start):
+```json
+{
+  "params": {
+    "type": "new-account",
+    "url": "http://127.0.0.1:7001",
+    "token": "1234"
+  }
+}
+```
+
+As noted above - `token` is optional - it will default to the empty string.
+
+##### Initial Response from Server
+The server will replay all values back to the user for confirmation. An
+additional field - `event_id` - is also returned which contains a globally
+unique value (internally this is a 128-bit `UUID`). The fields
+`confirmations`, and `payment_id` are sent to simplify the backend, and
+can be ignored when the type is `new-account`.
+
+Example response:
+```json
+{
+  "payment_id": "0000000000000000",
+  "event_id": "c5a735e71b1e4f0a8bfaeff661d0b38a"",
+  "token": "1234",
+  "confirmations": 1,
+  "url": "http://127.0.0.1:7000"
+}
+```
+
+If you use the `debug_database` command provided by the `monero-lws-admin`
+executable, the event should be listed in the
+`webhooks_by_account_id,payment_id` field of the returned JSON object. The
+event will remain in the database until an explicit
+[`webhook_delete_uuid`](#webhook_delete_uuid) is invoked.
+
+##### Callback from Server
+When the event "fires" due to a new account creation, the provided URL is
+invoked with a JSON payload that looks like the below:
+
+```json
+{
+  "event_id": "c5a735e71b1e4f0a8bfaeff661d0b38a",
+  "token": "",
+  "address": "9zGwnfWRMTF9nFVW9DNKp46aJ43CRtQBWNFvPqFVSN3RUKHuc37u2RDi2GXGp1wRdSRo5juS828FqgyxkumDaE4s9qyyi9B"
+}
+```
+
 
 ### webhook_delete
 Deletes all webhooks associated with a specific Monero primary address.
