@@ -239,26 +239,35 @@ namespace lws { namespace rpc
 
   expect<void> webhook_add_::operator()(wire::writer& dest, db::storage disk, request&& req) const
   {
-    if (req.address)
+    switch (req.type)
     {
-      std::uint64_t payment_id = 0;
-      static_assert(sizeof(payment_id) == sizeof(crypto::hash8), "invalid memcpy");
-      if (req.payment_id)
-        std::memcpy(std::addressof(payment_id), std::addressof(*req.payment_id), sizeof(payment_id));
-      db::webhook_value event{
-        db::webhook_dupsort{payment_id, boost::uuids::random_generator{}()},
-        db::webhook_data{
-          std::move(req.url),
-          std::move(req.token).value_or(std::string{}),
-          req.confirmations.value_or(1)
-        }
-      };
-
-      MONERO_CHECK(disk.add_webhook(req.type, *req.address, event));
-      write_bytes(dest, event);
+      case db::webhook_type::tx_confirmation:
+        if (!req.address)
+          return {error::bad_webhook};
+        break;
+      case db::webhook_type::new_account:
+        if (req.address)
+          return {error::bad_webhook};
+        break;
+      default:
+        return {error::bad_webhook};
     }
-    else if (req.type == db::webhook_type::tx_confirmation)
-      return {error::bad_webhook};
+
+    std::uint64_t payment_id = 0;
+    static_assert(sizeof(payment_id) == sizeof(crypto::hash8), "invalid memcpy");
+    if (req.payment_id)
+      std::memcpy(std::addressof(payment_id), std::addressof(*req.payment_id), sizeof(payment_id));
+    db::webhook_value event{
+      db::webhook_dupsort{payment_id, boost::uuids::random_generator{}()},
+      db::webhook_data{
+        std::move(req.url),
+        std::move(req.token).value_or(std::string{}),
+        req.confirmations.value_or(1)
+      }
+    };
+
+    MONERO_CHECK(disk.add_webhook(req.type, req.address, event));
+    write_bytes(dest, event);
     return success();
   }
 

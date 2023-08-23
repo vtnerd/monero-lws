@@ -212,7 +212,7 @@ namespace db
       rescan(block_id height, epee::span<const account_address> addresses);
 
     //! Add an account for later approval. For use with the login endpoint.
-    expect<void> creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags) noexcept;
+    expect<std::vector<webhook_new_account>> creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags) noexcept;
 
     /*!
       Request lock height of an existing account. No effect if the `start_height`
@@ -249,12 +249,12 @@ namespace db
      
       \param type The webhook event type to be tracked by the DB.
       \param address is required for `type == tx_confirmation`, and is not
-        not needed for all other types (use default construction of zeroes).
+        not needed for all other types.
       \param event Additional information for the webhook. A valid "http"
         or "https" URL must be provided (or else error). All other information
         is optional.
      */
-    expect<void> add_webhook(webhook_type type, const account_address& address, const webhook_value& event);
+    expect<void> add_webhook(webhook_type type, const boost::optional<account_address>& address, const webhook_value& event);
 
     /*! Delete all webhooks associated with every value in `addresses`. This is
       likely only valid for `tx_confirmation` event types. */
