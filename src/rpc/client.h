@@ -38,7 +38,6 @@
 #include "rpc/message.h"   // monero/src
 #include "rpc/daemon_pub.h"
 #include "rpc/rates.h"
-#include "span.h"          // monero/contrib/epee/include
 #include "util/source_location.h"
 
 namespace lws
@@ -60,6 +59,14 @@ namespace rpc
     struct context;
   }
 
+  struct rmq_details
+  {
+    std::string address;
+    std::string credentials;
+    std::string exchange;
+    std::string routing;
+  };
+
   //! Abstraction for ZMQ RPC client. Only `get_rates()` thread-safe; use `clone()`.
   class client
   {
@@ -76,6 +83,9 @@ namespace rpc
     expect<void> get_response(cryptonote::rpc::Message& response, std::chrono::seconds timeout, source_location loc);
 
   public:
+
+    static constexpr const char* payment_topic_json() { return "json-full-payment_hook:"; }
+    static constexpr const char* payment_topic_msgpack() { return "msgpack-full-payment_hook:"; }
 
     enum class topic : std::uint8_t
     {
@@ -191,10 +201,11 @@ namespace rpc
 
       \param daemon_addr Location of ZMQ enabled `monerod` RPC.
       \param pub_addr Bind location for publishing ZMQ events.
+      \param rmq_info Required information for RMQ publishing (if enabled)
       \param rates_interval Frequency to retrieve exchange rates. Set value to
         `<= 0` to disable exchange rate retrieval.
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, std::chrono::minutes rates_interval);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval);
 
     context(context&&) = default;
     context(context const&) = delete;

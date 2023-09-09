@@ -58,6 +58,12 @@ namespace
     const command_line::arg_descriptor<std::string> daemon_rpc;
     const command_line::arg_descriptor<std::string> daemon_sub;
     const command_line::arg_descriptor<std::string> zmq_pub;
+#ifdef MLWS_RMQ_ENABLED
+    const command_line::arg_descriptor<std::string> rmq_address;
+    const command_line::arg_descriptor<std::string> rmq_credentials;
+    const command_line::arg_descriptor<std::string> rmq_exchange;
+    const command_line::arg_descriptor<std::string> rmq_routing;
+#endif
     const command_line::arg_descriptor<std::vector<std::string>> rest_servers;
     const command_line::arg_descriptor<std::vector<std::string>> admin_rest_servers;
     const command_line::arg_descriptor<std::string> rest_ssl_key;
@@ -94,6 +100,12 @@ namespace
       , daemon_rpc{"daemon", "<protocol>://<address>:<port> of a monerod ZMQ RPC", get_default_zmq()}
       , daemon_sub{"sub", "tcp://address:port or ipc://path of a monerod ZMQ Pub", ""}
       , zmq_pub{"zmq-pub", "tcp://address:port or ipc://path of a bind location for ZMQ pub events", ""}
+#ifdef MLWS_RMQ_ENABLED
+      , rmq_address{"rmq-address", "tcp://<host>/[vhost]"}
+      , rmq_credentials{"rmq-credentials", "<user>:<pass>"}
+      , rmq_exchange{"rmq-exchange", "Name of the RMQ exchange"}
+      , rmq_routing{"rmq-routing", "Routing for the specified exchange"}
+#endif
       , rest_servers{"rest-server", "[(https|http)://<address>:]<port>[/<prefix>] for incoming connections, multiple declarations allowed"}
       , admin_rest_servers{"admin-rest-server", "[(https|http])://<address>:]<port>[/<prefix>] for incoming admin connections, multiple declarations allowed"}
       , rest_ssl_key{"rest-ssl-key", "<path> to PEM formatted SSL key for https REST server", ""}
@@ -118,6 +130,12 @@ namespace
       command_line::add_arg(description, daemon_rpc);
       command_line::add_arg(description, daemon_sub);
       command_line::add_arg(description, zmq_pub);
+#ifdef MLWS_RMQ_ENABLED
+      command_line::add_arg(description, rmq_address);
+      command_line::add_arg(description, rmq_credentials);
+      command_line::add_arg(description, rmq_exchange);
+      command_line::add_arg(description, rmq_routing);
+#endif
       description.add_options()(rest_servers.name, boost::program_options::value<std::vector<std::string>>()->default_value({rest_default}, rest_default), rest_servers.description);
       command_line::add_arg(description, admin_rest_servers);
       command_line::add_arg(description, rest_ssl_key);
@@ -144,6 +162,7 @@ namespace
     std::string daemon_rpc;
     std::string daemon_sub;
     std::string zmq_pub;
+    lws::rpc::rmq_details rmq;
     std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
@@ -218,6 +237,16 @@ namespace
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),
       command_line::get_arg(args, opts.zmq_pub),
+#ifdef MLWS_RMQ_ENABLED
+      lws::rpc::rmq_details{
+        command_line::get_arg(args, opts.rmq_address),
+        command_line::get_arg(args, opts.rmq_credentials),
+        command_line::get_arg(args, opts.rmq_exchange),
+        command_line::get_arg(args, opts.rmq_routing)
+      },
+#else
+      lws::rpc::rmq_details{},
+#endif
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
@@ -239,7 +268,7 @@ namespace
 
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
-    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), prog.rates_interval);
+    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), std::move(prog.rmq), prog.rates_interval);
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();
