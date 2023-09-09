@@ -51,7 +51,7 @@ jobs:
         submodules: recursive
 
     - name: Configure Monero
-      run: cmake -B ${{github.workspace}}/monero/build -DWITH_RMQ=${{matrix.rmq}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
+      run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
 
     - name: Build Monero
       run: cd ${{github.workspace}}/monero/build && make -j$(nproc) daemon lmdb_lib multisig 
@@ -64,7 +64,7 @@ jobs:
     - name: Configure LWS
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{github.workspace}}/lws -DBUILD_TESTS=ON
+      run: cmake -B ${{github.workspace}}/lws/build -DWITH_RMQ=${{matrix.rmq}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{github.workspace}}/lws -DBUILD_TESTS=ON
 
     - name: Build LWS
       # Build your program with the given configuration
