@@ -41,7 +41,7 @@ jobs:
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf ccache
     - name: Install RabbitMQ iff WITH_RMQ (MacOS)
       if: matrix.rmq == 'ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-12' || matrix.os == 'macos-11')
-      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq
+      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
   
     - name: Checkout Monero Source
       uses: actions/checkout@v3
