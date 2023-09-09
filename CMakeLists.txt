@@ -34,6 +34,11 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_TESTS "Build Tests" OFF)
+option(WITH_RMQ "Build with RMQ publish support" OFF)
+if (WITH_RMQ)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMLWS_RMQ_ENABLED")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMLWS_RMQ_ENABLED")
+endif()
 
 set(MONERO_LIBRARIES
   daemon_messages
@@ -160,6 +165,13 @@ if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
   message(FATAL_ERROR "Boost libraries for monero build differs from this project")
 endif()
 
+if (WITH_RMQ)
+  find_path(RMQ_INCLUDE_DIR "amqp.h")
+  find_library(RMQ_LIBRARY rabbitmq REQUIRED)
+else()
+  set(RMQ_INCLUDE_DIR "")
+  set(RMQ_LIBRARY "")
+endif()
 
 set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
 set(LMDB_LIB_PATH "monero::lmdb")
