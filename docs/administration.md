@@ -68,6 +68,7 @@ are:
   * [**modify_account_status**](#modify_account_status): `{"status": "active"|"hidden"|"inactive", "addresses":[...]}`
   * [**reject_requests**](#reject_requests): `{"type": "import"|"create", "addresses":[...]}`
   * [**rescan**](#rescan): `{"height":..., "addresses":[...]}`
+  * [**validate**](#validate): `{"spend_public_hex":..., "view_public_hex":..., "view_key_hex":...}`
   * [**webhook_add**](#webhook_add): `{"type":"tx-confirmation", "address":"...", "url":"...", ...}` with optional fields:
     * **token**: A string to be returned when the webhook is triggered
     * **payment_id**: 16 hex characters representing a unique identifier for a transaction
@@ -142,6 +143,46 @@ information from that endpoint on how to use this one.
 ### rescan
 This tells the scanner to rescan specific account(s) from the specified
 height.
+
+### validate
+This takes the spend_public, view_public, and view key all as hex, and then
+does basic validation for the caller: (1) that each value is 64 hex-ascii
+characters, (2) that the public keys are valid ed25519 points, and that (3)
+the view_key matches the view_public.
+
+The return value is the `address` on success, and `error` object on
+validation failure:
+
+#### Example Request
+```json
+{
+  "params": {
+    "view_public_hex": "3e77c1ee5a396cd6c3f68ce343882b2a09317649d6501078911fb17a1adac0b6",
+    "spend_public_hex": "7028d918af2cc4f1cfa499cca2ef014e57124982b99004e9630caf0b25c13954",
+    "view_key_hex": "80..."
+  },
+  "auth": "f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09"
+}
+```
+
+#### Example Failure Return
+```json
+{
+  "error": {
+    "field": "view_public_hex",
+    "details": "Invalid public key format"
+  }
+}
+```
+HTTP error codes are still returned if the JSON itself is invalid.
+
+#### Example Success Return
+```json
+{
+  "address": "9wRAu3giCtKhSsVnkZJ7LLE6zqzrmMKpPg39S8aoC7T6F6GobeDpz8TcvVfTQT3ucW82oTYKG8v3ZMAeh8SZVXWwMdvwZew"
+}
+```
+
 
 ### webhook_add
 This is used to track events happening in the database: (1) a new payment to

@@ -167,6 +167,10 @@ namespace lws { namespace rpc
   {
     read_addresses(source, self, WIRE_FIELD(height));
   }
+  void read_bytes(wire::reader& source, validate_req& self)
+  {
+    wire::object(source, WIRE_FIELD(spend_public_hex), WIRE_FIELD(view_public_hex), WIRE_FIELD(view_key_hex));
+  }
   void read_bytes(wire::reader& source, webhook_add_req& self)
   {
     boost::optional<std::string> address;
@@ -235,6 +239,67 @@ namespace lws { namespace rpc
   expect<void> rescan_::operator()(wire::writer& dest, db::storage disk, const request& req) const
   {
     return write_addresses(dest, disk.rescan(req.height, epee::to_span(req.addresses)));
+  }
+
+  namespace
+  {
+    struct validate_error
+    {
+      std::string field;
+      std::string details;
+    };
+
+    void write_bytes(wire::writer& dest, const validate_error& self)
+    {
+      wire::object(dest, WIRE_FIELD(field), WIRE_FIELD(details));
+    }
+
+    expect<void> output_error(wire::writer& dest, std::string field, std::string details)
+    {
+      wire::object(dest, wire::field("error", validate_error{std::move(field), std::move(details)}));
+      return success();
+    }
+
+    template<typename T>
+    bool convert_key(wire::writer& dest, T& out, const boost::string_ref in, const boost::string_ref field)
+    {
+      if (in.size() != sizeof(out) * 2)
+      {
+        output_error(dest, std::string{field}, "Expected " + std::to_string(sizeof(out) * 2) + " characters");
+        return false;
+      }
+      if (!epee::from_hex::to_buffer(epee::as_mut_byte_span(out), in))
+      {
+        output_error(dest, std::string{field}, "Invalid hex");
+        return false;
+      }
+      return true;
+    }
+  }
+
+  expect<void> validate_::operator()(wire::writer& dest, const db::storage&, const request& req) const
+  {
+    db::account_address address{};
+    crypto::secret_key view_key{};
+
+    if (!convert_key(dest, address.spend_public, req.spend_public_hex, "spend_public_hex"))
+      return success(); // error is delivered in JSON as opposed to HTTP codes
+    if (!convert_key(dest, address.view_public, req.view_public_hex, "view_public_hex"))
+      return success();
+    if (!convert_key(dest, unwrap(unwrap(view_key)), req.view_key_hex, "view_key_hex"))
+      return success();
+
+    if (!crypto::check_key(address.spend_public))
+      return output_error(dest, "spend_public_hex", "Invalid public key format");
+    if (!crypto::check_key(address.view_public))
+      return output_error(dest, "view_public_hex", "Invalid public key format");
+
+    crypto::public_key test{};
+    if (!crypto::secret_key_to_public_key(view_key, test) || test != address.view_public)
+      return output_error(dest, "view_key_hex", "view_key and view_public do not match");
+
+    wire::object(dest, wire::field("address", db::address_string(address)));
+    return success();
   }
 
   expect<void> webhook_add_::operator()(wire::writer& dest, db::storage disk, request&& req) const
