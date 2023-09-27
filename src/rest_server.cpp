@@ -777,6 +777,7 @@ namespace lws
       {"/modify_account_status", call_admin<rpc::modify_account_>,  50 * 1024},
       {"/reject_requests",       call_admin<rpc::reject_requests_>, 50 * 1024},
       {"/rescan",                call_admin<rpc::rescan_>,          50 * 1024},
+      {"/validate",              call_admin<rpc::validate_>,        50 * 1024},
       {"/webhook_add",           call_admin<rpc::webhook_add_>,     50 * 1024},
       {"/webhook_delete",        call_admin<rpc::webhook_delete_>,  50 * 1024},
       {"/webhook_delete_uuid",   call_admin<rpc::webhook_del_uuid_>,50 * 1024},

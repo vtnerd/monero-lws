@@ -70,6 +70,14 @@ namespace rpc
   };
   void read_bytes(wire::reader&, rescan_req&);
 
+  struct validate_req
+  {
+    std::string spend_public_hex;
+    std::string view_public_hex;
+    std::string view_key_hex;
+  };
+  void read_bytes(wire::reader&, validate_req&);
+
   struct webhook_add_req
   {
     std::string url;
@@ -147,6 +155,13 @@ namespace rpc
   };
   constexpr const rescan_ rescan{};
 
+  struct validate_
+  {
+    using request = validate_req;
+    expect<void> operator()(wire::writer& dest, const db::storage&, const request& req) const;
+  };
+  constexpr const validate_ validate{};
+
   struct webhook_add_
   {
     using request = webhook_add_req;
@@ -177,5 +192,4 @@ namespace rpc
     { return (*this)(dest, std::move(disk)); }
   };
   constexpr const webhook_list_ webhook_list{};
-
 }} // lws // rpc
