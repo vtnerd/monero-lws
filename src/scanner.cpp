@@ -94,16 +94,22 @@ namespace lws
       std::atomic<bool> update;
     };
 
+    struct options
+    {
+      net::ssl_verification_t webhook_verify;
+      bool enable_subaddresses;
+    };
+
     struct thread_data
     {
-      explicit thread_data(rpc::client client, db::storage disk, std::vector<lws::account> users, net::ssl_verification_t webhook_verify)
-        : client(std::move(client)), disk(std::move(disk)), users(std::move(users)), webhook_verify(webhook_verify)
+      explicit thread_data(rpc::client client, db::storage disk, std::vector<lws::account> users, options opts)
+        : client(std::move(client)), disk(std::move(disk)), users(std::move(users)), opts(opts)
       {}
 
       rpc::client client;
       db::storage disk;
       std::vector<lws::account> users;
-      net::ssl_verification_t webhook_verify;
+      options opts;
     };
 
     // until we have a signal-handler safe notification system
@@ -263,6 +269,23 @@ namespace lws
       }
     };
 
+    struct subaddress_reader
+    {
+      expect<db::storage_reader> reader;
+      db::cursor::subaddress_indexes cur;
+
+      subaddress_reader(db::storage const& disk, const bool enable_subaddresses)
+        : reader(common_error::kInvalidArgument), cur(nullptr)
+      {
+        if (enable_subaddresses)
+        {
+          reader = disk.start_read();
+          if (!reader)
+            MERROR("Subadress lookup failure: " << reader.error().message());
+        }
+      }
+    };
+
     void scan_transaction_base(
       epee::span<lws::account> users,
       const db::block_id height,
@@ -270,6 +293,7 @@ namespace lws
       crypto::hash const& tx_hash,
       cryptonote::transaction const& tx,
       std::vector<std::uint64_t> const& out_ids,
+      subaddress_reader& reader,
       std::function<void(lws::account&, const db::spend&)> spend_action,
       std::function<bool(lws::account&, const db::output&)> output_action)
     {
@@ -280,6 +304,8 @@ namespace lws
       boost::optional<crypto::hash> prefix_hash;
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
       std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+      cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
+      std::vector<crypto::key_derivation> additional_derivations;
 
       {
         std::vector<cryptonote::tx_extra_field> extra;
@@ -297,6 +323,10 @@ namespace lws
         }
         else
           extra_nonce = boost::none;
+
+        // additional tx pub keys present when there are 3+ outputs in a tx involving subaddresses
+        if (reader.reader)
+          cryptonote::find_tx_extra_field_by_type(extra, additional_tx_pub_keys);
       } // destruct `extra` vector
 
       for (account& user : users)
@@ -307,6 +337,21 @@ namespace lws
         crypto::key_derivation derived;
         if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
           continue; // to next user
+
+        if (reader.reader && additional_tx_pub_keys.data.size() == tx.vout.size())
+        {
+          additional_derivations.resize(tx.vout.size());
+          std::size_t index = -1;
+          for (auto const& out: tx.vout)
+          {
+            ++index;
+            if (!crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
+            {
+              additional_derivations.clear();
+              break; // vout loop
+            }
+          }
+        }
 
         db::extra ext{};
         std::uint32_t mixin = 0;
@@ -324,23 +369,26 @@ namespace lws
             for (std::uint64_t offset : in_data->key_offsets)
             {
               goffset += offset;
-              if (user.has_spendable(db::output_id{in_data->amount, goffset}))
-              {
-                spend_action(
-                  user,
-                  db::spend{
-                    db::transaction_link{height, tx_hash},
-                    in_data->k_image,
-                    db::output_id{in_data->amount, goffset},
-                    timestamp,
-                    tx.unlock_time,
-                    mixin,
-                    {0, 0, 0}, // reserved
-                    payment_id.first,
-                    payment_id.second.long_
-                  }
-                );
-              }
+              const boost::optional<db::address_index> subaccount =
+                user.get_spendable(db::output_id{in_data->amount, goffset});
+              if (!subaccount)
+                continue; // to next input
+
+              spend_action(
+                user,
+                db::spend{
+                  db::transaction_link{height, tx_hash},
+                  in_data->k_image,
+                  db::output_id{in_data->amount, goffset},
+                  timestamp,
+                  tx.unlock_time,
+                  mixin,
+                  {0, 0, 0}, // reserved
+                  payment_id.first,
+                  payment_id.second.long_,
+                  *subaccount
+                }
+              );
             }
           }
           else if (boost::get<cryptonote::txin_gen>(std::addressof(in)))
@@ -358,15 +406,57 @@ namespace lws
 
           boost::optional<crypto::view_tag> view_tag_opt =
             cryptonote::get_output_view_tag(out);
-          if (!cryptonote::out_can_be_to_acc(view_tag_opt, derived, index))
+
+          const bool found_tag =
+            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, additional_derivations.at(index), index)) ||
+            cryptonote::out_can_be_to_acc(view_tag_opt, derived, index); 
+
+          if (!found_tag)
             continue; // to next output
 
-          crypto::public_key derived_pub;
-          const bool received =
-            crypto::wallet::derive_subaddress_public_key(out_pub_key, derived, index, derived_pub) &&
-            derived_pub == user.spend_public();
+          bool found_pub = false;
+          db::address_index account_index{db::major_index::primary, db::minor_index::primary};
+          crypto::key_derivation active_derived;
 
-          if (!received)
+          // inspect the additional and traditional keys
+          for (std::size_t attempt = 0; attempt < 2; ++attempt)
+          {
+            if (attempt == 0)
+              active_derived = derived;
+            else if (!additional_derivations.empty())
+              active_derived = additional_derivations.at(index);
+            else
+              break; // inspection loop
+
+            crypto::public_key derived_pub;
+            if (!crypto::wallet::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
+              continue; // to next available active_derived
+
+            if (user.spend_public() != derived_pub)
+            {
+              if (!reader.reader)
+                continue; // to next available active_derived
+
+              const expect<db::address_index> match =
+                reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
+              if (!match)
+              {
+                if (match != lmdb::error(MDB_NOTFOUND))
+                  MERROR("Failure when doing subaddress search: " << match.error().message());
+                continue; // to next available active_derived
+              }
+              found_pub = true;
+              account_index = *match;
+              break; // additional_derivations loop
+            }
+            else
+            {
+              found_pub = true;
+              break; // additional_derivations loop
+            }
+          }
+
+          if (!found_pub)
             continue; // to next output
 
           if (!prefix_hash)
@@ -381,7 +471,7 @@ namespace lws
           {
             const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), derived, index, bulletproof2
+              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_derived, index, bulletproof2
             );
             if (!decrypted)
             {
@@ -398,7 +488,7 @@ namespace lws
             if (!payment_id.first && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
             {
               payment_id.first = sizeof(crypto::hash8);
-              lws::decrypt_payment_id(payment_id.second.short_, derived);
+              lws::decrypt_payment_id(payment_id.second.short_, active_derived);
             }
           }
 
@@ -421,7 +511,8 @@ namespace lws
               {0, 0, 0, 0, 0, 0, 0}, // reserved bytes
               db::pack(ext, payment_id.first),
               payment_id.second,
-              tx.rct_signatures.txnFee
+              tx.rct_signatures.txnFee,
+              account_index
             }
           );
 
@@ -437,12 +528,13 @@ namespace lws
       const std::uint64_t timestamp,
       crypto::hash const& tx_hash,
       cryptonote::transaction const& tx,
-      std::vector<std::uint64_t> const& out_ids)
+      std::vector<std::uint64_t> const& out_ids,
+      subaddress_reader& reader)
     {
-      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, add_spend{}, add_output{});
+      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{});
     }
 
-    void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, rpc::client& client, const net::ssl_verification_t verify_mode)
+    void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, rpc::client& client, const options& opts)
     {
       // uint64::max is for txpool
       static const std::vector<std::uint64_t> fake_outs(
@@ -459,9 +551,10 @@ namespace lws
       const auto time =
         boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
-      send_webhook sender{disk, client, verify_mode};
+      subaddress_reader reader{disk, opts.enable_subaddresses};
+      send_webhook sender{disk, client, opts.webhook_verify};
       for (const auto& tx : parsed->txes)
-        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, null_spend{}, sender);
+        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
     }
 
     void update_rates(rpc::context& ctx)
@@ -481,7 +574,7 @@ namespace lws
         rpc::client client{std::move(data->client)};
         db::storage disk{std::move(data->disk)};
         std::vector<lws::account> users{std::move(data->users)};
-        const net::ssl_verification_t webhook_verify = data->webhook_verify;
+        const options opts = std::move(data->opts);
 
         assert(!users.empty());
         assert(std::is_sorted(users.begin(), users.end(), by_height{}));
@@ -568,7 +661,7 @@ namespace lws
               {
                 if (message->first != rpc::client::topic::txpool)
                   break; // inner for loop
-                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, webhook_verify);
+                scan_transactions(std::move(message->second), epee::to_mut_span(users), disk, client, opts);
               }
 
               for ( ; message != new_pubs->end(); ++message)
@@ -605,6 +698,7 @@ namespace lws
           else
             fetched->start_height = 0;
 
+          subaddress_reader reader{disk, opts.enable_subaddresses};
           for (auto block_data : boost::combine(blocks, indices))
           {
             ++(fetched->start_height);
@@ -629,7 +723,8 @@ namespace lws
               block.timestamp,
               miner_tx_hash,
               block.miner_tx,
-              *(indices.begin())
+              *(indices.begin()),
+              reader
             );
 
             indices.remove_prefix(1);
@@ -644,13 +739,15 @@ namespace lws
                 block.timestamp,
                 boost::get<0>(tx_data),
                 boost::get<1>(tx_data),
-                boost::get<2>(tx_data)
+                boost::get<2>(tx_data),
+                reader
               );
             }
 
             blockchain.push_back(cryptonote::get_block_hash(block));
           } // for each block
 
+          reader.reader = std::error_code{common_error::kInvalidArgument}; // cleanup reader before next write
           auto updated = disk.update(
             users.front().scan_height(), epee::to_span(blockchain), epee::to_span(users)
           );
@@ -665,7 +762,7 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_payment_hook(client, epee::to_span(updated->second), webhook_verify);
+          send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
@@ -692,7 +789,7 @@ namespace lws
       Launches `thread_count` threads to run `scan_loop`, and then polls for
       active account changes in background
     */
-    void check_loop(db::storage disk, rpc::context& ctx, std::size_t thread_count, std::vector<lws::account> users, std::vector<db::account_id> active, const net::ssl_verification_t webhook_verify)
+    void check_loop(db::storage disk, rpc::context& ctx, std::size_t thread_count, std::vector<lws::account> users, std::vector<db::account_id> active, const options opts)
     {
       assert(0 < thread_count);
       assert(0 < users.size());
@@ -754,7 +851,7 @@ namespace lws
         client.watch_scan_signals();
 
         auto data = std::make_shared<thread_data>(
-          std::move(client), disk.clone(), std::move(thread_users), webhook_verify
+          std::move(client), disk.clone(), std::move(thread_users), opts
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
       }
@@ -765,7 +862,7 @@ namespace lws
         client.watch_scan_signals();
 
         auto data = std::make_shared<thread_data>(
-          std::move(client), disk.clone(), std::move(users), webhook_verify
+          std::move(client), disk.clone(), std::move(users), opts
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
       }
@@ -908,7 +1005,7 @@ namespace lws
     return {std::move(client)};
   }
 
-  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const epee::net_utils::ssl_verification_t webhook_verify)
+  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const epee::net_utils::ssl_verification_t webhook_verify, const bool enable_subaddresses)
   {
     thread_count = std::max(std::size_t(1), thread_count);
 
@@ -931,7 +1028,7 @@ namespace lws
 
         for (db::account user : accounts.make_range())
         {
-          std::vector<db::output_id> receives{};
+          std::vector<std::pair<db::output_id, db::address_index>> receives{};
           std::vector<crypto::public_key> pubs{};
           auto receive_list = MONERO_UNWRAP(reader.get_outputs(user.id));
 
@@ -941,7 +1038,9 @@ namespace lws
 
           for (auto output = receive_list.make_iterator(); !output.is_end(); ++output)
           {
-            receives.emplace_back(output.get_value<MONERO_FIELD(db::output, spend_meta.id)>());
+            auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+            auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
+            receives.emplace_back(std::move(id), std::move(subaddr));
             pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
           }
 
@@ -960,7 +1059,7 @@ namespace lws
         checked_wait(account_poll_interval - (std::chrono::steady_clock::now() - last));
       }
       else
-        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active), webhook_verify);
+        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active), options{webhook_verify, enable_subaddresses});
 
       if (!scanner::is_running())
         return;

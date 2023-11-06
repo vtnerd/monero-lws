@@ -33,13 +33,20 @@ namespace lmdb
       return out;
     }
 
-    static epee::byte_slice make_value(const fixed_value_type& val1, const msgpack_value_type& val2)
+    static expect<epee::byte_slice> make_value(const fixed_value_type& val1, const msgpack_value_type& val2)
     {
       epee::byte_stream initial;
       initial.write({reinterpret_cast<const char*>(std::addressof(val1)), sizeof(val1)});
 
       wire::msgpack_slice_writer dest{std::move(initial), true};
-      wire_write::bytes(dest, val2);
+      try
+      {
+        wire_write::bytes(dest, val2);
+      }
+      catch (const wire::exception& e)
+      {
+        return {e.code()};
+      }
       return epee::byte_slice{dest.take_sink()};
     }
 
@@ -80,12 +87,9 @@ namespace lmdb
       auto msgpack_bytes = lmdb::to_byte_span(value);
       msgpack_bytes.remove_prefix(sizeof(out.first));
 
-      msgpack_value_type second{};
-      const std::error_code error = wire::msgpack::from_bytes(epee::byte_slice{{msgpack_bytes}}, second);
+      const std::error_code error = wire::msgpack::from_bytes(epee::byte_slice{{msgpack_bytes}}, out.second);
       if (error)
         return error;
-      out.second = std::move(second);
-
       return out;
     }
     

@@ -206,8 +206,8 @@ namespace wire_write
   inline constexpr std::size_t array_size(const W& dest, const T& source) noexcept
   { return array_size_(dest.need_array_size(), source); }
 
-  template<typename W, typename T>
-  inline void array(W& dest, const T& source)
+  template<typename W, typename T, typename F = wire::identity_>
+  inline void array(W& dest, const T& source, F f = {})
   {
     using value_type = typename T::value_type;
     static_assert(!std::is_same<value_type, char>::value, "write array of chars as binary");
@@ -215,7 +215,7 @@ namespace wire_write
 
     dest.start_array(array_size(dest, source));
     for (const auto& elem : source)
-      bytes(dest, elem);
+      bytes(dest, f(elem));
     dest.end_array();
   }
 
@@ -268,7 +268,7 @@ namespace wire
   template<typename W, typename T, typename F>
   inline void write_bytes(W& dest, const as_array_<T, F> source)
   {
-    wire_write::array(dest, boost::adaptors::transform(source.get_value(), source.filter));
+    wire_write::array(dest, source.get_value(), std::move(source.filter));
   }
   template<typename W, typename T>
   inline std::enable_if_t<is_array<T>::value> write_bytes(W& dest, const T& source)

@@ -26,13 +26,16 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <array>
 #include <boost/uuid/uuid.hpp>
 #include <cassert>
 #include <cstdint>
 #include <iosfwd>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
@@ -122,6 +125,49 @@ namespace db
   static_assert(sizeof(account_address) == 64, "padding in account_address");
   WIRE_DECLARE_OBJECT(account_address);
 
+  //! Major index of a subaddress
+  enum class major_index : std::uint32_t { primary = 0 };
+  WIRE_AS_INTEGER(major_index);
+
+  //! Minor index of a subaddress
+  enum class minor_index : std::uint32_t { primary = 0 };
+  WIRE_AS_INTEGER(minor_index);
+
+  //! Range within a major index
+  using index_range = std::array<minor_index, 2>;
+
+  //! Ranges within a major index
+  using index_ranges = std::vector<index_range>;
+
+  //! Compatible with msgpack_table
+  using subaddress_dict = std::pair<major_index, index_ranges>;
+  bool check_subaddress_dict(const subaddress_dict&);
+  WIRE_DECLARE_OBJECT(subaddress_dict);
+
+  //! A specific (sub)address index
+  struct address_index
+  {
+    major_index maj_i;
+    minor_index min_i;
+
+    crypto::public_key get_spend_public(account_address const& base, crypto::secret_key const& view) const;
+    constexpr bool is_zero() const noexcept
+    {
+      return maj_i == major_index::primary && min_i == minor_index::primary;
+    } 
+  };
+  static_assert(sizeof(address_index) == 4 * 2, "padding in address_index");
+  WIRE_DECLARE_OBJECT(address_index);
+
+  //! Maps a subaddress pubkey to its index values
+  struct subaddress_map
+  {
+    crypto::public_key subaddress; //!< Must be first for LMDB optimzations
+    address_index index;
+  };
+  static_assert(sizeof(subaddress_map) == 32 + 4 * 2, "padding in subaddress_map");
+  WIRE_DECLARE_OBJECT(subaddress_map);
+
   struct account
   {
     account_id id;          //!< Must be first for LMDB optimizations
@@ -205,9 +251,10 @@ namespace db
       crypto::hash long_;    //!< Long version of payment id (always decrypted)
     } payment_id;
     std::uint64_t fee;       //!< Total fee for transaction
+    address_index recipient;
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8,
+    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
     "padding in output"
   );
   void write_bytes(wire::writer&, const output&);
@@ -225,8 +272,9 @@ namespace db
     char reserved[3];
     std::uint8_t length;      //!< Length of `payment_id` field (0..32).
     crypto::hash payment_id;  //!< Unencrypted only, can't decrypt spend
+    address_index sender;
   };
-  static_assert(sizeof(spend) == 8 + 32 * 2 + 8 * 4 + 4 + 3 + 1 + 32, "padding in spend");
+  static_assert(sizeof(spend) == 8 + 32 * 2 + 8 * 4 + 4 + 3 + 1 + 32 + 2 * 4, "padding in spend");
   WIRE_DECLARE_OBJECT(spend);
 
   //! Key image and info needed to retrieve primary `spend` data.
@@ -324,6 +372,18 @@ namespace db
     account_address account;
   };
   void write_bytes(wire::writer&, const webhook_new_account&);
+
+  inline constexpr bool operator==(address_index const& left, address_index const& right) noexcept
+  {
+    return left.maj_i == right.maj_i && left.min_i == right.min_i;
+  }
+
+  inline constexpr bool operator<(address_index const& left, address_index const& right) noexcept
+  {
+    return left.maj_i == right.maj_i ?
+      left.min_i < right.min_i : left.maj_i < right.maj_i;
+  }
+
 
   bool operator==(transaction_link const& left, transaction_link const& right) noexcept;
   bool operator<(transaction_link const& left, transaction_link const& right) noexcept;
