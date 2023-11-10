@@ -178,13 +178,6 @@ namespace wire
     --expected_;
   }
 
-  void msgpack_writer::enumeration(const std::size_t index, const epee::span<char const* const> enums)
-  {
-    if (enums.size() < index)
-      throw std::logic_error{"Invalid enum/string value"};
-    unsigned_integer(index);
-  }
-
   void msgpack_writer::start_array(const std::size_t items)
   {
     write_count<msgpack::ftag_array, msgpack::array_types>(bytes_, items);

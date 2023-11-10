@@ -88,9 +88,6 @@ namespace wire
     //! \throw wire::exception if next token cannot be read as hex into `dest`.
     void binary(epee::span<std::uint8_t> dest) override final;
 
-    //! \throw wire::exception if invalid next token invalid enum. \return Index in `enums`.
-    std::size_t enumeration(epee::span<char const* const> enums) override final;
-
 
     //! \throw wire::exception if next token not `[`.
     std::size_t start_array() override final;
