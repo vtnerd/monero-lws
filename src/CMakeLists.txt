@@ -40,26 +40,33 @@ set(monero-lws-common_headers config.h error.h fwd.h)
 add_library(monero-lws-common ${monero-lws-common_sources} ${monero-lws-common_headers})
 target_link_libraries(monero-lws-common monero::libraries)
 
-
-add_executable(monero-lws-daemon server_main.cpp rest_server.cpp scanner.cpp)
-target_include_directories(monero-lws-daemon PUBLIC ${ZMQ_INCLUDE_PATH})
-target_link_libraries(monero-lws-daemon
-  PRIVATE
+add_library(monero-lws-daemon-common rest_server.cpp scanner.cpp)
+target_include_directories(monero-lws-daemon-common PUBLIC ${ZMQ_INCLUDE_PATH})
+target_link_libraries(monero-lws-daemon-common
+  PUBLIC
     monero::libraries
     ${MONERO_lmdb}
     monero-lws-common
     monero-lws-db
     monero-lws-rpc
-    monero-lws-util
     monero-lws-wire-json
+    monero-lws-util
     ${Boost_CHRONO_LIBRARY}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
-    ${Boost_FILESYSTEM_LIBRARY}
     ${Boost_THREAD_LIBRARY}
-    ${CMAKE_THREAD_LIBS_INIT}
+    ${Boost_THREAD_LIBS_INIT}
     ${EXTRA_LIBRARIES}
     ${ZMQ_LIB}
     Threads::Threads
+)
+
+add_executable(monero-lws-daemon server_main.cpp)
+target_link_libraries(monero-lws-daemon
+  PRIVATE
+    monero::libraries
+    monero-lws-daemon-common
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
 )
 
 add_executable(monero-lws-admin admin_main.cpp)
