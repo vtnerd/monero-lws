@@ -407,7 +407,7 @@ namespace lws
             db::output{
               db::transaction_link{height, tx_hash},
               db::output::spend_meta_{
-                db::output_id{out.amount, out_ids.at(index)},
+                db::output_id{tx.version < 2 ? out.amount : 0, out_ids.at(index)},
                 amount,
                 mixin,
                 boost::numeric_cast<std::uint32_t>(index),
