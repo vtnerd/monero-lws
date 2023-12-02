@@ -40,8 +40,11 @@ namespace lws_test
     std::uint64_t d = std::uint64_t(id);
     for (const auto& hash : snapshot)
     {
-      EXPECT(MONERO_UNWRAP(reader.get_block_hash(lws::db::block_id(d))) == hash);
-      ++d;
+      SETUP("Testing Block #: " + std::to_string(d))
+      {
+        EXPECT(MONERO_UNWRAP(reader.get_block_hash(lws::db::block_id(d))) == hash);
+        ++d;
+      }
     }
 
     const lws::db::block_info last_block =

@@ -30,11 +30,16 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
+#include "cryptonote_basic/account.h" // monero/src
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
+#include "cryptonote_config.h"        // monero/src
+#include "cryptonote_core/cryptonote_tx_utils.h"      // monero/src
 #include "db/chain.test.h"
 #include "db/storage.test.h"
-#include "net/zmq.h"             // monero/src
+#include "hardforks/hardforks.h"      // monero/src
+#include "net/zmq.h"                  // monero/src
 #include "rpc/client.h"
-#include "rpc/daemon_messages.h" // monero/src
+#include "rpc/daemon_messages.h"      // monero/src
 #include "scanner.h"
 #include "wire/error.h"
 #include "wire/json/write.h"
@@ -76,7 +81,7 @@ namespace
     return cryptonote::rpc::FullMessage::getResponse(message, id);
   }
 
-  void rpc_thread(void* server, const std::vector<epee::byte_slice>& reply)
+  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
   {
     struct stop_
     {
@@ -85,12 +90,20 @@ namespace
 
     try
     {
+      net::zmq::socket server{};
+      server.reset(zmq_socket(ctx, ZMQ_REP));
+      if (!server || zmq_bind(server.get(), rendevous))
+      {
+        std::cout << "Failed to create ZMQ server" << std::endl;
+        return;
+      }
+
       for (const epee::byte_slice& message : reply)
       {
         const auto start = std::chrono::steady_clock::now();
         for (;;)
         {
-          const auto request = net::zmq::receive(server, ZMQ_DONTWAIT);
+          const auto request = net::zmq::receive(server.get(), ZMQ_DONTWAIT);
           if (request)
             break;
 
@@ -108,7 +121,7 @@ namespace
           boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
         } // until error or received message
 
-        const auto sent = net::zmq::send(message.clone(), server);
+        const auto sent = net::zmq::send(message.clone(), server.get());
         if (!sent)
         {
           std::cout << "Failed to send dummy RPC message: " << sent.error().message() << std::endl;
@@ -126,28 +139,150 @@ namespace
   {
       boost::thread& thread;
       ~join() { thread.join(); }
-  }; 
+  };
+
+  struct transaction
+  {
+    cryptonote::transaction tx;
+    std::vector<crypto::secret_key> additional_keys;
+    crypto::secret_key key;
+    crypto::public_key pub_key;
+    crypto::public_key spend_public;
+    rct::key mask;
+  };
+
+  transaction make_miner_tx(lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags)
+  {
+    static constexpr std::uint64_t fee = 0;
+    transaction tx{};
+    crypto::generate_keys(tx.pub_key, tx.key);
+    add_tx_pub_key_to_extra(tx.tx, tx.pub_key);
+
+    cryptonote::txin_gen in;
+    in.height = std::uint64_t(height);
+    tx.tx.vin.push_back(in);
+
+    // This will work, until size of constructed block is less then CRYPTONOTE_BLOCK_GRANTED_FULL_REWARD_ZONE
+    uint64_t block_reward;
+    if (!cryptonote::get_block_reward(0, 0, 1000000, block_reward, num_testnet_hard_forks))
+      throw std::runtime_error{"Blcok is too big"};
+    block_reward += fee;
+
+    crypto::key_derivation derivation;
+    crypto::generate_key_derivation(miner_address.view_public, tx.key, derivation);
+    crypto::derive_public_key(derivation, 0, miner_address.spend_public, tx.spend_public);
+ 
+    crypto::view_tag view_tag;
+    if (use_view_tags)
+      crypto::derive_view_tag(derivation, 0, view_tag);
+
+    cryptonote::tx_out out;
+    cryptonote::set_tx_out(block_reward, tx.spend_public, use_view_tags, view_tag, out);
+
+    tx.tx.vout.push_back(out);
+    tx.tx.version = 2;
+    tx.tx.unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
+    tx.mask = rct::identity();
+
+    return tx;
+  }
+
+  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const bool use_view_tag)
+  {
+    static constexpr std::uint64_t input_amount = 20000;
+    static constexpr std::uint64_t output_amount = 8000;
+
+    crypto::secret_key unused_key{};
+    crypto::secret_key og_tx_key{};
+    crypto::public_key og_tx_public{};
+    crypto::generate_keys(og_tx_public, og_tx_key);
+
+    crypto::key_derivation derivation{};
+    crypto::public_key spend_public{};
+    crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, og_tx_key, derivation);
+    crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, spend_public);
+
+    std::unordered_map<crypto::public_key, cryptonote::subaddress_index> subaddresses;
+    subaddresses[keys.m_account_address.m_spend_public_key] = {0, 0};
+
+    std::vector<cryptonote::tx_source_entry> sources;
+    sources.emplace_back();
+    sources.back().amount = input_amount;
+    sources.back().mask = rct::identity(); //crypto::rand<rct::key>();
+    sources.back().rct = true;
+    sources.back().real_output = 15;
+    sources.back().real_output_in_tx_index = 0;
+    sources.back().real_out_tx_key = og_tx_public;
+    for (std::size_t i = 0; i < 15; ++i)
+    {
+      crypto::public_key next{};
+      crypto::generate_keys(next, unused_key);
+      sources.back().push_output(i + 20, next, 10000);
+    }
+    sources.back().outputs.emplace_back();
+    sources.back().outputs.back().first = 15 + 20;
+    sources.back().outputs.back().second.dest = rct::pk2rct(spend_public);
+    sources.back().outputs.back().second.mask = rct::commit(input_amount, sources.back().mask);
+
+    std::vector<cryptonote::tx_destination_entry> destinations;
+    destinations.emplace_back();
+    destinations.back().amount = output_amount;
+    destinations.back().addr = keys.m_account_address;
+
+    transaction out{};
+    EXPECT(
+      cryptonote::construct_tx_and_get_tx_key(
+        keys, subaddresses, sources, destinations, keys.m_account_address, {}, out.tx, 0, out.key,
+        out.additional_keys, true, {rct::RangeProofType::RangeProofBulletproof, 2}, use_view_tag
+      )
+    );
+
+    out.mask = sources.back().mask;
+    crypto::secret_key_to_public_key(out.key, out.pub_key);
+    crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, out.key, derivation);
+    crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, out.spend_public);
+    return out;
+  }
 }
 
-LWS_CASE("lws::scanner::sync")
+LWS_CASE("lws::scanner::sync and lws::scanner::run")
 {
+  cryptonote::account_keys keys{};
+  crypto::generate_keys(keys.m_account_address.m_spend_public_key, keys.m_spend_secret_key);
+  crypto::generate_keys(keys.m_account_address.m_view_public_key, keys.m_view_secret_key);
+
+  const lws::db::account_address account{
+    keys.m_account_address.m_view_public_key,
+    keys.m_account_address.m_spend_public_key
+  };
+
+  cryptonote::account_keys keys2{};
+  crypto::generate_keys(keys2.m_account_address.m_spend_public_key, keys2.m_spend_secret_key);
+  crypto::generate_keys(keys2.m_account_address.m_view_public_key, keys2.m_view_secret_key);
+
+  const lws::db::account_address account2{
+    keys2.m_account_address.m_view_public_key,
+    keys2.m_account_address.m_spend_public_key
+  };
+
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
     lws::scanner::reset();
     auto rpc = 
       lws::rpc::context::make(rendevous, {}, {}, {}, std::chrono::minutes{0});
 
-    net::zmq::socket server{};
-    server.reset(zmq_socket(rpc.zmq_context(), ZMQ_REP));
-    EXPECT(server);
-    EXPECT(0 <= zmq_bind(server.get(), rendevous));
 
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     const lws::db::block_info last_block =
       MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
 
-    SECTION("Invalid Response")
+    const auto get_account = [&db, &account] () -> lws::db::account
+    {
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account)).second;
+    };
+
+    SECTION("lws::scanner::sync Invalid Response")
     {
       const crypto::hash hashes[1] = {
         last_block.hash
@@ -156,13 +291,13 @@ LWS_CASE("lws::scanner::sync")
       std::vector<epee::byte_slice> messages{};
       messages.push_back(to_json_rpc(1));
 
-      boost::thread server_thread(&rpc_thread, server.get(), std::cref(messages));
+      boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
       const join on_scope_exit{server_thread};
       EXPECT(!lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, hashes);
     }
 
-    SECTION("Chain Update")
+    SECTION("lws::scanner::sync Update")
     {
       std::vector<epee::byte_slice> messages{};
       std::vector<crypto::hash> hashes{
@@ -188,7 +323,7 @@ LWS_CASE("lws::scanner::sync")
 
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, {hashes.data(), 1});
       {
-        boost::thread server_thread(&rpc_thread, server.get(), std::cref(messages));
+        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
@@ -211,13 +346,149 @@ LWS_CASE("lws::scanner::sync")
         message.hashes.resize(1);
         messages.push_back(daemon_response(message));
 
-        boost::thread server_thread(&rpc_thread, server.get(), std::cref(messages));
+        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
       }
     }
-  }
-}
 
+    SECTION("lws::scanner::run")
+    {
+      std::vector<epee::byte_slice> messages{};
+      transaction tx = make_miner_tx(last_block.id, account, false);
+      transaction tx2 = make_tx(lest_env, keys, true);
+
+      cryptonote::rpc::GetBlocksFast::Response bmessage{};
+      bmessage.start_height = std::uint64_t(last_block.id) + 1;
+      bmessage.current_height = bmessage.start_height + 1;
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx = tx.tx;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx2.tx));
+      bmessage.blocks.back().transactions.push_back(tx2.tx);
+      bmessage.output_indices.emplace_back();
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(100);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(101);
+      bmessage.blocks.push_back(bmessage.blocks.back());
+      bmessage.output_indices.push_back(bmessage.output_indices.back());
+
+      std::vector<crypto::hash> hashes{
+        last_block.hash,
+        cryptonote::get_block_hash(bmessage.blocks.back().block),
+      };
+      {
+        cryptonote::rpc::GetHashesFast::Response hmessage{};
+
+        hmessage.start_height = std::uint64_t(last_block.id);
+        hmessage.hashes = hashes;
+        hmessage.current_height = hmessage.start_height + hashes.size() - 1;
+        messages.push_back(daemon_response(hmessage));
+
+        hmessage.start_height = hmessage.current_height;
+        hmessage.hashes.front() = hmessage.hashes.back();
+        hmessage.hashes.resize(1);
+        messages.push_back(daemon_response(hmessage));
+
+        {
+          boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+          const join on_scope_exit{server_thread};
+          EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
+          lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
+        }
+      }
+
+      lws::scanner::reset();
+
+      EXPECT(db.add_account(account, keys.m_view_secret_key));
+      EXPECT(db.add_account(account2, keys2.m_view_secret_key));
+
+      messages.clear();
+      messages.push_back(daemon_response(bmessage));
+      bmessage.start_height = bmessage.current_height;
+      bmessage.blocks.resize(1);
+      bmessage.output_indices.resize(1);
+      messages.push_back(daemon_response(bmessage));
+      {
+        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+        const join on_scope_exit{server_thread};
+        lws::scanner::run(db.clone(), std::move(rpc), 1, epee::net_utils::ssl_verification_t::none);
+      }
+
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
+      lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
+
+      const lws::db::block_id new_last_block_id = lws::db::block_id(std::uint64_t(last_block.id) + 2);
+      EXPECT(get_account().scan_height == new_last_block_id);
+      {
+        const std::unordered_map<crypto::hash, lws::db::output> expected{
+          {
+            cryptonote::get_transaction_hash(tx.tx), lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_key
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx.tx),
+              tx.spend_public,
+              rct::commit(35184372088830, rct::identity()),
+              {},
+              lws::db::pack(lws::db::extra::coinbase_output, 0),
+              {},
+              0 // fee
+            },
+          },
+          {
+            cryptonote::get_transaction_hash(tx2.tx), lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_key
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx2.tx),
+              tx2.spend_public,
+              tx2.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000 // fee
+            },
+          }
+        };
+        auto reader = MONERO_UNWRAP(db.start_read());
+        auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
+        EXPECT(outputs.count() == 2);
+        auto output_it = outputs.make_iterator();
+        for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
+        {
+          auto real_output = *output_it;
+          const auto expected_output = expected.find(real_output.link.tx_hash);
+          EXPECT(expected_output != expected.end());
+
+          EXPECT(real_output.link.height == expected_output->second.link.height);
+          EXPECT(real_output.link.tx_hash == expected_output->second.link.tx_hash);
+          EXPECT(real_output.spend_meta.id == expected_output->second.spend_meta.id);
+          EXPECT(real_output.spend_meta.amount == expected_output->second.spend_meta.amount);
+          EXPECT(real_output.spend_meta.mixin_count == expected_output->second.spend_meta.mixin_count);
+          EXPECT(real_output.spend_meta.index == expected_output->second.spend_meta.index);
+          EXPECT(real_output.tx_prefix_hash == expected_output->second.tx_prefix_hash);
+          EXPECT(real_output.spend_meta.tx_public == expected_output->second.spend_meta.tx_public);
+          EXPECT(real_output.pub == expected_output->second.pub);
+          EXPECT(rct::commit(real_output.spend_meta.amount, real_output.ringct_mask) == expected_output->second.ringct_mask);
+          EXPECT(real_output.extra == expected_output->second.extra);
+          if (unpack(expected_output->second.extra).second == 8)
+            EXPECT(real_output.payment_id.short_ == expected_output->second.payment_id.short_);
+          EXPECT(real_output.fee == expected_output->second.fee);
+        }
+
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
+        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1))).count() == 0);
+        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
+      }
+    } //SECTION (lws::scanner::run)
+  } // SETUP
+} // LWS_CASE
 
