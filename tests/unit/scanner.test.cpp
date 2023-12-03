@@ -148,15 +148,14 @@ namespace
     crypto::secret_key key;
     crypto::public_key pub_key;
     crypto::public_key spend_public;
-    rct::key mask;
   };
 
-  transaction make_miner_tx(lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags)
+  transaction make_miner_tx(lest::env& lest_env, lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags)
   {
     static constexpr std::uint64_t fee = 0;
     transaction tx{};
     crypto::generate_keys(tx.pub_key, tx.key);
-    add_tx_pub_key_to_extra(tx.tx, tx.pub_key);
+    EXPECT(add_tx_pub_key_to_extra(tx.tx, tx.pub_key));
 
     cryptonote::txin_gen in;
     in.height = std::uint64_t(height);
@@ -164,13 +163,12 @@ namespace
 
     // This will work, until size of constructed block is less then CRYPTONOTE_BLOCK_GRANTED_FULL_REWARD_ZONE
     uint64_t block_reward;
-    if (!cryptonote::get_block_reward(0, 0, 1000000, block_reward, num_testnet_hard_forks))
-      throw std::runtime_error{"Blcok is too big"};
+    EXPECT(cryptonote::get_block_reward(0, 0, 1000000, block_reward, num_testnet_hard_forks));
     block_reward += fee;
 
     crypto::key_derivation derivation;
-    crypto::generate_key_derivation(miner_address.view_public, tx.key, derivation);
-    crypto::derive_public_key(derivation, 0, miner_address.spend_public, tx.spend_public);
+    EXPECT(crypto::generate_key_derivation(miner_address.view_public, tx.key, derivation));
+    EXPECT(crypto::derive_public_key(derivation, 0, miner_address.spend_public, tx.spend_public));
  
     crypto::view_tag view_tag;
     if (use_view_tags)
@@ -182,15 +180,16 @@ namespace
     tx.tx.vout.push_back(out);
     tx.tx.version = 2;
     tx.tx.unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
-    tx.mask = rct::identity();
 
     return tx;
   }
 
-  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const bool use_view_tag)
+  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const std::uint32_t ring_base, const bool use_view_tag)
   {
     static constexpr std::uint64_t input_amount = 20000;
     static constexpr std::uint64_t output_amount = 8000;
+
+    EXPECT(15 < std::numeric_limits<std::uint32_t>::max() - ring_base);
 
     crypto::secret_key unused_key{};
     crypto::secret_key og_tx_key{};
@@ -199,8 +198,8 @@ namespace
 
     crypto::key_derivation derivation{};
     crypto::public_key spend_public{};
-    crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, og_tx_key, derivation);
-    crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, spend_public);
+    EXPECT(crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, og_tx_key, derivation));
+    EXPECT(crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, spend_public));
 
     std::unordered_map<crypto::public_key, cryptonote::subaddress_index> subaddresses;
     subaddresses[keys.m_account_address.m_spend_public_key] = {0, 0};
@@ -208,21 +207,19 @@ namespace
     std::vector<cryptonote::tx_source_entry> sources;
     sources.emplace_back();
     sources.back().amount = input_amount;
-    sources.back().mask = rct::identity(); //crypto::rand<rct::key>();
     sources.back().rct = true;
     sources.back().real_output = 15;
     sources.back().real_output_in_tx_index = 0;
     sources.back().real_out_tx_key = og_tx_public;
-    for (std::size_t i = 0; i < 15; ++i)
+    for (std::uint32_t i = ring_base; i < 15 + ring_base; ++i)
     {
       crypto::public_key next{};
       crypto::generate_keys(next, unused_key);
-      sources.back().push_output(i + 20, next, 10000);
+      sources.back().push_output(i, next, 10000);
     }
     sources.back().outputs.emplace_back();
-    sources.back().outputs.back().first = 15 + 20;
+    sources.back().outputs.back().first = 15 + ring_base;
     sources.back().outputs.back().second.dest = rct::pk2rct(spend_public);
-    sources.back().outputs.back().second.mask = rct::commit(input_amount, sources.back().mask);
 
     std::vector<cryptonote::tx_destination_entry> destinations;
     destinations.emplace_back();
@@ -237,7 +234,6 @@ namespace
       )
     );
 
-    out.mask = sources.back().mask;
     crypto::secret_key_to_public_key(out.key, out.pub_key);
     crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, out.key, derivation);
     crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, out.spend_public);
@@ -356,8 +352,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
     SECTION("lws::scanner::run")
     {
       std::vector<epee::byte_slice> messages{};
-      transaction tx = make_miner_tx(last_block.id, account, false);
-      transaction tx2 = make_tx(lest_env, keys, true);
+      transaction tx = make_miner_tx(lest_env, last_block.id, account, false);
+      transaction tx2 = make_tx(lest_env, keys, 20, true);
+      transaction tx3 = make_tx(lest_env, keys, 86, true);
 
       cryptonote::rpc::GetBlocksFast::Response bmessage{};
       bmessage.start_height = std::uint64_t(last_block.id) + 1;
@@ -365,12 +362,16 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.blocks.emplace_back();
       bmessage.blocks.back().block.miner_tx = tx.tx;
       bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx2.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx3.tx));
       bmessage.blocks.back().transactions.push_back(tx2.tx);
+      bmessage.blocks.back().transactions.push_back(tx3.tx);
       bmessage.output_indices.emplace_back();
       bmessage.output_indices.back().emplace_back();
       bmessage.output_indices.back().back().push_back(100);
       bmessage.output_indices.back().emplace_back();
       bmessage.output_indices.back().back().push_back(101);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(102);
       bmessage.blocks.push_back(bmessage.blocks.back());
       bmessage.output_indices.push_back(bmessage.output_indices.back());
 
@@ -456,11 +457,29 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
               {},
               12000 // fee
             },
+          },
+	        {
+            cryptonote::get_transaction_hash(tx3.tx), lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_key
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx3.tx),
+              tx3.spend_public,
+              tx3.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000 // fee
+            },
           }
+
         };
         auto reader = MONERO_UNWRAP(db.start_read());
         auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
-        EXPECT(outputs.count() == 2);
+        EXPECT(outputs.count() == 3);
         auto output_it = outputs.make_iterator();
         for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
         {
@@ -484,8 +503,19 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           EXPECT(real_output.fee == expected_output->second.fee);
         }
 
+        auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
+        EXPECT(spends.count() == 1);
+        auto spend_it = spends.make_iterator();
+        auto real_spend = *spend_it;
+        EXPECT(real_spend.link.height == new_last_block_id);
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
+        const lws::db::output_id expected_out{0, 100};
+        EXPECT(real_spend.source == expected_out);
+        EXPECT(real_spend.mixin_count == 15);
+        EXPECT(real_spend.length == 0);
+        EXPECT(real_spend.payment_id == crypto::hash{});
+
         EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
-        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1))).count() == 0);
         EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
       }
     } //SECTION (lws::scanner::run)
