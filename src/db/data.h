@@ -204,8 +204,8 @@ namespace db
   {
     transaction_link link;    //!< Orders and links `spend` to `output`.
     crypto::key_image image;  //!< Unique ID for the spend
-    // `link` and `image` must in this order for LMDB optimizations
     output_id source;         //!< The output being spent
+    // `link`, `image`, and `source` must in this order for LMDB optimizations
     std::uint64_t timestamp;  //!< Timestamp of spend
     std::uint64_t unlock_time;//!< Unlock time of spend
     std::uint32_t mixin_count;//!< Ring-size of TX output

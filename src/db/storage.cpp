@@ -174,7 +174,13 @@ namespace db
       right_bytes.remove_prefix(sizeof(crypto::hash));
 
       static_assert(sizeof(crypto::key_image) == 32, "bad memcmp below");
-      return compare_32bytes(left_bytes, right_bytes);
+      diff = compare_32bytes(left_bytes, right_bytes);
+      if (diff)
+        return diff;
+
+      left_bytes.remove_prefix(sizeof(crypto::key_image));
+      right_bytes.remove_prefix(sizeof(crypto::key_image));
+      return less<output_id>(left_bytes, right_bytes);
     }
 
     constexpr const lmdb::basic_table<unsigned, block_info> blocks{
