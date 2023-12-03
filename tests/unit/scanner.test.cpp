@@ -475,8 +475,8 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
               12000 // fee
             },
           }
-
         };
+
         auto reader = MONERO_UNWRAP(db.start_read());
         auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
         EXPECT(outputs.count() == 3);
@@ -504,12 +504,26 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         }
 
         auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
-        EXPECT(spends.count() == 1);
+        EXPECT(spends.count() == 2);
         auto spend_it = spends.make_iterator();
+        EXPECT(!spend_it.is_end());
+
         auto real_spend = *spend_it;
         EXPECT(real_spend.link.height == new_last_block_id);
         EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
-        const lws::db::output_id expected_out{0, 100};
+        lws::db::output_id expected_out{0, 100};
+        EXPECT(real_spend.source == expected_out);
+        EXPECT(real_spend.mixin_count == 15);
+        EXPECT(real_spend.length == 0);
+        EXPECT(real_spend.payment_id == crypto::hash{});
+
+        ++spend_it;
+        EXPECT(!spend_it.is_end());
+
+        real_spend = *spend_it;
+        EXPECT(real_spend.link.height == new_last_block_id);
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
+        expected_out = lws::db::output_id{0, 101};
         EXPECT(real_spend.source == expected_out);
         EXPECT(real_spend.mixin_count == 15);
         EXPECT(real_spend.length == 0);
