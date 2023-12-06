@@ -59,11 +59,14 @@
   }                                                                     \
   void read_bytes(::wire::reader& source, type_& dest)                  \
   {                                                                     \
-    dest = type_(source.enumeration(map));                              \
+    const auto val = type_ ## _from_string(source.string());            \
+    if (!val)                                                           \
+      WIRE_DLOG_THROW(::wire::error::schema::enumeration, #type_);      \
+    dest = *val;                                                        \
   }                                                                     \
   void write_bytes(::wire::writer& dest, const type_ source)            \
   {                                                                     \
-    dest.enumeration(std::size_t(source), map);                         \
+    dest.string(get_string(source));                                    \
   }
 
 #define WIRE_DEFINE_OBJECT(type, map)                          \

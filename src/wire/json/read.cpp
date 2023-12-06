@@ -316,22 +316,6 @@ namespace wire
       WIRE_DLOG_THROW(error::schema::fixed_binary, "of size" << dest.size() * 2 << " but got " << value.size());
   }
 
-  std::size_t json_reader::enumeration(epee::span<char const* const> enums)
-  {
-    rapidjson_sax json_enum{error::schema::string};
-    read_next_value(json_enum);
-
-    const boost::string_ref value{json_enum.value.string.ptr, json_enum.value.string.length};
-    for (std::size_t i = 0; i < enums.size(); ++i)
-    {
-      if (value == enums[i])
-        return i;
-    }
-
-    WIRE_DLOG_THROW(error::schema::enumeration, value << " is not a valid enum");
-    return enums.size();
-  }
-
   std::size_t json_reader::start_array()
   {
     if (get_next_token() != '[')

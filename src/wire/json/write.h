@@ -101,8 +101,6 @@ namespace wire
     void string(boost::string_ref) override final;
     void binary(epee::span<const std::uint8_t> source) override final;
 
-    void enumeration(std::size_t index, epee::span<char const* const> enums) override final;
-
     void start_array(std::size_t) override final;
     void end_array() override final;
 
