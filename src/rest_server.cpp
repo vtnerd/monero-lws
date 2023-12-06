@@ -27,6 +27,7 @@
 #include "rest_server.h"
 
 #include <algorithm>
+#include <boost/range/counting_range.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <cstring>
 #include <limits>
@@ -140,6 +141,7 @@ namespace lws
 
     struct runtime_options
     {
+      std::uint32_t max_subaddresses;
       epee::net_utils::ssl_verification_t webhook_verify;
       bool disable_admin_auth;
     };
@@ -482,6 +484,23 @@ namespace lws
       }
     };
 
+    struct get_subaddrs
+    {
+      using request = rpc::account_credentials;
+      using response = rpc::get_subaddrs_response;
+
+      static expect<response> handle(request const& req, db::storage disk, rpc::client const&, runtime_options const& options)
+      {
+        auto user = open_account(req, std::move(disk));
+        if (!user)
+          return user.error();
+        auto subaddrs = user->second.get_subaddresses(user->first.id);
+        if (!subaddrs)
+          return subaddrs.error();
+        return response{std::move(*subaddrs)};
+      }
+    };
+
     struct get_unspent_outs
     {
       using request = rpc::get_unspent_outs_request;
@@ -642,6 +661,68 @@ namespace lws
       }
     };
 
+    struct provision_subaddrs
+    {
+      using request = rpc::provision_subaddrs_request;
+      using response = rpc::new_subaddrs_response;
+
+      static expect<response> handle(request req, db::storage disk, rpc::client const&, runtime_options const& options)
+      {
+        if (!req.maj_i && !req.min_i && !req.n_min && !req.n_maj)
+          return {lws::error::invalid_range};
+
+        db::account_id id = db::account_id::invalid;
+        {
+          auto user = open_account(req.creds, disk.clone());
+          if (!user)
+            return user.error();
+          id = user->first.id;
+        }
+
+        const std::uint32_t major_i = req.maj_i.value_or(0);
+        const std::uint32_t minor_i = req.min_i.value_or(0);
+        const std::uint32_t n_major = req.n_maj.value_or(50);
+        const std::uint32_t n_minor = req.n_min.value_or(500);
+        const bool get_all = req.get_all.value_or(true);
+
+        if (std::numeric_limits<std::uint32_t>::max() / n_major < n_minor)
+          return {lws::error::max_subaddresses};
+        if (options.max_subaddresses < n_major * n_minor)
+          return {lws::error::max_subaddresses};
+
+        std::vector<db::subaddress_dict> new_ranges;
+        std::vector<db::subaddress_dict> all_ranges;
+        if (n_major && n_minor)
+        {
+          std::vector<db::subaddress_dict> ranges;
+          ranges.reserve(n_major);
+          for (std::uint64_t elem : boost::counting_range(std::uint64_t(major_i), std::uint64_t(major_i) + n_major))
+          {
+            ranges.emplace_back(
+              db::major_index(elem), db::index_ranges{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}
+            );
+          }
+          auto upserted = disk.upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, options.max_subaddresses);
+          if (!upserted)
+            return upserted.error();
+          new_ranges = std::move(*upserted);
+        }
+
+        if (get_all)
+        {
+          // must start a new read after the last write
+          auto reader = disk.start_read();
+          if (!reader)
+            return reader.error();
+          auto rc = reader->get_subaddresses(id);
+          if (!rc)
+            return rc.error();
+          all_ranges = std::move(*rc);
+        }
+        return response{std::move(new_ranges), std::move(all_ranges)};
+      }
+    };
+
     struct submit_raw_tx
     {
       using request = rpc::submit_raw_tx_request;
@@ -669,6 +750,46 @@ namespace lws
           return {lws::error::tx_relay_failed};
 
         return response{"OK"};
+      }
+    };
+
+    struct upsert_subaddrs
+    {
+      using request = rpc::upsert_subaddrs_request;
+      using response = rpc::new_subaddrs_response;
+
+      static expect<response> handle(request req, db::storage disk, rpc::client const&, runtime_options const& options)
+      {
+        if (!options.max_subaddresses)
+          return {lws::error::max_subaddresses};
+
+        db::account_id id = db::account_id::invalid;
+        {
+          auto user = open_account(req.creds, disk.clone());
+          if (!user)
+            return user.error();
+          id = user->first.id;
+        }
+
+        const bool get_all = req.get_all.value_or(true);
+
+        std::vector<db::subaddress_dict> all_ranges;
+        auto new_ranges =
+          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, options.max_subaddresses);
+        if (!new_ranges)
+          return new_ranges.error();
+
+        if (get_all)
+        {
+          auto reader = disk.start_read();
+          if (!reader)
+            return reader.error();
+          auto rc = reader->get_subaddresses(id);
+          if (!rc)
+            return rc.error();
+          all_ranges = std::move(*rc);
+        }
+        return response{std::move(*new_ranges), std::move(all_ranges)};
       }
     };
 
@@ -758,14 +879,17 @@ namespace lws
 
     constexpr const endpoint endpoints[] =
     {
-      {"/get_address_info",      call<get_address_info>, 2 * 1024},
-      {"/get_address_txs",       call<get_address_txs>,  2 * 1024},
-      {"/get_random_outs",       call<get_random_outs>,  2 * 1024},
-      {"/get_txt_records",       nullptr,                0       },
-      {"/get_unspent_outs",      call<get_unspent_outs>, 2 * 1024},
-      {"/import_wallet_request", call<import_request>,   2 * 1024},
-      {"/login",                 call<login>,            2 * 1024},
-      {"/submit_raw_tx",         call<submit_raw_tx>,   50 * 1024}
+      {"/get_address_info",      call<get_address_info>,   2 * 1024},
+      {"/get_address_txs",       call<get_address_txs>,    2 * 1024},
+      {"/get_random_outs",       call<get_random_outs>,    2 * 1024},
+      {"/get_subaddrs",          call<get_subaddrs>,       2 * 1024},
+      {"/get_txt_records",       nullptr,                  0       },
+      {"/get_unspent_outs",      call<get_unspent_outs>,   2 * 1024},
+      {"/import_wallet_request", call<import_request>,     2 * 1024},
+      {"/login",                 call<login>,              2 * 1024},
+      {"/provision_subaddrs",    call<provision_subaddrs>, 2 * 1024},
+      {"/submit_raw_tx",         call<submit_raw_tx>,     50 * 1024},
+      {"/upsert_subaddrs",       call<upsert_subaddrs>,   10 * 1024}
     };
 
     constexpr const endpoint admin_endpoints[] =
@@ -893,7 +1017,7 @@ namespace lws
       {
         MINFO(body.error().message() << " from " << ctx.m_remote_address.str() << " on " << handler->name);
 
-        if (body.error().category() == wire::error::rapidjson_category())
+        if (body.error().category() == wire::error::rapidjson_category() || body == lws::error::invalid_range)
         {
           response.m_response_code = 400;
           response.m_response_comment = "Bad Request";
@@ -902,6 +1026,11 @@ namespace lws
         {
           response.m_response_code = 403;
           response.m_response_comment = "Forbidden";
+        }
+        else if (body == lws::error::max_subaddresses)
+        {
+          response.m_response_code = 409;
+          response.m_response_comment = "Conflict";
         }
         else if (body.matches(std::errc::timed_out) || body.matches(std::errc::no_lock_available))
         {
@@ -1017,7 +1146,7 @@ namespace lws
     };
 
     bool any_ssl = false;
-    const runtime_options options{config.webhook_verify, config.disable_admin_auth};
+    const runtime_options options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth};
     for (const std::string& address : addresses)
     {
       ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);

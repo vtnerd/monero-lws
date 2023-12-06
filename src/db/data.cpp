@@ -29,12 +29,18 @@
 #include <cstring>
 #include <memory>
 
+#include "cryptonote_config.h" // monero/src
 #include "db/string.h"
+#include "int-util.h"          // monero/contribe/epee/include
+#include "ringct/rctOps.h"     // monero/src
+#include "ringct/rctTypes.h"   // monero/src
 #include "wire.h"
+#include "wire/adapted/array.h"
 #include "wire/crypto.h"
 #include "wire/json/write.h"
 #include "wire/msgpack.h"
 #include "wire/uuid.h"
+#include "wire/vector.h"
 #include "wire/wrapper/defaulted.h"
 
 namespace lws
@@ -68,6 +74,102 @@ namespace db
     }
   }
   WIRE_DEFINE_OBJECT(account_address, map_account_address);
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_subaddress_dict(F& format, T& self)
+    {
+      wire::object(format,
+        wire::field<0>("key", std::ref(self.first)),
+        wire::field<1>("value", std::ref(self.second))
+      );
+    }
+  }
+
+  bool check_subaddress_dict(const subaddress_dict& self)
+  {
+    bool is_first = true;
+    minor_index last = minor_index::primary;
+    for (const auto& elem : self.second)
+    {
+      if (elem[1] < elem[0])
+      {
+        MERROR("Invalid subaddress_range (last before first");
+        return false;
+      }
+      if (std::uint32_t(elem[0]) <= std::uint64_t(last) + 1 && !is_first)
+      {
+        MERROR("Invalid subaddress_range (overlapping with previous)");
+        return false;
+      }
+      is_first = false;
+      last = elem[1];
+    }
+    return true;
+  }
+  void read_bytes(wire::reader& source, subaddress_dict& dest)
+  {
+    map_subaddress_dict(source, dest);
+    if (!check_subaddress_dict(dest))
+      WIRE_DLOG_THROW_(wire::error::schema::array);
+  }
+  void write_bytes(wire::writer& dest, const subaddress_dict& source)
+  { 
+    if (!check_subaddress_dict(source))
+      WIRE_DLOG_THROW_(wire::error::schema::array);
+    map_subaddress_dict(dest, source);
+  }
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_address_index(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, maj_i), WIRE_FIELD_ID(1, min_i));
+    }
+
+    crypto::secret_key get_subaddress_secret_key(const crypto::secret_key &a, const std::uint32_t major, const std::uint32_t minor)
+    {
+      char data[sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key) + 2 * sizeof(uint32_t)];
+      memcpy(data, config::HASH_KEY_SUBADDRESS, sizeof(config::HASH_KEY_SUBADDRESS));
+      memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS), &a, sizeof(crypto::secret_key));
+      std::uint32_t idx = SWAP32LE(major);
+      memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key), &idx, sizeof(uint32_t));
+      idx = SWAP32LE(minor);
+      memcpy(data + sizeof(config::HASH_KEY_SUBADDRESS) + sizeof(crypto::secret_key) + sizeof(uint32_t), &idx, sizeof(uint32_t));
+      crypto::secret_key m;
+      crypto::hash_to_scalar(data, sizeof(data), m);
+      return m;
+    }
+  }
+  WIRE_DEFINE_OBJECT(address_index, map_address_index);
+
+  crypto::public_key address_index::get_spend_public(account_address const& base, crypto::secret_key const& view) const
+  {
+    if (is_zero())
+      return base.spend_public;
+
+    // m = Hs(a || index_major || index_minor)
+    crypto::secret_key m = get_subaddress_secret_key(view, std::uint32_t(maj_i), std::uint32_t(min_i));
+
+    // M = m*G
+    crypto::public_key M;
+    crypto::secret_key_to_public_key(m, M);
+
+    // D = B + M
+    return rct::rct2pk(rct::addKeys(rct::pk2rct(base.spend_public), rct::pk2rct(M)));
+  }
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_subaddress_map(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, subaddress), WIRE_FIELD_ID(1, index));
+    }
+  }
+  WIRE_DEFINE_OBJECT(subaddress_map, map_subaddress_map);
 
   void write_bytes(wire::writer& dest, const account& self, const bool show_key)
   {
@@ -144,7 +246,8 @@ namespace db
       wire::field<10>("unlock_time", self.unlock_time),
       wire::field<11>("mixin_count", self.spend_meta.mixin_count),
       wire::field<12>("coinbase", coinbase),
-      wire::field<13>("fee", self.fee)
+      wire::field<13>("fee", self.fee),
+      wire::field<14>("recipient", self.recipient)
     );
   }
 
@@ -161,7 +264,8 @@ namespace db
         WIRE_FIELD(timestamp),
         WIRE_FIELD(unlock_time),
         WIRE_FIELD(mixin_count),
-        wire::optional_field("payment_id", std::ref(payment_id))
+        wire::optional_field("payment_id", std::ref(payment_id)),
+        WIRE_FIELD(sender)
       );
     }
   }

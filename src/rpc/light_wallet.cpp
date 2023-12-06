@@ -134,7 +134,8 @@ namespace
       wire::field("timestamp", iso_timestamp(self.data.first.timestamp)),
       wire::field("height", self.data.first.link.height),
       wire::field("spend_key_images", std::cref(self.data.second)),
-      wire::optional_field("rct", optional_rct)
+      wire::optional_field("rct", optional_rct),
+      wire::field("recipient", std::cref(self.data.first.recipient))
     );
   }
 
@@ -192,6 +193,12 @@ namespace lws
     convert_address(address, self.address);
   }
 
+  void rpc::write_bytes(wire::json_writer& dest, const new_subaddrs_response& self)
+  {
+    wire::object(dest, WIRE_FIELD(new_subaddrs), WIRE_FIELD(all_subaddrs));
+  }
+
+
   void rpc::write_bytes(wire::json_writer& dest, const transaction_spend& self)
   {
     wire::object(dest,
@@ -199,7 +206,8 @@ namespace lws
       wire::field("key_image", std::cref(self.possible_spend.image)),
       wire::field("tx_pub_key", std::cref(self.meta.tx_public)),
       wire::field("out_index", self.meta.index),
-      wire::field("mixin", self.possible_spend.mixin_count)
+      wire::field("mixin", self.possible_spend.mixin_count),
+      wire::field("sender", std::cref(self.possible_spend.sender))
     );
   }
 
@@ -278,6 +286,11 @@ namespace lws
     wire::object(dest, WIRE_FIELD(amount_outs));
   }
 
+  void rpc::write_bytes(wire::json_writer& dest, const get_subaddrs_response& self)
+  {
+    wire::object(dest, WIRE_FIELD(all_subaddrs));
+  }
+
   void rpc::read_bytes(wire::json_reader& source, get_unspent_outs_request& self)
   {
     std::string address;
@@ -331,6 +344,21 @@ namespace lws
     wire::object(dest, WIRE_FIELD_COPY(new_address), WIRE_FIELD_COPY(generated_locally));
   }
 
+  void rpc::read_bytes(wire::json_reader& source, provision_subaddrs_request& self)
+  {
+    std::string address;
+    wire::object(source,
+      wire::field("address", std::ref(address)),
+      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      WIRE_OPTIONAL_FIELD(maj_i),
+      WIRE_OPTIONAL_FIELD(min_i),
+      WIRE_OPTIONAL_FIELD(n_maj),
+      WIRE_OPTIONAL_FIELD(n_min),
+      WIRE_OPTIONAL_FIELD(get_all)
+    );
+    convert_address(address, self.creds.address);
+  }
+
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)
   {
     wire::object(source, WIRE_FIELD(tx));
@@ -338,5 +366,17 @@ namespace lws
   void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response self)
   {
     wire::object(dest, WIRE_FIELD_COPY(status));
+  }
+
+  void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)
+  {
+    std::string address;
+    wire::object(source,
+      wire::field("address", std::ref(address)),
+      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      WIRE_FIELD(subaddrs),
+      WIRE_OPTIONAL_FIELD(get_all)
+    );
+    convert_address(address, self.creds.address);
   }
 } // lws

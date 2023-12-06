@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/optional/optional.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -33,6 +34,7 @@
 
 #include "crypto/crypto.h"
 #include "fwd.h"
+#include "db/data.h"
 #include "db/fwd.h"
 
 namespace lws
@@ -43,19 +45,19 @@ namespace lws
     struct internal;
 
     std::shared_ptr<const internal> immutable_;
-    std::vector<db::output_id> spendable_;
+    std::vector<std::pair<db::output_id, db::address_index>> spendable_;
     std::vector<crypto::public_key> pubs_;
     std::vector<db::spend> spends_;
     std::vector<db::output> outputs_;
     db::block_id height_;
 
-    explicit account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<db::output_id> spendable, std::vector<crypto::public_key> pubs) noexcept;
+    explicit account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs) noexcept;
     void null_check() const;
 
   public:
 
     //! Construct an account from `source` and current `spendable` outputs.
-    explicit account(db::account const& source, std::vector<db::output_id> spendable, std::vector<crypto::public_key> pubs);
+    explicit account(db::account const& source, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs);
 
     /*!
       \return False if this is a "moved-from" account (i.e. the internal memory
@@ -96,8 +98,8 @@ namespace lws
     //! \return Current scan height of `this`.
     db::block_id scan_height() const noexcept { return height_; }
 
-    //! \return True iff `id` is spendable by `this`.
-    bool has_spendable(db::output_id const& id) const noexcept;
+    //! \return Subaddress index iff `id` is spendable by `this`.
+    boost::optional<db::address_index> get_spendable(db::output_id const& id) const noexcept;
 
     //! \return Outputs matched during the latest scan.
     std::vector<db::output> const& outputs() const noexcept { return outputs_; }

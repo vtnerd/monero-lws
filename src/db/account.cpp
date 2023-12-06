@@ -72,11 +72,11 @@ namespace lws
     crypto::secret_key view_key;
   };
 
-  account::account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<db::output_id> spendable, std::vector<crypto::public_key> pubs) noexcept
+  account::account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs) noexcept
     : immutable_(std::move(immutable))
     , spendable_(std::move(spendable))
     , pubs_(std::move(pubs))
-      , spends_()
+    , spends_()
     , outputs_()
     , height_(height)
   {}
@@ -87,7 +87,7 @@ namespace lws
       MONERO_THROW(::common_error::kInvalidArgument, "using moved from account");
   }
 
-  account::account(db::account const& source, std::vector<db::output_id> spendable, std::vector<crypto::public_key> pubs)
+  account::account(db::account const& source, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs)
     : account(std::make_shared<internal>(source), source.scan_height, std::move(spendable), std::move(pubs))
   {
     std::sort(spendable_.begin(), spendable_.end());
@@ -151,9 +151,15 @@ namespace lws
     return immutable_->view_key;
   }
 
-  bool account::has_spendable(db::output_id const& id) const noexcept
+  boost::optional<db::address_index> account::get_spendable(db::output_id const& id) const noexcept
   {
-    return std::binary_search(spendable_.begin(), spendable_.end(), id);
+    const auto searchable = 
+      std::make_pair(id, db::address_index{db::major_index::primary, db::minor_index::primary});
+    const auto account =
+      std::lower_bound(spendable_.begin(), spendable_.end(), searchable);
+    if (account == spendable_.end() || account->first != id)
+      return boost::none;
+    return account->second;
   }
 
   bool account::add_out(db::output const& out)
@@ -163,9 +169,10 @@ namespace lws
       return false;
 
     pubs_.insert(existing_pub, out.pub);
+    auto spendable_value = std::make_pair(out.spend_meta.id, out.recipient);
     spendable_.insert(
-      std::lower_bound(spendable_.begin(), spendable_.end(), out.spend_meta.id),
-      out.spend_meta.id
+      std::lower_bound(spendable_.begin(), spendable_.end(), spendable_value),
+      spendable_value
     );
     outputs_.push_back(out);
     return true;

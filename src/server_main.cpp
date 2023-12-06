@@ -78,6 +78,7 @@ namespace
     const command_line::arg_descriptor<bool> disable_admin_auth;
     const command_line::arg_descriptor<std::string> webhook_ssl_verification;
     const command_line::arg_descriptor<std::string> config_file;
+    const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
 
     static std::string get_default_zmq()
     {
@@ -120,6 +121,7 @@ namespace
       , disable_admin_auth{"disable-admin-auth", "Make auth field optional in HTTP-REST requests", false}
       , webhook_ssl_verification{"webhook-ssl-verification", "[<none|system_ca>] specify SSL verification mode for webhooks", "system_ca"}
       , config_file{"config-file", "Specify any option in a config file; <name>=<value> on separate lines"}
+      , max_subaddresses{"max-subaddresses", "Maximum number of subaddresses per primary account (defaults to 0)", 0}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -150,6 +152,7 @@ namespace
       command_line::add_arg(description, disable_admin_auth);
       command_line::add_arg(description, webhook_ssl_verification);
       command_line::add_arg(description, config_file);
+      command_line::add_arg(description, max_subaddresses);
     }
   };
 
@@ -230,6 +233,7 @@ namespace
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
+	command_line::get_arg(args, opts.max_subaddresses),
         webhook_verify,
         command_line::get_arg(args, opts.external_bind),
         command_line::get_arg(args, opts.disable_admin_auth)
@@ -250,7 +254,7 @@ namespace
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
-      command_line::get_arg(args, opts.create_queue_max),
+      command_line::get_arg(args, opts.create_queue_max)
     };
 
     prog.rest_config.threads = std::max(std::size_t(1), prog.rest_config.threads);
@@ -273,6 +277,7 @@ namespace
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = lws::scanner::sync(disk.clone(), ctx.connect().value()).value();
 
+    const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
     const auto webhook_verify = prog.rest_config.webhook_verify;
     lws::rest_server server{
       epee::to_span(prog.rest_servers), prog.admin_rest_servers, disk.clone(), std::move(client), std::move(prog.rest_config)
@@ -283,7 +288,7 @@ namespace
       MINFO("Listening for REST admin clients at " << address);
 
     // blocks until SIGINT
-    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, webhook_verify);
+    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, webhook_verify, enable_subaddresses);
   }
 } // anonymous
 
