@@ -57,7 +57,9 @@ namespace lws
     exchange_rates_fetch,       //!< Exchange rates fetching failed
     exchange_rates_old,         //!< Exchange rates are older than cache interval
     http_server,                //!< HTTP server failure (init or run)
+    invalid_range,              //!< Invalid subaddress range provided
     json_rpc,                   //!< Error returned by JSON-RPC server
+    max_subaddresses,           //!< Max subaddresses exceeded
     not_enough_mixin,           //!< Not enough outputs to meet mixin count
     signal_abort_process,       //!< In process ZMQ PUB to abort the process was received
     signal_abort_scan,          //!< In process ZMQ PUB to abort the scan was received

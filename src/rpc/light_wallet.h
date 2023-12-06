@@ -65,6 +65,15 @@ namespace rpc
   void read_bytes(wire::json_reader&, account_credentials&);
 
 
+  struct new_subaddrs_response
+  {
+    new_subaddrs_response() = delete;
+    std::vector<db::subaddress_dict> new_subaddrs;
+    std::vector<db::subaddress_dict> all_subaddrs;
+  };
+  void write_bytes(wire::json_writer&, const new_subaddrs_response&);
+
+
   struct transaction_spend
   {
     transaction_spend() = delete;
@@ -164,6 +173,14 @@ namespace rpc
   void write_bytes(wire::json_writer&, const get_unspent_outs_response&);
 
 
+  struct get_subaddrs_response
+  {
+    get_subaddrs_response() = delete;
+    std::vector<db::subaddress_dict> all_subaddrs;
+  };
+  void write_bytes(wire::json_writer&, const get_subaddrs_response&);
+
+
   struct import_response
   {
     import_response() = delete;
@@ -193,6 +210,19 @@ namespace rpc
   void write_bytes(wire::json_writer&, login_response);
 
 
+  struct provision_subaddrs_request
+  {
+    provision_subaddrs_request() = delete;
+    account_credentials creds;
+    boost::optional<std::uint32_t> maj_i;
+    boost::optional<std::uint32_t> min_i;
+    boost::optional<std::uint32_t> n_maj;
+    boost::optional<std::uint32_t> n_min;
+    boost::optional<bool> get_all;
+  };
+  void read_bytes(wire::json_reader&, provision_subaddrs_request&);
+
+  
   struct submit_raw_tx_request
   {
     submit_raw_tx_request() = delete;
@@ -206,5 +236,15 @@ namespace rpc
     const char* status;
   };
   void write_bytes(wire::json_writer&, submit_raw_tx_response);
+
+
+  struct upsert_subaddrs_request
+  {
+    upsert_subaddrs_request() = delete;
+    account_credentials creds;
+    std::vector<db::subaddress_dict> subaddrs;
+    boost::optional<bool> get_all;
+  };
+  void read_bytes(wire::json_reader&, upsert_subaddrs_request&);
 } // rpc
 } // lws

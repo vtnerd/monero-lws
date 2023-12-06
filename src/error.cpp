@@ -85,10 +85,14 @@ namespace lws
         return "Unspecified error when retrieving exchange rates";
       case error::http_server:
         return "HTTP server failed";
+      case error::invalid_range:
+        return "Invalid subaddress range provided";
       case error::json_rpc:
         return "Error returned by JSON-RPC server";
       case error::exchange_rates_old:
         return "Exchange rates are older than cache interval";
+      case error::max_subaddresses:
+        return "Max subaddresses exceeded";
       case error::not_enough_mixin:
         return "Not enough outputs to meet requested mixin count";
       case error::signal_abort_process:
