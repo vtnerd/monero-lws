@@ -130,13 +130,6 @@ namespace wire
       //}
   }
 
-  void json_writer::enumeration(const std::size_t index, const epee::span<char const* const> enums)
-  {
-    if (enums.size() < index)
-      throw std::logic_error{"Invalid enum/string value"};
-    string({enums[index], std::strlen(enums[index])});
-  }
-
   void json_writer::start_array(std::size_t)
   {
     formatter_.StartArray();

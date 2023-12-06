@@ -136,8 +136,6 @@ namespace wire
     //! \throw wire::exception if `source.size()` exceeds 2^32-1
     void binary(epee::span<const std::uint8_t> source) override final;
 
-    void enumeration(std::size_t index, epee::span<char const* const> enums) override final;
-
     //! \throw wire::exception if `items` exceeds 2^32-1.
     void start_array(std::size_t items) override final;
     void end_array() override final { --expected_; }

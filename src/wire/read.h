@@ -104,9 +104,6 @@ namespace wire
     //! \throw wire::exception if next value cannot be read as binary into `dest`.
     virtual void binary(epee::span<std::uint8_t> dest) = 0;
 
-    //! \throw wire::exception if next value invalid enum. \return Index in `enums`.
-    virtual std::size_t enumeration(epee::span<char const* const> enums) = 0;
-
     //! \throw wire::exception if next value not array
     virtual std::size_t start_array() = 0;
 

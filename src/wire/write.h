@@ -67,8 +67,6 @@ namespace wire
     virtual void string(boost::string_ref) = 0;
     virtual void binary(epee::span<const std::uint8_t> bytes) = 0;
 
-    virtual void enumeration(std::size_t index, epee::span<char const* const> enums) = 0;
-
     virtual void start_array(std::size_t) = 0;
     virtual void end_array() = 0;
 

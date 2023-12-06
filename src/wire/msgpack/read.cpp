@@ -428,14 +428,6 @@ namespace wire
     std::memcpy(dest.data(), bytes.data(), dest.size());
   }
 
-  std::size_t msgpack_reader::enumeration(const epee::span<char const* const> enums)
-  {
-    const std::uintmax_t value = unsigned_integer();
-    if (enums.size() < value)
-      WIRE_DLOG_THROW(error::schema::enumeration, value << " is not a valid enum");
-    return std::size_t(value);
-  }
-
   std::size_t msgpack_reader::start_array()
   {
     const std::size_t upcoming =
