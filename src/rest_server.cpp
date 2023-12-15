@@ -40,6 +40,7 @@
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
 #include "db/storage.h"
+#include "db/string.h"
 #include "error.h"
 #include "lmdb/util.h"             // monero/src
 #include "net/http_base.h"         // monero/contrib/epee/include
@@ -144,6 +145,7 @@ namespace lws
       std::uint32_t max_subaddresses;
       epee::net_utils::ssl_verification_t webhook_verify;
       bool disable_admin_auth;
+      bool auto_accept_creation;
     };
 
     struct get_address_info
@@ -648,6 +650,13 @@ namespace lws
         if (!hooks)
           return hooks.error();
 
+        if (options.auto_accept_creation)
+        {
+          const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1});
+          if (!accepted)
+            MERROR("Failed to move account " << db::address_string(req.creds.address) << " to available state: " << accepted.error());
+        }
+
         if (!hooks->empty())
         {
           expect<rpc::client> client = gclient.clone();
@@ -1146,7 +1155,7 @@ namespace lws
     };
 
     bool any_ssl = false;
-    const runtime_options options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth};
+    const runtime_options options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation};
     for (const std::string& address : addresses)
     {
       ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);

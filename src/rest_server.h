@@ -57,6 +57,7 @@ namespace lws
       epee::net_utils::ssl_verification_t webhook_verify;
       bool allow_external;
       bool disable_admin_auth;
+      bool auto_accept_creation;
     };
     
     explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);
