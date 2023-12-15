@@ -416,15 +416,22 @@ namespace lws
 
           bool found_pub = false;
           db::address_index account_index{db::major_index::primary, db::minor_index::primary};
-          crypto::key_derivation active_derived;
+          crypto::key_derivation active_derived{};
+          crypto::public_key active_pub{};
 
           // inspect the additional and traditional keys
           for (std::size_t attempt = 0; attempt < 2; ++attempt)
           {
             if (attempt == 0)
+            {
               active_derived = derived;
+              active_pub = key.pub_key;
+            }
             else if (!additional_derivations.empty())
+            {
               active_derived = additional_derivations.at(index);
+              active_pub = additional_tx_pub_keys.data.at(index);
+            }
             else
               break; // inspection loop
 
@@ -491,7 +498,6 @@ namespace lws
               lws::decrypt_payment_id(payment_id.second.short_, active_derived);
             }
           }
-
           const bool added = output_action(
             user,
             db::output{
@@ -501,7 +507,7 @@ namespace lws
                 amount,
                 mixin,
                 boost::numeric_cast<std::uint32_t>(index),
-                key.pub_key
+                active_pub
               },
               timestamp,
               tx.unlock_time,
