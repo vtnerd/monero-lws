@@ -79,6 +79,7 @@ namespace
     const command_line::arg_descriptor<std::string> webhook_ssl_verification;
     const command_line::arg_descriptor<std::string> config_file;
     const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
+    const command_line::arg_descriptor<bool> auto_accept_creation;
 
     static std::string get_default_zmq()
     {
@@ -122,6 +123,7 @@ namespace
       , webhook_ssl_verification{"webhook-ssl-verification", "[<none|system_ca>] specify SSL verification mode for webhooks", "system_ca"}
       , config_file{"config-file", "Specify any option in a config file; <name>=<value> on separate lines"}
       , max_subaddresses{"max-subaddresses", "Maximum number of subaddresses per primary account (defaults to 0)", 0}
+      , auto_accept_creation{"auto-accept-creation", "New account creation requests are automatically accepted", false}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -153,6 +155,7 @@ namespace
       command_line::add_arg(description, webhook_ssl_verification);
       command_line::add_arg(description, config_file);
       command_line::add_arg(description, max_subaddresses);
+      command_line::add_arg(description, auto_accept_creation);
     }
   };
 
@@ -236,7 +239,8 @@ namespace
 	command_line::get_arg(args, opts.max_subaddresses),
         webhook_verify,
         command_line::get_arg(args, opts.external_bind),
-        command_line::get_arg(args, opts.disable_admin_auth)
+        command_line::get_arg(args, opts.disable_admin_auth),
+        command_line::get_arg(args, opts.auto_accept_creation)
       },
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),
