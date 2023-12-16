@@ -511,7 +511,7 @@ namespace lws
               {0, 0, 0, 0, 0, 0, 0}, // reserved bytes
               db::pack(ext, payment_id.first),
               payment_id.second,
-              tx.rct_signatures.txnFee,
+              cryptonote::get_tx_fee(tx),
               account_index
             }
           );
