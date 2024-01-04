@@ -448,9 +448,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       EXPECT(tx3.spend_publics.size() == 1);
 
       destinations.emplace_back();
-      //destinations.back().amount = 2000;
-      //destinations.back().addr = keys_subaddr1.m_account_address;
-      //destinations.back().is_subaddress = true;
+      destinations.back().amount = 2000;
+      destinations.back().addr = keys_subaddr1.m_account_address;
+      destinations.back().is_subaddress = true;
 
       transaction tx4 = make_tx(lest_env, keys, destinations, 50, false);
       EXPECT(tx4.pub_keys.size() == 1);
@@ -461,7 +461,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       //destinations.back().addr = keys_subaddr2.m_account_address;
       //destinations.back().is_subaddress = true;
 
-      transaction tx5 = make_tx(lest_env, keys, destinations, 100, true);
+      //transaction tx5 = make_tx(lest_env, keys, destinations, 100, true);
       //EXPECT(tx5.pub_keys.size() == 3);
       //EXPECT(tx5.spend_publics.size() == 3);
 
