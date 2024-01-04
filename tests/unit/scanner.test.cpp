@@ -144,7 +144,7 @@ namespace
 
   struct transaction
   {
-    std::unique_ptr<cryptonote::transaction> tx;
+    cryptonote::transaction tx;
     std::vector<crypto::secret_key> additional_keys;
     std::vector<crypto::public_key> pub_keys;
     std::vector<crypto::public_key> spend_publics;
@@ -155,17 +155,16 @@ namespace
     static constexpr std::uint64_t fee = 0;
 
     transaction tx{};
-    tx.tx.reset(new cryptonote::transaction);
     tx.pub_keys.emplace_back();
     tx.spend_publics.emplace_back();
 
     crypto::secret_key key;
     crypto::generate_keys(tx.pub_keys.back(), key);
-    EXPECT(add_tx_pub_key_to_extra(*tx.tx, tx.pub_keys.back()));
+    EXPECT(add_tx_pub_key_to_extra(tx.tx, tx.pub_keys.back()));
 
     cryptonote::txin_gen in;
     in.height = std::uint64_t(height);
-    tx.tx->vin.push_back(in);
+    tx.tx.vin.push_back(in);
 
     // This will work, until size of constructed block is less then CRYPTONOTE_BLOCK_GRANTED_FULL_REWARD_ZONE
     uint64_t block_reward;
@@ -183,9 +182,9 @@ namespace
     cryptonote::tx_out out;
     cryptonote::set_tx_out(block_reward, tx.spend_publics.back(), use_view_tags, view_tag, out);
 
-    tx.tx->vout.push_back(out);
-    tx.tx->version = 2;
-    tx.tx->unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
+    tx.tx.vout.push_back(out);
+    tx.tx.version = 2;
+    tx.tx.unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
 
     return tx;
   }
@@ -248,21 +247,20 @@ namespace
     sources.back().outputs.back().second.dest = rct::pk2rct(spend_public);
  
     transaction out{};
-    out.tx.reset(new cryptonote::transaction);
     EXPECT(
       cryptonote::construct_tx_and_get_tx_key(
-        keys, subaddresses, sources, destinations, keys.m_account_address, {}, *out.tx, 0, unused_key,
+        keys, subaddresses, sources, destinations, keys.m_account_address, {}, out.tx, 0, unused_key,
         out.additional_keys, true, {rct::RangeProofType::RangeProofBulletproof, 2}, use_view_tag
       )
     );
 
-    for (const auto& vout : out.tx->vout)
+    for (const auto& vout : out.tx.vout)
       boost::apply_visitor(get_spend_public{out.spend_publics}, vout.target);
 
     if (out.additional_keys.empty())
     {
       std::vector<cryptonote::tx_extra_field> extra;
-      EXPECT(cryptonote::parse_tx_extra(out.tx->extra, extra));
+      EXPECT(cryptonote::parse_tx_extra(out.tx.extra, extra));
  
       cryptonote::tx_extra_pub_key key;
       EXPECT(cryptonote::find_tx_extra_field_by_type(extra, key));
@@ -284,6 +282,8 @@ namespace
 
 LWS_CASE("lws::scanner::sync and lws::scanner::run")
 {
+   mlog_set_log_level(4);
+
   cryptonote::account_keys keys{};
   crypto::generate_keys(keys.m_account_address.m_spend_public_key, keys.m_spend_secret_key);
   crypto::generate_keys(keys.m_account_address.m_view_public_key, keys.m_view_secret_key);
@@ -448,9 +448,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       EXPECT(tx3.spend_publics.size() == 1);
 
       destinations.emplace_back();
-      destinations.back().amount = 2000;
-      destinations.back().addr = keys_subaddr1.m_account_address;
-      destinations.back().is_subaddress = true;
+      //destinations.back().amount = 2000;
+      //destinations.back().addr = keys_subaddr1.m_account_address;
+      //destinations.back().is_subaddress = true;
 
       transaction tx4 = make_tx(lest_env, keys, destinations, 50, false);
       EXPECT(tx4.pub_keys.size() == 1);
@@ -461,7 +461,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       //destinations.back().addr = keys_subaddr2.m_account_address;
       //destinations.back().is_subaddress = true;
 
-      transaction tx5 = make_tx(lest_env, keys, destinations, 200, true);
+      transaction tx5 = make_tx(lest_env, keys, destinations, 100, true);
       //EXPECT(tx5.pub_keys.size() == 3);
       //EXPECT(tx5.spend_publics.size() == 3);
 
@@ -469,13 +469,13 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.start_height = std::uint64_t(last_block.id) + 1;
       bmessage.current_height = bmessage.start_height + 1;
       bmessage.blocks.emplace_back();
-      bmessage.blocks.back().block.miner_tx = *tx.tx;
-      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(*tx2.tx));
-      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(*tx3.tx));
-      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(*tx4.tx));
-      bmessage.blocks.back().transactions.push_back(*tx2.tx);
-      bmessage.blocks.back().transactions.push_back(*tx3.tx);
-      bmessage.blocks.back().transactions.push_back(*tx4.tx);
+      bmessage.blocks.back().block.miner_tx = tx.tx;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx2.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx3.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx4.tx));
+      bmessage.blocks.back().transactions.push_back(tx2.tx);
+      bmessage.blocks.back().transactions.push_back(tx3.tx);
+      bmessage.blocks.back().transactions.push_back(tx4.tx);
       bmessage.output_indices.emplace_back();
       bmessage.output_indices.back().emplace_back();
       bmessage.output_indices.back().back().push_back(100);
@@ -540,13 +540,13 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
           {
             {lws::db::output_id{0, 100}, 35184372088830}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx.tx),
+              cryptonote::get_transaction_prefix_hash(tx.tx),
               tx.spend_publics.at(0),
               rct::commit(35184372088830, rct::identity()),
               {},
@@ -558,15 +558,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 101}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx2.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx2.tx),
+              cryptonote::get_transaction_prefix_hash(tx2.tx),
               tx2.spend_publics.at(0),
-              tx2.tx->rct_signatures.outPk.at(0).mask,
+              tx2.tx.rct_signatures.outPk.at(0).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -576,15 +576,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
 	        {
             {lws::db::output_id{0, 102}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx3.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx3.tx),
+              cryptonote::get_transaction_prefix_hash(tx3.tx),
               tx3.spend_publics.at(0),
-              tx3.tx->rct_signatures.outPk.at(0).mask,
+              tx3.tx.rct_signatures.outPk.at(0).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -594,15 +594,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx4.tx),
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
               tx4.spend_publics.at(0),
-              tx4.tx->rct_signatures.outPk.at(0).mask,
+              tx4.tx.rct_signatures.outPk.at(0).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -612,15 +612,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx4.tx),
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
               tx4.spend_publics.at(1),
-              tx4.tx->rct_signatures.outPk.at(1).mask,
+              tx4.tx.rct_signatures.outPk.at(1).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -630,15 +630,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx4.tx),
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
               tx4.spend_publics.at(0),
-              tx4.tx->rct_signatures.outPk.at(0).mask,
+              tx4.tx.rct_signatures.outPk.at(0).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -648,15 +648,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(*tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
               },
               0,
               0,
-              cryptonote::get_transaction_prefix_hash(*tx4.tx),
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
               tx4.spend_publics.at(1),
-              tx4.tx->rct_signatures.outPk.at(1).mask,
+              tx4.tx.rct_signatures.outPk.at(1).mask,
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
@@ -701,7 +701,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
         auto real_spend = *spend_it;
         EXPECT(real_spend.link.height == new_last_block_id);
-        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(*tx3.tx));
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
         lws::db::output_id expected_out{0, 100};
         EXPECT(real_spend.source == expected_out);
         EXPECT(real_spend.mixin_count == 15);
@@ -714,7 +714,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
         real_spend = *spend_it;
         EXPECT(real_spend.link.height == new_last_block_id);
-        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(*tx3.tx));
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
         expected_out = lws::db::output_id{0, 101};
         EXPECT(real_spend.source == expected_out);
         EXPECT(real_spend.mixin_count == 15);
