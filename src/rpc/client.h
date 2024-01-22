@@ -218,6 +218,9 @@ namespace rpc
 
     // Do not create clone method, only one of these should exist right now.
 
+    // \return zmq context pointer (for testing).
+    void* zmq_context() const;
+
     //! \return The full address of the monerod ZMQ daemon.
     std::string const& daemon_address() const;
 

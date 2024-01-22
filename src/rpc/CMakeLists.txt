@@ -31,4 +31,4 @@ set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h fwd.h json
 
 add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})
 target_include_directories(monero-lws-rpc PRIVATE ${RMQ_INCLUDE_DIR})
-target_link_libraries(monero-lws-rpc monero::libraries monero-lws-wire-json monero-lws-wire-wrapper ${RMQ_LIBRARY})
+target_link_libraries(monero-lws-rpc monero::libraries monero-lws-util monero-lws-wire-json monero-lws-wire-wrapper ${RMQ_LIBRARY})

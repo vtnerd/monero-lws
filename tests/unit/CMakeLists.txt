@@ -34,15 +34,20 @@ add_subdirectory(db)
 add_subdirectory(rpc)
 add_subdirectory(wire)
 
-add_executable(monero-lws-unit main.cpp)
-target_link_libraries(
-  monero-lws-unit
+add_executable(monero-lws-unit main.cpp scanner.test.cpp)
+target_link_libraries(monero-lws-unit
+  monero::libraries
+  monero-lws-daemon-common
   monero-lws-unit-db
   monero-lws-unit-framework
   monero-lws-unit-rpc
   monero-lws-unit-wire
   monero-lws-unit-wire-json
   monero-lws-unit-wire-msgpack
+  ${Boost_FILESYSTEM_LIBRARY}
+  ${Boost_PROGRAM_OPTIONS_LIBRARY}
+  ${Boost_THREAD_LIBRARY}
+  ${Boost_THREAD_LIBS_INIT}
   Threads::Threads
 )
 add_test(NAME monero-lws-unit COMMAND monero-lws-unit -v)
