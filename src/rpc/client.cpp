@@ -513,6 +513,13 @@ namespace rpc
       raise_abort_process();
   }
 
+  void* context::zmq_context() const
+  {
+    if (ctx == nullptr)
+      return nullptr;
+    return ctx->comm.get();
+  }
+
   std::string const& context::daemon_address() const
   {
     if (ctx == nullptr)
