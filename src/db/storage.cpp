@@ -1421,6 +1421,10 @@ namespace db
     MONERO_PRECOND(!hashes.empty());
     MONERO_PRECOND(db != nullptr);
 
+    // refuse to rollback past a checkpoint
+    if (height < block_id(get_checkpoints().get_max_height()))
+      return {lws::error::bad_blockchain};
+
     return db->try_write([this, height, hashes] (MDB_txn& txn) -> expect<void>
     {
       cursor::blocks blocks_cur;
