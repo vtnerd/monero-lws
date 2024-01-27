@@ -1,0 +1,49 @@
+@startuml
+hide circle
+hide members
+
+entity "Light Wallet client" as Client {
+    * e.g. MyMonero app, OpenMonero
+    html, etc.
+}
+show Client fields
+
+package "monero-lws" <<Node>> {
+    entity "monero-lws-daemon" as MoneroLWSDaemon {
+        * implements light wallet server REST API
+        * takes addresses and view keys and scans 
+        for transactions in real-time
+    }
+    show MoneroLWSDaemon fields
+    entity "monero-lws-admin" as MoneroLWSAdmin {
+        * admin uses this program to perform various
+        administrative tasks managing the server,
+        such as accept or reject requests to
+        add an address to the server
+    }
+    show MoneroLWSAdmin fields
+    entity "monero-lws database" as MoneroLWSdb {
+        * uses LMDB, which reads/writes from/to
+        files on the host machine by default
+    }
+    show MoneroLWSdb fields
+
+    MoneroLWSDaemon -up-> MoneroLWSdb
+    MoneroLWSAdmin -up-> MoneroLWSdb
+}
+
+entity monerod {
+    * running Monero daemon
+}
+show monerod fields
+
+entity "Exchange rate API provider (optional)" as ExchangeRateProvider {
+    * currently cryptocompare.com
+    * disabled by default
+}
+show ExchangeRateProvider fields
+
+Client -right-> MoneroLWSDaemon
+MoneroLWSDaemon -down-> monerod
+MoneroLWSDaemon -down-> ExchangeRateProvider
+@enduml
