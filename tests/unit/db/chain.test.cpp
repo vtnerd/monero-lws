@@ -117,14 +117,11 @@ LWS_CASE("db::storage::sync_chain")
 
     SECTION("Fork past checkpoint")
     {
-      cryptonote::checkpoints checkpoints;
-      checkpoints.init_default_checkpoints(lws::config::network);
-
+      const auto& checkpoints = lws::db::storage::get_checkpoints();
       const auto& points = checkpoints.get_points();
-      EXPECT(3 <= points.size());
+      EXPECT(!points.empty());
 
-      auto point = ++points.begin();
-
+      auto point = points.begin();
       const crypto::hash fchain[3] = {
         point->second,
         crypto::rand<crypto::hash>(),
