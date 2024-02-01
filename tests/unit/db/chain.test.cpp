@@ -29,7 +29,6 @@
 
 #include <cstdint>
 #include "checkpoints/checkpoints.h" // monero/src
-#include "config.h"
 #include "db/storage.test.h"
 #include "error.h"
 
