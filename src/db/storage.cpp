@@ -1453,7 +1453,7 @@ namespace db
 
         if (*hash != chain.front())
         {
-          if (current < get_checkpoints().get_max_height())
+          if (current <= get_checkpoints().get_max_height())
           {
             MERROR("Attempting rollback past last checkpoint; invalid daemon chain response");
             return {lws::error::bad_blockchain};
