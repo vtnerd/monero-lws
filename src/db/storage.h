@@ -57,6 +57,7 @@ namespace db
     MONERO_CURSOR(subaddress_indexes);
 
     MONERO_CURSOR(blocks);
+    MONERO_CURSOR(pow);
     MONERO_CURSOR(accounts_by_address);
     MONERO_CURSOR(accounts_by_height);
   
@@ -70,6 +71,13 @@ namespace db
     cursor::blocks blocks_cur;
     cursor::accounts_by_address accounts_ba_cur;
     cursor::accounts_by_height accounts_bh_cur;
+  };
+
+  struct pow_window
+  {
+    std::vector<std::uint64_t> pow_timestamps; //!< for pow calculation
+    std::vector<block_difficulty::unsigned_int> cumulative_diffs;
+    std::vector<std::uint64_t> median_timestamps; //!< for timestamp check
   };
 
   //! Wrapper for LMDB read access to on-disk storage of light-weight server data.
@@ -95,11 +103,20 @@ namespace db
     //! \return Last known block.
     expect<block_info> get_last_block() noexcept;
 
+    //! \return Last known pow block.
+    expect<block_pow> get_last_pow_block() noexcept;
+
     //! \return "Our" block hash at `height`.
     expect<crypto::hash> get_block_hash(const block_id height) noexcept;
 
     //! \return List for `GetHashesFast` to sync blockchain with daemon.
     expect<std::list<crypto::hash>> get_chain_sync();
+
+    //! \return List for GetBlocksFast` to sync blockchain+pow with daemon
+    expect<std::list<crypto::hash>> get_pow_sync();
+
+    //! \return Objects for use with cryptonote::next_difficulty and median timestamp check
+    expect<pow_window> get_pow_window(block_id last);
 
     //! \return All registered `account`s.
     expect<lmdb::key_stream<account_status, account, cursor::close_accounts>>
@@ -172,6 +189,9 @@ namespace db
     //! \return A single instance of compiled-in checkpoints for lws
     static cryptonote::checkpoints const& get_checkpoints();
 
+    //! \return Last hard-coded block checkpoint
+    static block_info get_last_checkpoint();
+
     /*!
       Open a light_wallet_server LDMB database.
 
@@ -209,6 +229,8 @@ namespace db
       \return True if the local blockchain is correctly synced.
     */
     expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes);
+
+    expect<void> sync_pow(block_id height, epee::span<const crypto::hash> hashes, epee::span<const pow_sync> pow);
 
     //! Bump the last access time of `address` to the current time.
     expect<void> update_access_time(account_address const& address) noexcept;
@@ -255,7 +277,7 @@ namespace db
       \return True iff LMDB successfully committed the update.
     */
     expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>>
-      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts);
+      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow);
 
     /*!
       Adds subaddresses to an account. Upon success, an account will

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <array>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <cassert>
 #include <cstdint>
@@ -183,6 +184,7 @@ namespace db
   static_assert(sizeof(account) == (4 * 2) + 64 + 32 + (8 * 2) + (4 * 2), "padding in account");
   void write_bytes(wire::writer&, const account&, bool show_key = false);
 
+  //! Used with quick and full sync mode
   struct block_info
   {
     block_id id;      //!< Must be first for LMDB optimizations
@@ -190,6 +192,36 @@ namespace db
   };
   static_assert(sizeof(block_info) == 8 + 32, "padding in block_info");
   WIRE_DECLARE_OBJECT(block_info);
+
+  struct block_difficulty
+  {
+    using unsigned_int = boost::multiprecision::uint128_t;
+
+    std::uint64_t high;
+    std::uint64_t low;
+
+    void set_difficulty(const unsigned_int& in);
+    unsigned_int get_difficulty() const;
+  };
+  static_assert(sizeof(block_difficulty) == 8 * 2, "padding in block_difficulty");
+  WIRE_DECLARE_OBJECT(block_difficulty);
+
+  //! Used with untrusted daemons / full sync mode
+  struct block_pow
+  {
+    block_id id;
+    std::uint64_t timestamp;
+    block_difficulty cumulative_diff; 
+  };
+  static_assert(sizeof(block_pow) == 8 * 4, "padding in blow_pow");
+  WIRE_DECLARE_OBJECT(block_pow);
+
+  //! Used during sync "check-ins" if --untrusted-daemon
+  struct pow_sync
+  {
+    std::uint64_t timestamp;
+    block_difficulty cumulative_diff;
+  };
 
   //! `output`s and `spend`s are sorted by these fields to make merging easier.
   struct transaction_link

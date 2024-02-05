@@ -90,7 +90,7 @@ LWS_CASE("db::storage::sync_chain")
     {
       const lws::account accounts[1] = {lws::account{get_account(), {}, {}}};
       EXPECT(accounts[0].scan_height() == last_block.id);
-      EXPECT(db.update(last_block.id, chain, accounts));
+      EXPECT(db.update(last_block.id, chain, accounts, nullptr));
       EXPECT(get_account().scan_height == lws::db::block_id(std::uint64_t(last_block.id) + 4));
     }
 
