@@ -76,7 +76,7 @@ namespace wire
   template<typename R, typename T, std::size_t N>
   inline void read_bytes(R& source, std::array<T, N>& dest)
   {
-    std::size_t count = source.start_array();
+    std::size_t count = source.start_array(0);
     const bool json = (count == 0);
     if (!json && count != dest.size())
       WIRE_DLOG_THROW(wire::error::schema::array, "Expected array of size " << dest.size());

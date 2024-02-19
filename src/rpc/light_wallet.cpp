@@ -50,6 +50,8 @@
 
 namespace
 {
+  using max_subaddrs = wire::max_element_count<16384>;
+
   enum class iso_timestamp : std::uint64_t {};
 
   struct rct_bytes
@@ -178,7 +180,7 @@ namespace lws
   }
   void rpc::read_bytes(wire::json_reader& source, safe_uint64_array& self)
   {
-    for (std::size_t count = source.start_array(); !source.is_array_end(count); --count)
+    for (std::size_t count = source.start_array(0); !source.is_array_end(count); --count)
       self.values.emplace_back(wire::integer::cast_unsigned<std::uint64_t>(source.safe_unsigned_integer()));
     source.end_array();
   }
@@ -374,7 +376,7 @@ namespace lws
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
-      WIRE_FIELD(subaddrs),
+      WIRE_FIELD_ARRAY(subaddrs, max_subaddrs),
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);

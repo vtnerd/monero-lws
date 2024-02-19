@@ -44,18 +44,26 @@ namespace wire
 {
   //! Interface for converting "wire" (byte) formats to C/C++ objects without a DOM.
   class reader
-  {
+  { 
     std::size_t depth_; //!< Tracks number of recursive objects and arrays
 
   protected:
-    //! \throw wire::exception if max depth is reached
-    void increment_depth();
-    void decrement_depth() noexcept { --depth_; }
+    epee::span<const std::uint8_t> remaining_; //!< Derived class tracks unprocessed bytes here
+
+    reader(const epee::span<const std::uint8_t> remaining) noexcept
+      : depth_(0), remaining_(remaining)
+    {}
 
     reader(const reader&) = default;
     reader(reader&&) = default;
     reader& operator=(const reader&) = default;
     reader& operator=(reader&&) = default;
+
+    //! \throw wire::exception if max depth is reached
+    void increment_depth();
+
+    //! \throw std::logic_error if already `depth() == 0`.
+    void decrement_depth();
 
   public:
     struct key_map
@@ -70,15 +78,14 @@ namespace wire
     //! \return Assume delimited arrays in generic interface (some optimizations disabled)
     static constexpr std::true_type delimited_arrays() noexcept { return {}; }
 
-    reader() noexcept
-      : depth_(0)
-    {}
-
     virtual ~reader() noexcept
     {}
 
     //! \return Number of recursive objects and arrays
     std::size_t depth() const noexcept { return depth_; }
+
+    //! \return Unprocessed bytes
+    epee::span<const std::uint8_t> remaining() const noexcept { return remaining_; }
 
     //! \throw wire::exception if parsing is incomplete.
     virtual void check_complete() const = 0;
@@ -104,14 +111,20 @@ namespace wire
     //! \throw wire::exception if next value cannot be read as binary into `dest`.
     virtual void binary(epee::span<std::uint8_t> dest) = 0;
 
-    //! \throw wire::exception if next value not array
-    virtual std::size_t start_array() = 0;
+    /*  \param min_element_size of each array element in any format - if known.
+          Derived types with explicit element count should verify available
+          space, and throw a `wire::exception` on issues.
+        \throw wire::exception if next value not array
+        \throw wire::exception if not enough bytes for all array elements
+          (with epee/msgpack which has specified number of elements).
+        \return Number of values to read before calling `is_array_end()` */
+    virtual std::size_t start_array(std::size_t min_element_size) = 0;
 
     //! \return True if there is another element to read.
     virtual bool is_array_end(std::size_t count) = 0;
 
     //! \throw wire::exception if array end delimiter not present.
-    void end_array() noexcept { decrement_depth(); }
+    void end_array() { decrement_depth(); }
 
 
     //! \throw wire::exception if not object begin. \return State to be given to `key(...)` function.
@@ -134,7 +147,7 @@ namespace wire
      */
     virtual bool key(epee::span<const key_map> map, std::size_t& state, std::size_t& index) = 0;
 
-    void end_object() noexcept { decrement_depth(); }
+    void end_object() { decrement_depth(); }
   };
 
   template<typename R>
@@ -247,28 +260,84 @@ namespace wire_read
     return {};
   }
 
+  // Trap objects that do not have standard insertion functions
+  template<typename R, typename... T>
+  void array_insert(const R&, const T&...) noexcept
+  {
+    static_assert(std::is_same<R, void>::value, "type T does not have a valid insertion function");
+  }
+
+  // Insert to sorted containers
+  template<typename R, typename T, typename V = typename T::value_type>
+  inline auto array_insert(R& source, T& dest) -> decltype(dest.emplace_hint(dest.end(), std::declval<V>()), bool(true))
+  {
+    V val{};
+    wire_read::bytes(source, val);
+    dest.emplace_hint(dest.end(), std::move(val));
+    return true;
+  }
+
+  // Insert into unsorted containers
+  template<typename R, typename T, typename V = typename T::value_type>
+  inline auto array_insert(R& source, T& dest) -> decltype(dest.emplace_back(), dest.back(), bool(true))
+  {
+    // more efficient to process the object in-place in many cases
+    dest.emplace_back();
+    wire_read::bytes(source, dest.back());
+    return true;
+  }
+
+  // no compile-time checks for the array constraints
   template<typename R, typename T>
-  inline void array(R& source, T& dest)
+  inline void array_unchecked(R& source, T& dest, const std::size_t min_element_size, const std::size_t max_element_count)
   {
     using value_type = typename T::value_type;
-    static_assert(!std::is_same<value_type, char>::value, "read array of chars as binary");
+    static_assert(!std::is_same<value_type, char>::value, "read array of chars as string");
+    static_assert(!std::is_same<value_type, std::int8_t>::value, "read array of signed chars as binary");
     static_assert(!std::is_same<value_type, std::uint8_t>::value, "read array of unsigned chars as binary");
 
-    std::size_t count = source.start_array();
+    std::size_t count = source.start_array(min_element_size);
+
+    // quick check for epee/msgpack formats
+    if (max_element_count < count)
+      throw_exception(wire::error::schema::array_max_element, "", nullptr);
+
+    // also checked by derived formats when count is known
+    if (min_element_size && (source.remaining().size() / min_element_size) < count)
+      throw_exception(wire::error::schema::array_min_size, "", nullptr);
 
     dest.clear();
     wire::reserve(dest, count);
 
     bool more = count;
+    const std::size_t start_bytes = source.remaining().size();
     while (more || !source.is_array_end(count))
     {
-      dest.emplace_back();
-      read_bytes(source, dest.back());
+      // check for json/cbor formats
+      if (source.delimited_arrays() && max_element_count <= dest.size())
+        throw_exception(wire::error::schema::array_max_element, "", nullptr);
+
+      wire_read::array_insert(source, dest);
       --count;
       more &= bool(count);
+
+      if (((start_bytes - source.remaining().size()) / dest.size()) < min_element_size)
+        throw_exception(wire::error::schema::array_min_size, "", nullptr);
     }
 
-    return source.end_array();
+    source.end_array();
+  }
+
+  template<typename R, typename T, std::size_t M, std::size_t N = std::numeric_limits<std::size_t>::max()>
+  inline void array(R& source, T& dest, wire::min_element_size<M> min_element_size, wire::max_element_count<N> max_element_count = {})
+  {
+    using value_type = typename T::value_type;
+    static_assert(
+      min_element_size.template check<value_type>() || max_element_count.template check<value_type>(),
+      "array unpacking memory issues"
+    );
+    // each set of template args generates unique ASM, merge them down
+    array_unchecked(source, dest, min_element_size, max_element_count);
   }
 
   template<typename T, unsigned I>
@@ -413,7 +482,14 @@ namespace wire
   template<typename R, typename T>
   inline std::enable_if_t<is_array<T>::value> read_bytes(R& source, T& dest)
   {
-    wire_read::array(source, dest);
+    static constexpr const std::size_t wire_size =
+      default_min_element_size<R, typename T::value_type>::value;
+    static_assert(
+      wire_size != 0,
+      "no sane default array constraints for the reader / value_type pair"
+    );
+
+    wire_read::array(source, dest, min_element_size<wire_size>{});
   }
 
   template<typename R, typename... T>

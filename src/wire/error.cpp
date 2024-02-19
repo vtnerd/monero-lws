@@ -42,6 +42,10 @@ namespace wire
         return "No schema errors";
       case schema::array:
         return "Schema expected array";
+      case schema::array_max_element:
+        return "Schema expected array size to be smaller";
+      case schema::array_min_size:
+        return "Schema expected minimum wire size per array element to be larger";
       case schema::binary:
         return "Schema expected binary value of variable size";
       case schema::boolean:

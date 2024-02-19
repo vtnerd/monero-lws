@@ -64,12 +64,21 @@
 #include "wire/wrapper/array.h"
 #include "wire/wrappers_impl.h"
 
+namespace wire
+{
+  template<typename T, typename C>
+  static bool operator<(const array_<T, C>& lhs, const array_<T, C>& rhs)
+  {
+    return lhs.get_container() < rhs.get_container();
+  }
+}
+
 namespace lws
 {
 namespace db
 {
   namespace v0
-  {
+  { 
     //! Orignal DB value, with no txn fee
     struct output
     {
@@ -1156,7 +1165,7 @@ namespace db
     );
   }
 
-  static void write_bytes(wire::json_writer& dest, const std::pair<lws::db::account_id, std::vector<std::pair<lws::db::major_index, std::vector<std::array<lws::db::minor_index, 2>>>>>& self)
+  static void write_bytes(wire::json_writer& dest, const std::pair<lws::db::account_id, std::vector<db::subaddress_dict>>& self)
   {
     wire::object(dest,
       wire::field("id", std::cref(self.first)),
@@ -2756,9 +2765,9 @@ namespace db
       const auto add_out = [&out] (major_index major, index_range minor)
       {
         if (out.empty() || out.back().first != major)
-          out.emplace_back(major, index_ranges{minor});
+          out.emplace_back(major, index_ranges{std::vector<index_range>{minor}});
         else
-          out.back().second.push_back(minor);
+          out.back().second.get_container().push_back(minor);
       };
 
       const auto check_max_range = [&subaddr_count, max_subaddr] (const index_range& range) -> bool
@@ -2771,7 +2780,7 @@ namespace db
       };
       const auto check_max_ranges = [&check_max_range] (const index_ranges& ranges) -> bool
       {
-        for (const auto& range : ranges)
+        for (const auto& range : ranges.get_container())
         {
           if (!check_max_range(range))
             return false;
@@ -2802,7 +2811,7 @@ namespace db
 
       for (auto& major_entry : subaddrs)
       {
-        new_dict.clear();
+        new_dict.get_container().clear();
         if (!check_subaddress_dict(major_entry))
         {
           MERROR("Invalid subaddress_dict given to storage::upsert_subaddrs");
@@ -2826,8 +2835,8 @@ namespace db
           if (!old_dict)
             return old_dict.error();
 
-          auto& old_range = old_dict->second;
-          const auto& new_range = major_entry.second;
+          auto& old_range = old_dict->second.get_container();
+          const auto& new_range = major_entry.second.get_container();
 
           auto old_loc = old_range.begin();
           auto new_loc = new_range.begin();
@@ -2838,13 +2847,13 @@ namespace db
               if (!check_max_range(*new_loc))
                 return {error::max_subaddresses};
 
-              new_dict.push_back(*new_loc);
+              new_dict.get_container().push_back(*new_loc);
               add_out(major_entry.first, *new_loc);
               ++new_loc;
             }
             else if (std::uint64_t(old_loc->at(1)) + 1 < std::uint32_t(new_loc->at(0)))
             { // existing has no overlap with new
-              new_dict.push_back(*old_loc);
+              new_dict.get_container().push_back(*old_loc);
               ++old_loc;
             }
             else if (old_loc->at(0) <= new_loc->at(0) && new_loc->at(1) <= old_loc->at(1))
@@ -2873,17 +2882,17 @@ namespace db
             }
           }
 
-          std::copy(old_loc, old_range.end(), std::back_inserter(new_dict));
+          std::copy(old_loc, old_range.end(), std::back_inserter(new_dict.get_container()));
           for ( ; new_loc != new_range.end(); ++new_loc)
           {
             if (!check_max_range(*new_loc))
               return {error::max_subaddresses};
-            new_dict.push_back(*new_loc);
+            new_dict.get_container().push_back(*new_loc);
             add_out(major_entry.first, *new_loc);
           }
         }
 
-        for (const auto& new_indexes : new_dict)
+        for (const auto& new_indexes : new_dict.get_container())
         {
           for (std::uint64_t minor : boost::counting_range(std::uint64_t(new_indexes[0]), std::uint64_t(new_indexes[1]) + 1))
           {

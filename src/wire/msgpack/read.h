@@ -45,30 +45,30 @@ namespace wire
   class msgpack_reader : public reader
   {
     epee::byte_slice source_;
-    std::size_t remaining_; //!< Expected number of elements remaining
+    std::size_t tags_remaining_; //!< Expected number of elements remaining
 
-    //! \throw std::logic_error
-    [[noreturn]] void throw_logic_error();
-    //! Decrement remaining_ if not zero, \throw std::logic_error when `remaining_ == 0`.
-    void update_remaining()
+    //! \throw wire::exception with `error::msgpack::underflow_tree` 
+    [[noreturn]] void throw_wire_exception();
+    //! Decrement tags_remaining_ if not zero, \throw std::logic_error when `tags_remaining_ == 0`.
+    void update_tags_remaining()
     {
-      if (remaining_)
-        --remaining_;
+      if (tags_remaining_)
+        --tags_remaining_;
       else
-        throw_logic_error();
+        throw_wire_exception();
     }
 
     //! Skips next value. \throw wire::exception if invalid JSON syntax.
     void skip_value();
 
-    //! \return Next tag but leave `source_` untouched.
+    //! \return Next tag but leave `remaining_` untouched.
     msgpack::tag peek_tag();
-    //! \return Next tag and remove first byte from `source_`.
+    //! \return Next tag and remove first byte from `remaining_`.
     msgpack::tag get_tag();
 
-    //! \return Integer from `soure_` where positive fixed tag has been checked.
+    //! \return Integer from `remaining_` where positive fixed tag has been checked.
     std::intmax_t do_integer(msgpack::tag);
-    //! \return Integer from `source_` where fixed tag has been checked.
+    //! \return Integer from `remaining_` where fixed tag has been checked.
     std::uintmax_t do_unsigned_integer(msgpack::tag);
 
     //! \return Number of items determined by `T` fixed tag and `U` tuple of tags.
@@ -77,8 +77,10 @@ namespace wire
 
   public:
     explicit msgpack_reader(epee::byte_slice&& source)
-      : reader(), source_(std::move(source)), remaining_(1)
-    {}
+      : reader(nullptr), source_(std::move(source)), tags_remaining_(1)
+    {
+      remaining_ = {source_.data(), source_.size()};
+    }
 
     //! \throw wire::exception if JSON parsing is incomplete.
     void check_complete() const override final;
@@ -89,7 +91,7 @@ namespace wire
     //! \throw wire::expception if next token not an integer.
     std::intmax_t integer() override final
     {
-      update_remaining();
+      update_tags_remaining();
       const msgpack::tag next = get_tag();
       if (std::uint8_t(next) <= msgpack::ftag_unsigned::max())
         return std::uint8_t(next);
@@ -99,7 +101,7 @@ namespace wire
     //! \throw wire::exception if next token not an unsigned integer.
     std::uintmax_t unsigned_integer() override final
     {
-      update_remaining();
+      update_tags_remaining();
       const msgpack::tag next = get_tag();
       if (std::uint8_t(next) <= msgpack::ftag_unsigned::max())
         return std::uint8_t(next);
@@ -120,7 +122,7 @@ namespace wire
 
 
     //! \throw wire::exception if next token not `[`.
-    std::size_t start_array() override final;
+    std::size_t start_array(std::size_t min_element_size) override final;
 
     //! \return true when `count == 0`.
     bool is_array_end(const std::size_t count) override final;

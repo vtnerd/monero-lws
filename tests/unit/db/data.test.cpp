@@ -35,41 +35,41 @@ LWS_CASE("db::data::check_subaddress_dict")
   EXPECT(lws::db::check_subaddress_dict(
     {
       lws::db::major_index(0),
-      lws::db::index_ranges{lws::db::index_range{{lws::db::minor_index(0), lws::db::minor_index(0)}}}
+      lws::db::index_ranges{{lws::db::index_range{{lws::db::minor_index(0), lws::db::minor_index(0)}}}}
     }
   ));
   EXPECT(lws::db::check_subaddress_dict(
     {
       lws::db::major_index(0),
-      lws::db::index_ranges{
+      lws::db::index_ranges{{
         lws::db::index_range{{lws::db::minor_index(0), lws::db::minor_index(0)}},
         lws::db::index_range{{lws::db::minor_index(2), lws::db::minor_index(10)}}
-      }
+      }}
     }
   ));
   
   EXPECT(!lws::db::check_subaddress_dict(
     {
       lws::db::major_index(0),
-      lws::db::index_ranges{lws::db::index_range{{lws::db::minor_index(1), lws::db::minor_index(0)}}}
+      lws::db::index_ranges{{lws::db::index_range{{lws::db::minor_index(1), lws::db::minor_index(0)}}}}
     }
   ));
   EXPECT(!lws::db::check_subaddress_dict(
     {
       lws::db::major_index(0),
-      lws::db::index_ranges{
+      lws::db::index_ranges{{
         lws::db::index_range{{lws::db::minor_index(0), lws::db::minor_index(4)}},
         lws::db::index_range{{lws::db::minor_index(1), lws::db::minor_index(10)}}
-      }
+      }}
     }
   ));
   EXPECT(!lws::db::check_subaddress_dict(
     {
       lws::db::major_index(0),
-      lws::db::index_ranges{
+      lws::db::index_ranges{{
         lws::db::index_range{{lws::db::minor_index(0), lws::db::minor_index(0)}},
         lws::db::index_range{{lws::db::minor_index(1), lws::db::minor_index(10)}}
-      }
+      }}
     }
   ));
 

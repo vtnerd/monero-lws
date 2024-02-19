@@ -708,7 +708,7 @@ namespace lws
           for (std::uint64_t elem : boost::counting_range(std::uint64_t(major_i), std::uint64_t(major_i) + n_major))
           {
             ranges.emplace_back(
-              db::major_index(elem), db::index_ranges{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}
+              db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
           auto upserted = disk.upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, options.max_subaddresses);

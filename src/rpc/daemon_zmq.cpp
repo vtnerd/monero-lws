@@ -28,11 +28,14 @@
 #include "daemon_zmq.h"
 
 #include <boost/optional/optional.hpp>
+#include "cryptonote_config.h"        // monero/src
 #include "crypto/crypto.h"            // monero/src
 #include "rpc/message_data_structs.h" // monero/src
 #include "wire/crypto.h"
 #include "wire/json.h"
+#include "wire/wrapper/array.h"
 #include "wire/wrapper/variant.h"
+#include "wire/wrappers_impl.h"
 #include "wire/vector.h"
 
 namespace
@@ -43,6 +46,17 @@ namespace
   constexpr const std::size_t default_outputs = 4;
   constexpr const std::size_t default_txextra_size = 2048;
   constexpr const std::size_t default_txpool_size = 32;
+
+  using max_blocks_per_fetch =
+    wire::max_element_count<COMMAND_RPC_GET_BLOCKS_FAST_MAX_BLOCK_COUNT>;
+
+  //! Not the default in cryptonote, but roughly a 31.8 MiB block
+  using max_txes_per_block = wire::max_element_count<21845>; 
+
+  using max_inputs_per_tx = wire::max_element_count<3000>;
+  using max_outputs_per_tx = wire::max_element_count<2000>;
+  using max_ring_size = wire::max_element_count<4600>;
+  using max_txpool_size = wire::max_element_count<775>;
 }
 
 namespace rct
@@ -65,7 +79,11 @@ namespace rct
 
   static void read_bytes(wire::json_reader& source, mgSig& self)
   {
-    wire::object(source, WIRE_FIELD(ss), WIRE_FIELD(cc));
+    using max_256 = wire::max_element_count<256>;
+    wire::object(source,
+      wire::field("ss", wire::array<max_256>(std::ref(self.ss))),
+      WIRE_FIELD(cc)
+    );
   }
 
   static void read_bytes(wire::json_reader& source, BulletproofPlus& self)
@@ -142,13 +160,20 @@ namespace rct
 
     void read_bytes(wire::json_reader& source, prunable_helper& self)
     {
+      using rf_min_size = wire::min_element_sizeof<key64, key64, key64, key>;
+      using bf_max = wire::max_element_count<BULLETPROOF_MAX_OUTPUTS>;
+      using bf_plus_max = wire::max_element_count<BULLETPROOF_PLUS_MAX_OUTPUTS>;
+      using mlsags_max = wire::max_element_count<256>;
+      using clsags_max = wire::max_element_count<256>;
+      using pseudo_outs_max = wire::max_element_count<256>;
+
       wire::object(source,
-        wire::field("range_proofs", std::ref(self.prunable.rangeSigs)),
-        wire::field("bulletproofs", std::ref(self.prunable.bulletproofs)),
-        wire::field("bulletproofs_plus", std::ref(self.prunable.bulletproofs_plus)),
-        wire::field("mlsags", std::ref(self.prunable.MGs)),
-        wire::field("clsags", std::ref(self.prunable.CLSAGs)),
-        wire::field("pseudo_outs", std::ref(self.pseudo_outs))
+        wire::field("range_proofs", wire::array<rf_min_size>(std::ref(self.prunable.rangeSigs))),
+        wire::field("bulletproofs", wire::array<bf_max>(std::ref(self.prunable.bulletproofs))),
+        wire::field("bulletproofs_plus", wire::array<bf_plus_max>(std::ref(self.prunable.bulletproofs_plus))),
+        wire::field("mlsags", wire::array<mlsags_max>(std::ref(self.prunable.MGs))),
+        wire::field("clsags", wire::array<clsags_max>(std::ref(self.prunable.CLSAGs))),
+        wire::field("pseudo_outs", wire::array<pseudo_outs_max>(std::ref(self.pseudo_outs)))
       );
 
       const bool pruned =
@@ -166,15 +191,16 @@ namespace rct
 
   static void read_bytes(wire::json_reader& source, rctSig& self)
   {
-    boost::optional<std::vector<ecdhTuple>> ecdhInfo;
-    boost::optional<ctkeyV> outPk;
+    using min_ecdh = wire::min_element_sizeof<rct::key, rct::key>;
+    using min_ctkey = wire::min_element_sizeof<rct::key>;
+ 
     boost::optional<xmr_amount> txnFee;
     boost::optional<prunable_helper> prunable;
     self.outPk.reserve(default_inputs);
     wire::object(source,
       WIRE_FIELD(type),
-      wire::optional_field("encrypted", std::ref(ecdhInfo)),
-      wire::optional_field("commitments", std::ref(outPk)),
+      wire::optional_field("encrypted", wire::array<min_ecdh>(std::ref(self.ecdhInfo))),
+      wire::optional_field("commitments", wire::array<min_ctkey>(std::ref(self.outPk))),
       wire::optional_field("fee", std::ref(txnFee)),
       wire::optional_field("prunable", std::ref(prunable))
     );
@@ -182,13 +208,11 @@ namespace rct
     self.txnFee = 0;
     if (self.type != RCTTypeNull)
     {
-      if (!ecdhInfo || !outPk || !txnFee)
+      if (self.ecdhInfo.empty() || self.outPk.empty() || !txnFee)
         WIRE_DLOG_THROW(wire::error::schema::missing_key, "Expected fields `encrypted`, `commitments`, and `fee`");
-      self.ecdhInfo = std::move(*ecdhInfo);
-      self.outPk = std::move(*outPk);
       self.txnFee = std::move(*txnFee);
     }
-    else if (ecdhInfo || outPk || txnFee)
+    else if (!self.ecdhInfo.empty() || !self.outPk.empty() || txnFee)
       WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
 
     if (prunable)
@@ -243,7 +267,11 @@ namespace cryptonote
   }
   static void read_bytes(wire::json_reader& source, txin_to_key& self)
   {
-    wire::object(source, WIRE_FIELD(amount), WIRE_FIELD(key_offsets), wire::field("key_image", std::ref(self.k_image)));
+    wire::object(source,
+      WIRE_FIELD(amount),
+      WIRE_FIELD_ARRAY(key_offsets, max_ring_size),
+      wire::field("key_image", std::ref(self.k_image))
+    );
   }
   static void read_bytes(wire::json_reader& source, txin_v& self)
   {
@@ -264,33 +292,45 @@ namespace cryptonote
     wire::object(source,
       WIRE_FIELD(version),
       WIRE_FIELD(unlock_time),
-      wire::field("inputs", std::ref(self.vin)),
-      wire::field("outputs", std::ref(self.vout)),
+      wire::field("inputs", wire::array<max_inputs_per_tx>(std::ref(self.vin))),
+      wire::field("outputs", wire::array<max_outputs_per_tx>(std::ref(self.vout))),
       WIRE_FIELD(extra),
+      WIRE_FIELD_ARRAY(signatures, max_inputs_per_tx),
       wire::field("ringct", std::ref(self.rct_signatures))
     );
   }
 
   static void read_bytes(wire::json_reader& source, block& self)
   {
+    using min_hash_size = wire::min_element_sizeof<crypto::hash>;
     self.tx_hashes.reserve(default_transaction_count);
     wire::object(source,
       WIRE_FIELD(major_version),
       WIRE_FIELD(minor_version),
       WIRE_FIELD(timestamp),
       WIRE_FIELD(miner_tx),
-      WIRE_FIELD(tx_hashes),
+      WIRE_FIELD_ARRAY(tx_hashes, min_hash_size),
       WIRE_FIELD(prev_id),
       WIRE_FIELD(nonce)
     );
   }
 
-  namespace rpc
+  static void read_bytes(wire::json_reader& source, std::vector<transaction>& self)
   {
+    wire_read::array_unchecked(source, self, 0, max_txes_per_block{});
+  }
+
+  namespace rpc
+  { 
     static void read_bytes(wire::json_reader& source, block_with_transactions& self)
     {
       self.transactions.reserve(default_transaction_count);
       wire::object(source, WIRE_FIELD(block), WIRE_FIELD(transactions));
+    }
+
+    static void read_bytes(wire::json_reader& source, std::vector<block_with_transactions>& self)
+    {
+      wire_read::array_unchecked(source, self, 0, max_blocks_per_fetch{}); 
     }
 
     static void read_bytes(wire::json_reader& source, tx_in_pool& self)
@@ -310,11 +350,16 @@ void lws::rpc::read_bytes(wire::json_reader& source, get_blocks_fast_response& s
 {
   self.blocks.reserve(default_blocks_fetched);
   self.output_indices.reserve(default_blocks_fetched);
-  wire::object(source, WIRE_FIELD(blocks), WIRE_FIELD(output_indices), WIRE_FIELD(start_height), WIRE_FIELD(current_height));
+  wire::object(source,
+    WIRE_FIELD(blocks),
+    wire::field("output_indices", wire::array<max_blocks_per_fetch>(wire::array<max_txes_per_block>(wire::array<max_outputs_per_tx>(std::ref(self.output_indices))))),
+    WIRE_FIELD(start_height),
+    WIRE_FIELD(current_height)
+  );
 }
 
 void lws::rpc::read_bytes(wire::json_reader& source, get_transaction_pool_response& self)
 {
   self.transactions.reserve(default_txpool_size);
-  wire::object(source, WIRE_FIELD(transactions));
+  wire::object(source, WIRE_FIELD_ARRAY(transactions, max_txpool_size));
 }
