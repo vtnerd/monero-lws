@@ -409,52 +409,6 @@ namespace db
       }
     }
 
-    //! \return a single instance of compiled-in checkpoints for lws
-    cryptonote::checkpoints const& get_checkpoints()
-    {
-      struct initializer
-      {
-        cryptonote::checkpoints data;
-
-        initializer()
-          : data()
-        {
-          data.init_default_checkpoints(lws::config::network);
-
-          std::string const* genesis_tx = nullptr;
-          std::uint32_t genesis_nonce = 0;
-
-          switch (lws::config::network)
-          {
-          case cryptonote::TESTNET:
-            genesis_tx = std::addressof(::config::testnet::GENESIS_TX);
-            genesis_nonce = ::config::testnet::GENESIS_NONCE;
-            break;
-
-          case cryptonote::STAGENET:
-            genesis_tx = std::addressof(::config::stagenet::GENESIS_TX);
-            genesis_nonce = ::config::stagenet::GENESIS_NONCE;
-            break;
-
-          case cryptonote::MAINNET:
-            genesis_tx = std::addressof(::config::GENESIS_TX);
-            genesis_nonce = ::config::GENESIS_NONCE;
-            break;
-
-          default:
-            MONERO_THROW(lws::error::bad_blockchain, "Unsupported net type");
-          }
-          cryptonote::block b;
-          cryptonote::generate_genesis_block(b, *genesis_tx, genesis_nonce);
-          crypto::hash block_hash = cryptonote::get_block_hash(b);
-          if (!data.add_checkpoint(0, epee::to_hex::string(epee::as_byte_span(block_hash))))
-            MONERO_THROW(lws::error::bad_blockchain, "Genesis tx and checkpoints file mismatch");
-        }
-      };
-      static const initializer instance;
-      return instance.data;
-    }
-
     //! \return Current block hash at `id` using `cur`.
     expect<crypto::hash> do_get_block_hash(MDB_cursor& cur, block_id id) noexcept
     {
@@ -469,7 +423,7 @@ namespace db
       cursor::blocks cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_blocks>(txn, tbl));
 
       std::map<std::uint64_t, crypto::hash> const& points =
-        get_checkpoints().get_points();
+        storage::get_checkpoints().get_points();
 
       if (points.empty() || points.begin()->first != 0)
         MONERO_THROW(lws::error::bad_blockchain, "Checkpoints are empty/expected genesis hash");
@@ -558,7 +512,7 @@ namespace db
         return success();
       };
 
-      const std::uint64_t checkpoint = get_checkpoints().get_max_height();
+      const std::uint64_t checkpoint = lws::db::storage::get_checkpoints().get_max_height();
       const std::uint64_t anchor = lmdb::to_native(out.back().id);
 
       for (unsigned i = 1; i <= max_internal; ++i)
@@ -1155,6 +1109,51 @@ namespace db
     return nullptr;
   }
 
+  cryptonote::checkpoints const& storage::get_checkpoints()
+  {
+    struct initializer
+    {
+      cryptonote::checkpoints data;
+
+      initializer()
+        : data()
+      {
+        data.init_default_checkpoints(lws::config::network);
+
+        std::string const* genesis_tx = nullptr;
+        std::uint32_t genesis_nonce = 0;
+
+        switch (lws::config::network)
+        {
+        case cryptonote::TESTNET:
+          genesis_tx = std::addressof(::config::testnet::GENESIS_TX);
+          genesis_nonce = ::config::testnet::GENESIS_NONCE;
+          break;
+
+        case cryptonote::STAGENET:
+          genesis_tx = std::addressof(::config::stagenet::GENESIS_TX);
+          genesis_nonce = ::config::stagenet::GENESIS_NONCE;
+          break;
+
+        case cryptonote::MAINNET:
+          genesis_tx = std::addressof(::config::GENESIS_TX);
+          genesis_nonce = ::config::GENESIS_NONCE;
+          break;
+
+        default:
+          MONERO_THROW(lws::error::bad_blockchain, "Unsupported net type");
+        }
+        cryptonote::block b;
+        cryptonote::generate_genesis_block(b, *genesis_tx, genesis_nonce);
+        crypto::hash block_hash = cryptonote::get_block_hash(b);
+        if (!data.add_checkpoint(0, epee::to_hex::string(epee::as_byte_span(block_hash))))
+          MONERO_THROW(lws::error::bad_blockchain, "Genesis tx and checkpoints file mismatch");
+      }
+    };
+    static const initializer instance;
+    return instance.data;
+  }
+
   storage storage::open(const char* path, unsigned create_queue_max)
   {
     return {
@@ -1454,6 +1453,12 @@ namespace db
 
         if (*hash != chain.front())
         {
+          if (current <= get_checkpoints().get_max_height())
+          {
+            MERROR("Attempting rollback past last checkpoint; invalid daemon chain response");
+            return {lws::error::bad_blockchain};
+          }
+
           MONERO_CHECK(rollback_chain(this->db->tables, txn, *blocks_cur, db::block_id(current)));
           break;
         }
