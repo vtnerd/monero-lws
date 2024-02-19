@@ -28,7 +28,6 @@
 #include "daemon_pub.h"
 
 #include "cryptonote_basic/cryptonote_basic.h" // monero/src
-#include "cryptonote_config.h"                 // monero/src
 #include "rpc/daemon_zmq.h"
 #include "wire/crypto.h"
 #include "wire/error.h"

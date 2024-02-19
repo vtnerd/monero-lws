@@ -27,7 +27,6 @@
 #include "data.h"
 
 #include <cstring>
-#include <limits>
 #include <memory>
 
 #include "cryptonote_config.h" // monero/src
