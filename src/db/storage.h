@@ -41,6 +41,7 @@
 #include "lmdb/key_stream.h"
 #include "lmdb/value_stream.h"
 
+namespace cryptonote { class checkpoints; }
 namespace lws
 {
 namespace db
@@ -167,6 +168,10 @@ namespace db
     {}
 
   public:
+
+    //! \return A single instance of compiled-in checkpoints for lws
+    static cryptonote::checkpoints const& get_checkpoints();
+
     /*!
       Open a light_wallet_server LDMB database.
 

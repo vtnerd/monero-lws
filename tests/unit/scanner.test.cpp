@@ -282,8 +282,6 @@ namespace
 
 LWS_CASE("lws::scanner::sync and lws::scanner::run")
 {
-   mlog_set_log_level(4);
-
   cryptonote::account_keys keys{};
   crypto::generate_keys(keys.m_account_address.m_spend_public_key, keys.m_spend_secret_key);
   crypto::generate_keys(keys.m_account_address.m_view_public_key, keys.m_view_secret_key);

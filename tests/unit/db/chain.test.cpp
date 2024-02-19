@@ -28,6 +28,7 @@
 #include "chain.test.h"
 
 #include <cstdint>
+#include "checkpoints/checkpoints.h" // monero/src
 #include "db/storage.test.h"
 #include "error.h"
 
@@ -111,6 +112,23 @@ LWS_CASE("db::storage::sync_chain")
       EXPECT(db.sync_chain(last_block.id, fchain));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, fchain);
       EXPECT(get_account().scan_height == lws::db::block_id(std::uint64_t(last_block.id) + 1));
+    }
+
+    SECTION("Fork past checkpoint")
+    {
+      const auto& checkpoints = lws::db::storage::get_checkpoints();
+      const auto& points = checkpoints.get_points();
+      EXPECT(!points.empty());
+
+      auto point = points.begin();
+      const crypto::hash fchain[3] = {
+        point->second,
+        crypto::rand<crypto::hash>(),
+        crypto::rand<crypto::hash>()
+      };
+
+      const auto sync_result = db.sync_chain(lws::db::block_id(point->first), fchain);
+      EXPECT(sync_result == lws::error::bad_blockchain);
     }
   }
 }
