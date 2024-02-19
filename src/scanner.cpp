@@ -1072,11 +1072,20 @@ namespace lws
           return sent.error();
       }
 
-      auto resp = client.get_message(sync_rpc_timeout);
-      if (!scanner::is_running())
-        return {lws::error::signal_abort_process};
-      if (!resp)
-        return resp.error();
+      expect<std::string> resp{lws::error::daemon_timeout};
+      start = std::chrono::steady_clock::now();
+
+      while (!(resp = client.get_message(std::chrono::seconds{1})))
+      {
+        if (!scanner::is_running())
+          return {lws::error::signal_abort_process};
+
+        if (sync_rpc_timeout <= (std::chrono::steady_clock::now() - start))
+          return {lws::error::daemon_timeout};
+
+        if (!resp.matches(std::errc::timed_out))
+          return resp.error();
+      }
       return rpc::parse_json_response<R>(std::move(*resp));
     }
 
