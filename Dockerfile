@@ -45,6 +45,7 @@ RUN apt-get install --no-install-recommends -y \
 ARG MONERO_BRANCH
 ARG MONERO_COMMIT_HASH
 ARG NPROC
+ARG TARGETARCH
 ENV CFLAGS='-fPIC'
 ENV CXXFLAGS='-fPIC -DELPP_FEATURE_CRASH_LOG'
 ENV USE_SINGLE_BUILDDIR 1
@@ -80,8 +81,12 @@ RUN git clone --recursive --branch ${MONERO_BRANCH} \
     && test `git rev-parse HEAD` = ${MONERO_COMMIT_HASH} || exit 1 \
     && git submodule init && git submodule update \
     && mkdir -p build/release && cd build/release \
-    # Create make build files manually for release-static-linux-x86_64
-    && cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-x64" ../.. \
+    # Create make build files manually for release-static-linux-${TARGETARCH}
+    && case ${TARGETARCH:-amd64} in \
+        "arm64") cmake -D STATIC=ON -D ARCH="armv8-a" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-armv8" ../.. ;; \
+        "amd64") cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-x64" ../.. ;; \
+        *) echo "Dockerfile does not support this platform"; exit 1 ;; \
+    esac \
     # Build only monerod binary using number of available threads
     && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon lmdb_lib multisig
 
@@ -113,6 +118,8 @@ RUN apt-get install --no-install-recommends -y \
     ca-certificates \
     curl \
     jq \
+    libhidapi-dev \
+    libzmq3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
