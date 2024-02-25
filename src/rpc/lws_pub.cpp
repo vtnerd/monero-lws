@@ -66,9 +66,9 @@ namespace
     };
 
     wire::object(dest,
-      WIRE_FIELD(height),
-      WIRE_FIELD(id),
-      wire::field("addresses", wire::array(self.users | boost::adaptors::transformed(just_address)))
+      WIRE_FIELD_ID(0, height),
+      WIRE_FIELD_ID(1, id),
+      wire::field<2>("addresses", wire::array(self.users | boost::adaptors::transformed(just_address)))
     );
   }
 } // anonymous
