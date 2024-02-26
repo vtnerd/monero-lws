@@ -191,7 +191,7 @@ endif()
 if(monero_PROTOLIB_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(NOT monero_SODIUM_LIBRARY_RELESAE)
+if(monero_SODIUM_LIBRARY_RELEASE)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY_RELEASE}")
 endif()
 
