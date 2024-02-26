@@ -124,7 +124,6 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   NORM_LIBRARY
   GSSAPI_LIBRARY
   PROTOLIB_LIBRARY
-  SODIUM_LIBRARY
 )
 
 if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
@@ -192,7 +191,9 @@ endif()
 if(monero_PROTOLIB_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(monero_SODIUM_LIBRARY)
+if(NOT monero_SODIUM_LIBRARY)
+  message(FATAL_ERROR "Could not find Sodium Library")
+else ()
   set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
 endif()
 
