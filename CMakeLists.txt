@@ -191,8 +191,8 @@ endif()
 if(monero_PROTOLIB_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(monero_SODIUM_LIBRARY_RELEASE)
-  set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY_RELEASE}")
+if(monero_sodium_LIBRARY_RELEASE)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_sodium_LIBRARY_RELEASE}")
 endif()
 
 if(STATIC AND NOT IOS)
@@ -251,7 +251,7 @@ set_property(TARGET monero::libraries PROPERTY
     ${monero_LIBUDEV_LIBRARY}
     ${monero_OPENSSL_SSL_LIBRARY}
     ${monero_OPENSSL_CRYPTO_LIBRARY}
-    ${monero_SODIUM_LIBRARY_RELEASE}
+    ${monero_sodium_LIBRARY_RELEASE}
     ${monero_UNBOUND_LIBRARIES}
     ${CMAKE_DL_LIBS}
 )
