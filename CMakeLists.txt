@@ -116,7 +116,7 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   OPENSSL_INCLUDE_DIR
   OPENSSL_CRYPTO_LIBRARY
   OPENSSL_SSL_LIBRARY
-  SODIUM_LIBRARY
+  sodium_LIBRARIES
   UNBOUND_LIBRARIES
   ZMQ_INCLUDE_PATH
   ZMQ_LIB
@@ -191,10 +191,10 @@ endif()
 if(monero_PROTOLIB_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(NOT monero_SODIUM_LIBRARY)
+if(NOT monero_sodium_LIBRARIES)
   message(FATAL_ERROR "Could not find Sodium Library")
 else ()
-  set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_sodium_LIBRARIES}")
 endif()
 
 if(STATIC AND NOT IOS)
@@ -214,7 +214,7 @@ foreach (LIB ${MONERO_LIBRARIES})
   else ()
     set(LIB_NAME "monero::${LIB}")
     add_library(${LIB_NAME} STATIC IMPORTED)
-    target_link_libraries(${LIB_NAME} PUBLIC ${monero_SODIUM_LIBRARY})
+    target_link_libraries(${LIB_NAME} PUBLIC ${monero_sodium_LIBRARIES})
     set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
     list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
   endif()
