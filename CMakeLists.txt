@@ -116,7 +116,7 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   OPENSSL_INCLUDE_DIR
   OPENSSL_CRYPTO_LIBRARY
   OPENSSL_SSL_LIBRARY
-  SODIUM_LIBRARY
+  sodium_LIBRARY_RELEASE
   UNBOUND_LIBRARIES
   ZMQ_INCLUDE_PATH
   ZMQ_LIB
@@ -124,7 +124,6 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   NORM_LIBRARY
   GSSAPI_LIBRARY
   PROTOLIB_LIBRARY
-  SODIUM_LIBRARY
 )
 
 if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
@@ -192,8 +191,8 @@ endif()
 if(monero_PROTOLIB_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_PROTOLIB_LIBRARY}")
 endif()
-if(monero_SODIUM_LIBRARY)
-  set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
+if(monero_sodium_LIBRARY_RELEASE)
+  set(ZMQ_LIB "${ZMQ_LIB};${monero_sodium_LIBRARY_RELEASE}")
 endif()
 
 if(STATIC AND NOT IOS)
@@ -252,7 +251,7 @@ set_property(TARGET monero::libraries PROPERTY
     ${monero_LIBUDEV_LIBRARY}
     ${monero_OPENSSL_SSL_LIBRARY}
     ${monero_OPENSSL_CRYPTO_LIBRARY}
-    ${monero_SODIUM_LIBRARY}
+    ${monero_sodium_LIBRARY_RELEASE}
     ${monero_UNBOUND_LIBRARIES}
     ${CMAKE_DL_LIBS}
 )
