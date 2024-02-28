@@ -357,7 +357,7 @@ namespace db
 
   namespace
   {
-    constexpr const char* map_webhook_type[] = {"tx-confirmation", "new-account"};
+    constexpr const char* map_webhook_type[] = {"tx-confirmation", "new-account", "tx-spend"};
 
     template<typename F, typename T>
     void map_webhook_key(F& format, T& self)
@@ -418,6 +418,16 @@ namespace db
       wire::field<3>("confirmations", std::cref(self.value.second.confirmations)),
       wire::field<4>("event_id", std::cref(self.value.first.event_id)),
       WIRE_FIELD_ID(5, tx_info)
+    );
+  }
+
+  void write_bytes(wire::writer& dest, const webhook_tx_spend& self)
+  {
+    wire::object(dest,
+      wire::field<0>("event", std::cref(self.key.type)),
+      wire::field<1>("token", std::cref(self.value.second.token)),
+      wire::field<2>("event_id", std::cref(self.value.first.event_id)),
+      WIRE_FIELD_ID(3, tx_info)
     );
   }
 
