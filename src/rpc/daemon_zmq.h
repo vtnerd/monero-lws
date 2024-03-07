@@ -75,6 +75,26 @@ namespace rpc
     using response = get_blocks_fast_response;
   };
   void read_bytes(wire::json_reader&, get_blocks_fast_response&);
+  
+  struct get_hashes_fast_request
+  {
+    get_hashes_fast_request() = delete;
+    std::vector<crypto::hash> known_hashes;
+    std::uint64_t start_height;
+  };
+  struct get_hashes_fast_response
+  {
+    get_hashes_fast_response() = delete;
+    std::vector<crypto::hash> hashes;
+    std::uint64_t start_height;
+    std::uint64_t current_height;
+  };
+  struct get_hashes_fast
+  {
+    using request = get_hashes_fast_request;
+    using response = get_hashes_fast_response;
+  };
+  void read_bytes(wire::json_reader&, get_hashes_fast_response&);
 
   struct get_transaction_pool_request
   {

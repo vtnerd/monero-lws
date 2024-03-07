@@ -1,4 +1,4 @@
- // Copyright (c) 2018-2023, The Monero Project
+// Copyright (c) 2018-2023, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -42,13 +42,16 @@
 #include <vector>
 
 #include "common/error.h"                             // monero/src
+#include "config.h"
 #include "crypto/crypto.h"                            // monero/src
 #include "crypto/wallet/crypto.h"                     // monero/src
 #include "cryptonote_basic/cryptonote_basic.h"        // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "db/account.h"
 #include "db/data.h"
+#include "cryptonote_basic/difficulty.h"              // monero/src
 #include "error.h"
+#include "hardforks/hardforks.h"   // monero/src
 #include "misc_log_ex.h"           // monero/contrib/epee/include
 #include "net/net_parse_helpers.h"
 #include "net/net_ssl.h"           // monero/contrib/epee/include
@@ -57,6 +60,7 @@
 #include "rpc/json.h"
 #include "rpc/message_data_structs.h" // monero/src
 #include "rpc/webhook.h"
+#include "util/blocks.h"
 #include "util/source_location.h"
 #include "util/transactions.h"
 
@@ -98,6 +102,7 @@ namespace lws
     {
       net::ssl_verification_t webhook_verify;
       bool enable_subaddresses;
+      bool untrusted_daemon;
     };
 
     struct thread_data
@@ -173,6 +178,43 @@ namespace lws
     {
       rpc::send_webhook(client, events, "json-full-payment_hook:", "msgpack-full-payment_hook:", std::chrono::seconds{5}, verify_mode);
     }
+
+    std::size_t get_target_time(db::block_id height)
+    {
+      const hardfork_t* fork = nullptr;
+      switch (config::network)
+      {
+      case cryptonote::network_type::MAINNET:
+        if (num_mainnet_hard_forks < 2)
+          MONERO_THROW(error::bad_blockchain, "expected more mainnet forks");
+        fork = mainnet_hard_forks;
+        break;     
+      case cryptonote::network_type::TESTNET:
+         if (num_testnet_hard_forks < 2)
+          MONERO_THROW(error::bad_blockchain, "expected more testnet forks");
+        fork = testnet_hard_forks;
+        break; 
+      case cryptonote::network_type::STAGENET:
+         if (num_stagenet_hard_forks < 2)
+          MONERO_THROW(error::bad_blockchain, "expected more stagenet forks");
+        fork = stagenet_hard_forks;
+        break;
+      default:
+        MONERO_THROW(error::bad_blockchain, "chain type not support with full sync"); 
+      } 
+      // this is hardfork version 2
+      return height < db::block_id(fork[1].height) ?
+        DIFFICULTY_TARGET_V1 : DIFFICULTY_TARGET_V2;
+    }
+
+    //! For difficulty vectors only
+    template<typename T> 
+    void update_window(T& vec)
+    {
+      // should only have one to pop each time
+      while (DIFFICULTY_BLOCKS_COUNT < vec.size())
+        vec.erase(vec.begin());
+    };
 
     struct by_height
     {
@@ -572,7 +614,7 @@ namespace lws
         MINFO("Updated exchange rates: " << *(*new_rates));
     }
 
-    void scan_loop(thread_sync& self, std::shared_ptr<thread_data> data) noexcept
+    void scan_loop(thread_sync& self, std::shared_ptr<thread_data> data, const bool untrusted_daemon, const bool leader_thread) noexcept
     {
       try
       {
@@ -602,17 +644,22 @@ namespace lws
         cryptonote::rpc::GetBlocksFast::Request req{};
         req.start_height = std::uint64_t(users.begin()->scan_height());
         req.start_height = std::max(std::uint64_t(1), req.start_height);
-        req.prune = true;
+        req.prune = !untrusted_daemon;
 
         epee::byte_slice block_request = rpc::client::make_message("get_blocks_fast", req);
         if (!send(client, block_request.clone()))
           return;
 
         std::vector<crypto::hash> blockchain{};
+        std::vector<db::pow_sync> new_pow{};
+        db::pow_window pow_window{};
 
+        const db::block_info last_checkpoint = db::storage::get_last_checkpoint();
+        const db::block_id last_pow = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_last_pow_block()).id;
         while (!self.update && scanner::is_running())
         {
           blockchain.clear();
+          new_pow.clear();
 
           auto resp = client.get_message(block_rpc_timeout);
           if (!resp)
@@ -691,6 +738,8 @@ namespace lws
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};
 
           blockchain.push_back(cryptonote::get_block_hash(fetched->blocks.front().block));
+          if (untrusted_daemon)
+            new_pow.push_back(db::pow_sync{fetched->blocks.front().block.timestamp});
 
           auto blocks = epee::to_span(fetched->blocks);
           auto indices = epee::to_span(fetched->output_indices);
@@ -704,7 +753,16 @@ namespace lws
           else
             fetched->start_height = 0;
 
+          if (untrusted_daemon)
+          {
+            pow_window = MONERO_UNWRAP(
+              MONERO_UNWRAP(disk.start_read()).get_pow_window(db::block_id(fetched->start_height))
+            );
+          }
+
           subaddress_reader reader{disk, opts.enable_subaddresses};
+          db::block_difficulty::unsigned_int diff{};
+          const db::block_id initial_height = db::block_id(fetched->start_height);
           for (auto block_data : boost::combine(blocks, indices))
           {
             ++(fetched->start_height);
@@ -733,12 +791,48 @@ namespace lws
               reader
             );
 
+            if (untrusted_daemon)
+            {
+              if (block.prev_id != blockchain.back())
+                MONERO_THROW(error::bad_blockchain, "A blocks prev_id does not match");
+
+              update_window(pow_window.pow_timestamps);
+              update_window(pow_window.cumulative_diffs);
+
+              while (BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW < pow_window.median_timestamps.size())
+                pow_window.median_timestamps.erase(pow_window.median_timestamps.begin());
+
+              // longhash takes a while, check is_running
+              if (!scanner::is_running())
+                return; 
+
+              diff = cryptonote::next_difficulty(pow_window.pow_timestamps, pow_window.cumulative_diffs, get_target_time(db::block_id(fetched->start_height)));
+
+              // skip POW hashing if done previously
+              if (last_pow < db::block_id(fetched->start_height))
+              {
+                if (!verify_timestamp(block.timestamp, pow_window.median_timestamps))
+                  MONERO_THROW(error::bad_blockchain, "Block failed timestamp check - possible chain forgery");
+
+                const crypto::hash pow =
+                  get_block_longhash(get_block_hashing_blob(block), db::block_id(fetched->start_height), block.major_version, disk, initial_height, epee::to_span(blockchain));
+                if (!cryptonote::check_hash(pow, diff))
+                  MONERO_THROW(error::bad_blockchain, "Block had too low difficulty");
+              }
+            }
+
             indices.remove_prefix(1);
             if (txes.size() != indices.size())
               throw std::runtime_error{"Bad daemon respnse - need same number of txes and indices"};
 
             for (auto tx_data : boost::combine(block.tx_hashes, txes, indices))
             {
+              if (untrusted_daemon)
+              {
+                if (cryptonote::get_transaction_hash(boost::get<1>(tx_data)) != boost::get<0>(tx_data))
+                  MONERO_THROW(error::bad_blockchain, "Hash of transaction does not match hash in block");
+              }
+
               scan_transaction(
                 epee::to_mut_span(users),
                 db::block_id(fetched->start_height),
@@ -750,12 +844,24 @@ namespace lws
               );
             }
 
+            if (untrusted_daemon)
+            {
+              const auto last_difficulty =
+                pow_window.cumulative_diffs.empty() ?
+                  db::block_difficulty::unsigned_int(0) : pow_window.cumulative_diffs.back();
+
+              pow_window.pow_timestamps.push_back(block.timestamp);
+              pow_window.median_timestamps.push_back(block.timestamp);
+              pow_window.cumulative_diffs.push_back(diff + last_difficulty);
+              new_pow.push_back(db::pow_sync{block.timestamp});
+              new_pow.back().cumulative_diff.set_difficulty(pow_window.cumulative_diffs.back());
+            }
             blockchain.push_back(cryptonote::get_block_hash(block));
           } // for each block
 
           reader.reader = std::error_code{common_error::kInvalidArgument}; // cleanup reader before next write
           auto updated = disk.update(
-            users.front().scan_height(), epee::to_span(blockchain), epee::to_span(users)
+            users.front().scan_height(), epee::to_span(blockchain), epee::to_span(users), epee::to_span(new_pow)
           );
           if (!updated)
           {
@@ -765,6 +871,11 @@ namespace lws
               return;
             }
             MONERO_THROW(updated.error(), "Failed to update accounts on disk");
+          }
+
+          if (untrusted_daemon && leader_thread && fetched->start_height % 4 == 0 && last_pow < db::block_id(fetched->start_height))
+          {
+            MINFO("On chain with hash " << blockchain.back() << " and difficulty " << diff << " at height " << fetched->start_height);
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
@@ -844,6 +955,7 @@ namespace lws
 
       MINFO("Starting scan loops on " << std::min(thread_count, users.size()) << " thread(s) with " << users.size() << " account(s)");
 
+      bool leader_thread = true;
       while (!users.empty() && --thread_count)
       {
         const std::size_t per_thread = std::max(std::size_t(1), users.size() / (thread_count + 1));
@@ -859,7 +971,8 @@ namespace lws
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(thread_users), opts
         );
-        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
+        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, leader_thread));
+        leader_thread = false;
       }
 
       if (!users.empty())
@@ -870,7 +983,7 @@ namespace lws
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(users), opts
         );
-        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data)));
+        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, false /*leader thread*/));
       }
 
       auto last_check = std::chrono::steady_clock::now();
@@ -931,36 +1044,20 @@ namespace lws
         accounts_cur = current_users.give_cursor();
       } // while scanning
     }
-  } // anonymous
 
-  expect<rpc::client> scanner::sync(db::storage disk, rpc::client client)
-  {
-    using get_hashes = cryptonote::rpc::GetHashesFast;
-
-    MINFO("Starting blockchain sync with daemon");
-
-    get_hashes::Request req{};
-    req.start_height = 0;
+    expect<std::list<crypto::hash>> get_chain_sync(expect<db::storage_reader> reader)
     {
-      auto reader = disk.start_read();
       if (!reader)
         return reader.error();
-
-      auto chain = reader->get_chain_sync();
-      if (!chain)
-        return chain.error();
-
-      req.known_hashes = std::move(*chain);
+      return reader->get_chain_sync();
     }
 
-    for (;;)
+    template<typename R, typename Q>
+    expect<typename R::response> fetch_chain(rpc::client& client, const char* endpoint, const Q& req)
     {
-      if (req.known_hashes.empty())
-        return {lws::error::bad_blockchain};
-
       expect<void> sent{lws::error::daemon_timeout};
 
-      epee::byte_slice msg = rpc::client::make_message("get_hashes_fast", req);
+      epee::byte_slice msg = rpc::client::make_message(endpoint, req);
       auto start = std::chrono::steady_clock::now();
 
       while (!(sent = client.send(std::move(msg), std::chrono::seconds{1})))
@@ -975,10 +1072,10 @@ namespace lws
           return sent.error();
       }
 
-      expect<get_hashes::Response> resp{lws::error::daemon_timeout};
+      expect<std::string> resp{lws::error::daemon_timeout};
       start = std::chrono::steady_clock::now();
 
-      while (!(resp = client.receive<get_hashes::Response>(std::chrono::seconds{1}, MLWS_CURRENT_LOCATION)))
+      while (!(resp = client.get_message(std::chrono::seconds{1})))
       {
         if (!scanner::is_running())
           return {lws::error::signal_abort_process};
@@ -989,29 +1086,180 @@ namespace lws
         if (!resp.matches(std::errc::timed_out))
           return resp.error();
       }
-
-      //
-      // Exit loop if it appears we have synced to top of chain
-      //
-      if (resp->hashes.size() <= 1 || resp->hashes.back() == req.known_hashes.front())
-        return {std::move(client)};
-
-      MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes)));
-
-      req.known_hashes.erase(req.known_hashes.begin(), --(req.known_hashes.end()));
-      for (std::size_t num = 0; num < 10; ++num)
-      {
-        if (resp->hashes.empty())
-          break;
-
-        req.known_hashes.insert(--(req.known_hashes.end()), resp->hashes.back());
-      }
+      return rpc::parse_json_response<R>(std::move(*resp));
     }
 
-    return {std::move(client)};
+    // does not validate blockchain hashes
+    expect<rpc::client> sync_quick(db::storage disk, rpc::client client)
+    {
+      MINFO("Starting blockchain sync with daemon");
+
+      cryptonote::rpc::GetHashesFast::Request req{};
+      req.start_height = 0;
+      req.known_hashes = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_chain_sync());
+
+      for (;;)
+      {
+        if (req.known_hashes.empty())
+          return {lws::error::bad_blockchain};
+
+        auto resp = fetch_chain<rpc::get_hashes_fast>(client, "get_hashes_fast", req);
+        if (!resp)
+          return resp.error();
+
+        //
+        // exit loop if it appears we have synced to top of chain
+        //
+        if (resp->hashes.size() <= 1 || resp->hashes.back() == req.known_hashes.front())
+          return {std::move(client)};
+
+        MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes)));
+
+        req.known_hashes.erase(req.known_hashes.begin(), --(req.known_hashes.end()));
+        for (std::size_t num = 0; num < 10; ++num)
+        {
+          if (resp->hashes.empty())
+            break;
+
+          req.known_hashes.insert(--(req.known_hashes.end()), resp->hashes.back());
+        }
+      }
+
+      return {std::move(client)};
+    } 
+ 
+    // validates blockchain hashes
+    expect<rpc::client> sync_full(db::storage disk, rpc::client client)
+    {
+      MINFO("Starting blockchain sync with daemon");
+
+      cryptonote::rpc::GetBlocksFast::Request req{};
+      req.start_height = 0;
+      req.block_ids = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_pow_sync());
+      req.prune = true;
+
+      std::vector<crypto::hash> new_hashes{};
+      std::vector<db::pow_sync> new_pow{};
+      for (;;)
+      {
+        if (req.block_ids.empty())
+          return {lws::error::bad_blockchain};
+
+        auto resp = fetch_chain<rpc::get_blocks_fast>(client, "get_blocks_fast", req);
+        if (!resp)
+          return resp.error();
+
+        if (resp->blocks.empty())
+          return {error::bad_daemon_response};
+
+        crypto::hash hash{};
+        if (!cryptonote::get_block_hash(resp->blocks.front().block, hash))
+          return {lws::error::bad_blockchain};
+
+        //
+        // exit loop if it appears we have synced to top of chain
+        //
+        const db::block_info last_checkpoint = db::storage::get_last_checkpoint();
+        if (resp->blocks.size() <= 1)
+        {
+          // error if not past last checkpoint
+          const auto expected_hash =
+            MONERO_UNWRAP(disk.start_read()).get_block_hash(db::block_id(resp->start_height));
+          if (!expected_hash || *expected_hash != hash || db::block_id(resp->start_height) < last_checkpoint.id)
+            return {error::bad_daemon_response};
+          return {std::move(client)};
+        }
+
+        // genesis block must be present as last entry
+        req.block_ids.erase(req.block_ids.begin(), --(req.block_ids.end()));
+
+        auto pow_window =
+          MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_pow_window(db::block_id(resp->start_height)));
+
+        // overlap check performed in db::storage::pow_sync
+        new_hashes.clear();
+        new_pow.clear();
+        new_hashes.reserve(resp->blocks.size());
+        new_pow.reserve(resp->blocks.size());
+        new_hashes.push_back(hash);
+        new_pow.push_back(db::pow_sync{resp->blocks.front().block.timestamp});
+
+        // skip overlap block
+        db::block_difficulty::unsigned_int diff = 0;
+        for (std::size_t i = 1; i < resp->blocks.size(); ++i)
+        {
+          const auto& block = resp->blocks[i].block;
+          const db::block_id height = db::block_id(resp->start_height + i);
+ 
+          // important check, ensure we haven't deviated from chain
+          if (block.prev_id != hash)
+            return {lws::error::bad_blockchain};
+ 
+          // compute block id hash
+          if (!cryptonote::get_block_hash(block, hash))
+            return {lws::error::bad_blockchain};
+
+          req.block_ids.push_front(hash);
+          update_window(pow_window.pow_timestamps);
+          update_window(pow_window.cumulative_diffs);
+
+          while (BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW < pow_window.median_timestamps.size())
+            pow_window.median_timestamps.erase(pow_window.median_timestamps.begin());
+
+          // longhash takes a while, check is_running
+          if (!scanner::is_running())
+            return {error::signal_abort_process}; 
+
+          diff = cryptonote::next_difficulty(pow_window.pow_timestamps, pow_window.cumulative_diffs, get_target_time(height));
+
+          // skip POW hashing when sync is within checkpoint
+          // storage::sync_pow(...) currently verifies checkpoint hashes
+          if (last_checkpoint.id < height)
+          {
+            if (!verify_timestamp(block.timestamp, pow_window.median_timestamps))
+            {
+              MERROR("Block failed timestamp check - possible chain forgery");
+              return {error::bad_blockchain};
+            }
+            const crypto::hash pow =
+              get_block_longhash(get_block_hashing_blob(block), height, block.major_version, disk, db::block_id(resp->start_height), epee::to_span(new_hashes));
+
+            if (!cryptonote::check_hash(pow, diff))
+            {
+              MERROR("Block " << std::uint64_t(height) << "had too low difficulty");
+              return {error::bad_blockchain};
+            }
+          }
+
+          const auto last_difficulty =
+            pow_window.cumulative_diffs.empty() ?
+              db::block_difficulty::unsigned_int(0) : pow_window.cumulative_diffs.back();
+
+          pow_window.pow_timestamps.push_back(block.timestamp);
+          pow_window.median_timestamps.push_back(block.timestamp);
+          pow_window.cumulative_diffs.push_back(diff + last_difficulty);
+          new_hashes.push_back(hash);
+          new_pow.push_back(db::pow_sync{block.timestamp});
+          new_pow.back().cumulative_diff.set_difficulty(pow_window.cumulative_diffs.back());
+        } // for every tx in block
+
+        MONERO_CHECK(disk.sync_pow(db::block_id(resp->start_height), epee::to_span(new_hashes), epee::to_span(new_pow)));
+        MINFO("Verified up to block " << (resp->start_height + new_hashes.size() - 1) << " with hash " << hash << " and difficulty " << diff);
+
+      } // for until sync
+
+      return {std::move(client)};
+    }
+  } // anonymous
+
+  expect<rpc::client> scanner::sync(db::storage disk, rpc::client client, const bool untrusted_daemon)
+  {
+    if (untrusted_daemon)
+      return sync_full(std::move(disk), std::move(client));
+    return sync_quick(std::move(disk), std::move(client));
   }
 
-  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const epee::net_utils::ssl_verification_t webhook_verify, const bool enable_subaddresses)
+  void scanner::run(db::storage disk, rpc::context ctx, std::size_t thread_count, const epee::net_utils::ssl_verification_t webhook_verify, const bool enable_subaddresses, const bool untrusted_daemon)
   {
     thread_count = std::max(std::size_t(1), thread_count);
 
@@ -1065,7 +1313,7 @@ namespace lws
         checked_wait(account_poll_interval - (std::chrono::steady_clock::now() - last));
       }
       else
-        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active), options{webhook_verify, enable_subaddresses});
+        check_loop(disk.clone(), ctx, thread_count, std::move(users), std::move(active), options{webhook_verify, enable_subaddresses, untrusted_daemon});
 
       if (!scanner::is_running())
         return;
@@ -1073,7 +1321,7 @@ namespace lws
       if (!client)
         client = MONERO_UNWRAP(ctx.connect());
 
-      expect<rpc::client> synced = sync(disk.clone(), std::move(client));
+      expect<rpc::client> synced = sync(disk.clone(), std::move(client), untrusted_daemon);
       if (!synced)
       {
         if (!synced.matches(std::errc::timed_out))

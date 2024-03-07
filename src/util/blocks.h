@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -24,40 +24,17 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#pragma once
 
-#include <atomic>
-#include <boost/optional/optional.hpp>
-#include <cstdint>
 #include <string>
-
-#include "db/storage.h"
-#include "net/net_ssl.h" // monero/contrib/epee/include
-#include "rpc/client.h"
+#include "crypto/hash.h"
+#include "db/data.h"
+#include "db/fwd.h"
+#include "span.h" // in monero/contrib/epee/include
 
 namespace lws
 {
-  //! Scans all active `db::account`s. Detects if another process changes active list.
-  class scanner
-  {
-    static std::atomic<bool> running;
+  crypto::hash get_block_longhash(
+    const std::string& bd, const db::block_id height, const unsigned major_version, const db::storage& disk, db::block_id cached_start, epee::span<const crypto::hash> cached);
 
-    scanner() = delete;
-
-  public:
-    //! Use `client` to sync blockchain data, and \return client if successful.
-    static expect<rpc::client> sync(db::storage disk, rpc::client client, const bool untrusted_daemon = false);
-
-    //! Poll daemon until `stop()` is called, using `thread_count` threads.
-    static void run(db::storage disk, rpc::context ctx, std::size_t thread_count, epee::net_utils::ssl_verification_t webhook_verify, bool enable_subaddresses, bool untrusted_daemon = false);
-
-    //! \return True if `stop()` has never been called.
-    static bool is_running() noexcept { return running; }
-
-    //! Stops all scanner instances globally.
-    static void stop() noexcept { running = false; }
-
-    //! For testing, \post is_running() == true
-    static void reset() noexcept { running = true; }
-  };
-} // lws
+  bool verify_timestamp(std::uint64_t verify, std::vector<std::uint64_t> timestamps);
+}

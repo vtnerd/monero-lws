@@ -141,7 +141,7 @@ LWS_CASE("db::storage::*_webhook")
       {
         crypto::hash chain[2] = {head.hash, crypto::rand<crypto::hash>()};
 
-        auto updated = db.update(head.id, chain, {std::addressof(full_account), 1});
+        auto updated = db.update(head.id, chain, {std::addressof(full_account), 1}, nullptr);
         EXPECT(!updated.has_error());
         EXPECT(updated->first == 1);
         if (i < 3)
@@ -185,7 +185,7 @@ LWS_CASE("db::storage::*_webhook")
       const std::vector<lws::db::output> outs = full_account.outputs();
       EXPECT(outs.size() == 1);
 
-      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1});
+      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
       EXPECT(!updated.has_error());
       EXPECT(updated->first == 1);
       EXPECT(updated->second.size() == 3);

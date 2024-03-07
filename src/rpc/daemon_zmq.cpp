@@ -58,20 +58,128 @@ namespace rct
     wire::object(source, WIRE_FIELD(mask), WIRE_FIELD(amount));
   }
 
+  static void read_bytes(wire::json_reader& source, clsag& self)
+  {
+    wire::object(source, WIRE_FIELD(s), WIRE_FIELD(c1), WIRE_FIELD(D));
+  }
+
+  static void read_bytes(wire::json_reader& source, mgSig& self)
+  {
+    wire::object(source, WIRE_FIELD(ss), WIRE_FIELD(cc));
+  }
+
+  static void read_bytes(wire::json_reader& source, BulletproofPlus& self)
+  {
+    wire::object(source,
+      WIRE_FIELD(V),
+      WIRE_FIELD(A),
+      WIRE_FIELD(A1),
+      WIRE_FIELD(B),
+      WIRE_FIELD(r1),
+      WIRE_FIELD(s1),
+      WIRE_FIELD(d1),
+      WIRE_FIELD(L),
+      WIRE_FIELD(R)
+    );
+  }
+
+  static void read_bytes(wire::json_reader& source, Bulletproof& self)
+  {
+    wire::object(source,
+      WIRE_FIELD(V),
+      WIRE_FIELD(A),
+      WIRE_FIELD(S),
+      WIRE_FIELD(T1),
+      WIRE_FIELD(T2),
+      WIRE_FIELD(taux),
+      WIRE_FIELD(mu),
+      WIRE_FIELD(L),
+      WIRE_FIELD(R),
+      WIRE_FIELD(a),
+      WIRE_FIELD(b),
+      WIRE_FIELD(t)
+    );
+  }
+
+  static void read_bytes(wire::json_reader& source, boroSig& self)
+  {
+    std::vector<rct::key> s0;
+    std::vector<rct::key> s1;
+    s0.reserve(64);
+    s1.reserve(64);
+    wire::object(source, wire::field("s0", std::ref(s0)), wire::field("s1", std::ref(s1)));
+
+    if (s0.size() != 64 || s1.size() != 64)
+      WIRE_DLOG_THROW(wire::error::schema::array, "Expected s0 and s1 to have 64 elements");
+
+    for (std::size_t i = 0; i < 64; ++i)
+      self.s0[i] = s0[i];
+    for (std::size_t i = 0; i < 64; ++i)
+      self.s1[i] = s1[i];
+  }
+
+  static void read_bytes(wire::json_reader& source, rangeSig& self)
+  {
+    std::vector<rct::key> keys{};
+    keys.reserve(64);
+
+    wire::object(source, WIRE_FIELD(asig), wire::field("Ci", std::ref(keys)));
+    if (keys.size() != 64)
+      WIRE_DLOG_THROW(wire::error::schema::array, "Expected 64 eleents in Ci");
+    for (std::size_t i = 0; i < 64; ++i)
+    {
+      self.Ci[i] = keys[i];
+    }
+  }
+
+  namespace
+  {
+    struct prunable_helper
+    {
+      rctSigPrunable prunable;
+      rct::keyV pseudo_outs;
+    };
+
+    void read_bytes(wire::json_reader& source, prunable_helper& self)
+    {
+      wire::object(source,
+        wire::field("range_proofs", std::ref(self.prunable.rangeSigs)),
+        wire::field("bulletproofs", std::ref(self.prunable.bulletproofs)),
+        wire::field("bulletproofs_plus", std::ref(self.prunable.bulletproofs_plus)),
+        wire::field("mlsags", std::ref(self.prunable.MGs)),
+        wire::field("clsags", std::ref(self.prunable.CLSAGs)),
+        wire::field("pseudo_outs", std::ref(self.pseudo_outs))
+      );
+
+      const bool pruned =
+        self.prunable.rangeSigs.empty() &&
+        self.prunable.bulletproofs.empty() &&
+        self.prunable.bulletproofs_plus.empty() &&
+        self.prunable.MGs.empty() &&
+        self.prunable.CLSAGs.empty() &&
+        self.pseudo_outs.empty();
+
+      if (pruned)
+        WIRE_DLOG_THROW(wire::error::schema::array, "Expected at least one prunable field");
+    }
+  } // anonymous
+
   static void read_bytes(wire::json_reader& source, rctSig& self)
   {
     boost::optional<std::vector<ecdhTuple>> ecdhInfo;
     boost::optional<ctkeyV> outPk;
     boost::optional<xmr_amount> txnFee;
-
+    boost::optional<prunable_helper> prunable;
     self.outPk.reserve(default_inputs);
     wire::object(source,
       WIRE_FIELD(type),
       wire::optional_field("encrypted", std::ref(ecdhInfo)),
       wire::optional_field("commitments", std::ref(outPk)),
-      wire::optional_field("fee", std::ref(txnFee))
+      wire::optional_field("fee", std::ref(txnFee)),
+      wire::optional_field("prunable", std::ref(prunable))
     );
 
+    self.txnFee = 0;
     if (self.type != RCTTypeNull)
     {
       if (!ecdhInfo || !outPk || !txnFee)
@@ -82,6 +190,12 @@ namespace rct
     }
     else if (ecdhInfo || outPk || txnFee)
       WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
+
+    if (prunable)
+    {
+      self.p = std::move(prunable->prunable);
+      self.get_pseudo_outs() = std::move(prunable->pseudo_outs);
+    }
   }
 } // rct
 
@@ -185,6 +299,12 @@ namespace cryptonote
     }
   } // rpc
 } // cryptonote
+
+void lws::rpc::read_bytes(wire::json_reader& source, get_hashes_fast_response& self)
+{
+  self.hashes.reserve(default_blocks_fetched);
+  wire::object(source, WIRE_FIELD(hashes), WIRE_FIELD(start_height), WIRE_FIELD(current_height));
+}
 
 void lws::rpc::read_bytes(wire::json_reader& source, get_blocks_fast_response& self)
 {
