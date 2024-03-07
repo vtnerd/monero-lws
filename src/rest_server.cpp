@@ -57,7 +57,7 @@
 #include "util/gamma_picker.h"
 #include "util/random_outputs.h"
 #include "util/source_location.h"
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/json.h"
 
 namespace lws

@@ -31,7 +31,7 @@
 #include "cryptonote_config.h"        // monero/src
 #include "crypto/crypto.h"            // monero/src
 #include "rpc/message_data_structs.h" // monero/src
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/json.h"
 #include "wire/wrapper/array.h"
 #include "wire/wrapper/variant.h"
