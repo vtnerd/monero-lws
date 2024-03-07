@@ -425,8 +425,8 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         EXPECT(result->at(0).second.at(0).size() == 2);
         EXPECT(result->at(0).second.at(0).at(0) == lws::db::minor_index(1));
         EXPECT(result->at(0).second.at(0).at(1) == lws::db::minor_index(2));
-      } 
-
+      }
+ 
       std::vector<cryptonote::tx_destination_entry> destinations;
       destinations.emplace_back();
       destinations.back().amount = 8000;

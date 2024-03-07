@@ -204,6 +204,43 @@ namespace db
   namespace
   {
     template<typename F, typename T>
+    void map_block_difficulty(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, high), WIRE_FIELD_ID(1, low));
+    }
+  }
+  WIRE_DEFINE_OBJECT(block_difficulty, map_block_difficulty);
+
+  void block_difficulty::set_difficulty(const unsigned_int& in)
+  {
+    high = ((in >> 64) & 0xffffffffffffffff).convert_to<std::uint64_t>();
+    low  = (in & 0xffffffffffffffff).convert_to<std::uint64_t>();
+  }
+  block_difficulty::unsigned_int block_difficulty::get_difficulty() const
+  {
+    unsigned_int out = high;
+    out <<= 64;
+    out += low;
+    return out;
+  }
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_block_pow(F& format, T& self)
+    {
+      wire::object(format,
+        WIRE_FIELD_ID(0, id),
+        WIRE_FIELD_ID(1, timestamp),
+        WIRE_FIELD_ID(2, cumulative_diff)
+      );
+    }
+  }
+  WIRE_DEFINE_OBJECT(block_pow, map_block_pow);
+
+  namespace
+  {
+    template<typename F, typename T>
     void map_transaction_link(F& format, T& self)
     {
       wire::object(format, WIRE_FIELD_ID(0, height), WIRE_FIELD_ID(1, tx_hash));
