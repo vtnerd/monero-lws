@@ -235,7 +235,7 @@ namespace rpc
     const std::string bind = account_endpoint + std::to_string(++ctx->account_counter);
     MONERO_CHECK(do_set_option(out.sock.get(), ZMQ_LINGER, account_zmq_linger));
     MONERO_ZMQ_CHECK(zmq_bind(out.sock.get(), bind.c_str()));
-    return out;
+    return {std::move(out)};
   }
 
   account_push::~account_push() noexcept
