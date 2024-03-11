@@ -1,0 +1,351 @@
+// Copyright (c) 2024, The Monero Project
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#include "framework.test.h"
+
+#include <optional>
+#include "db/data.h"
+#include "db/storage.test.h"
+#include "db/string.h"
+#include "hex.h" // monero/epee/contrib/include
+#include "net/http_client.h"
+#include "rest_server.h"
+
+namespace
+{
+  namespace enet = epee::net_utils;
+
+  constexpr const char fake_daemon[] = "inproc://fake_daemon";
+  constexpr const char rest_server[] = "http://127.0.0.1:10000";
+  constexpr const char admin_server[] = "http://127.0.0.1:10001";
+
+  std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
+  {
+    const enet::http::http_response_info* info = nullptr;
+    if (!client.invoke(uri, "POST", body, std::chrono::milliseconds{500}, std::addressof(info), {}))
+      throw std::runtime_error{"HTTP invoke failed"};
+    if (info->m_response_code != 200)
+      throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(info->m_response_code)};
+    return std::string{info->m_body}; 
+  } 
+}
+
+LWS_CASE("rest_server")
+{
+  lws::db::account_address account{};
+  crypto::secret_key view{};
+  crypto::generate_keys(account.spend_public, view);
+  crypto::generate_keys(account.view_public, view);
+  const std::string address = lws::db::address_string(account);
+  const std::string viewkey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(view))));
+
+  SETUP("Database and login")
+  {
+    std::optional<lws::rest_server> server;
+    lws::db::test::cleanup_db on_scope_exit{};
+    lws::db::storage db = lws::db::test::get_fresh_db();
+    auto rpc_client =
+      lws::rpc::context::make(fake_daemon, {}, {}, {}, std::chrono::minutes{0}); 
+    {
+      const lws::rest_server::configuration config{
+        {}, {}, 1, 10, {}, false, true, true  
+      };
+      std::vector<std::string> addresses{rest_server};
+      server.emplace(
+        epee::to_span(addresses),
+        std::vector<std::string>{admin_server},
+        db.clone(),
+        MONERO_UNWRAP(rpc_client.connect()),
+        config
+      );
+    }
+
+    const lws::db::block_info last_block =
+      MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
+    const auto get_account = [&db, &account] () -> lws::db::account
+    {
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account)).second;
+    };
+
+    enet::http::http_simple_client client{};
+    client.set_server("127.0.0.1", "10000", boost::none);
+    EXPECT(client.connect(std::chrono::milliseconds{500})); 
+
+    std::string message =
+      "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"create_account\":true,\"generated_locally\":true}";
+    std::string response = invoke(client, "/login", message);
+    EXPECT(response == "{\"new_address\":true,\"generated_locally\":true}");
+
+    auto account = get_account();
+    EXPECT(account.id == lws::db::account_id(1));
+
+    SECTION("Empty Account")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+
+      response = invoke(client, "/get_address_txs", message);
+      EXPECT(response ==
+        "{\"total_received\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+    }
+
+    SECTION("One Receive, Zero Spends")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+
+      const lws::db::transaction_link link{
+        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = crypto::rand<crypto::public_key>();
+      const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
+      const crypto::public_key pub = crypto::rand<crypto::public_key>();
+      const rct::key ringct = crypto::rand<rct::key>();
+      const auto extra =
+        lws::db::extra(lws::db::extra::coinbase_output | lws::db::extra::ringct_output);
+      const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
+      const crypto::key_image image = crypto::rand<crypto::key_image>();
+
+      lws::account real_account{account, {}, {}};
+      real_account.add_out(
+        lws::db::output{
+          link,
+          lws::db::output::spend_meta_{
+            lws::db::output_id{500, 30},
+            std::uint64_t(40000),
+            std::uint32_t(16),
+            std::uint32_t(2),
+            tx_public
+          },
+          std::uint64_t(7000),
+          std::uint64_t(4670),
+          tx_prefix,
+          pub,
+          ringct,
+          {0, 0, 0, 0, 0, 0, 0},
+          lws::db::pack(extra, sizeof(crypto::hash)),
+          payment_id_,
+          std::uint64_t(100),
+          lws::db::address_index{lws::db::major_index(2), lws::db::minor_index(66)}
+        }
+      );
+ 
+      {
+        std::vector<crypto::hash> hashes{
+          last_block.hash,
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>()
+        };
+
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"40000\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+
+      response = invoke(client, "/get_address_txs", message);
+      EXPECT(response ==
+        "{\"total_received\":\"40000\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"transactions\":["
+          "{\"id\":0,"
+          "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"timestamp\":\"1970-01-01T01:56:40Z\","
+          "\"total_received\":\"40000\","
+          "\"total_sent\":\"0\","
+          "\"fee\":\"100\","
+          "\"unlock_time\":4670,"
+          "\"height\":4000,"
+          "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_)) + "\","
+          "\"coinbase\":true,"
+          "\"mempool\":false,"
+          "\"mixin\":16}"
+        "]}"
+      );
+    }
+
+    SECTION("One Receive, One Spend")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+
+      const lws::db::transaction_link link{
+        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = crypto::rand<crypto::public_key>();
+      const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
+      const crypto::public_key pub = crypto::rand<crypto::public_key>();
+      const rct::key ringct = crypto::rand<rct::key>();
+      const auto extra =
+        lws::db::extra(lws::db::extra::coinbase_output | lws::db::extra::ringct_output);
+      const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
+      const crypto::hash payment_id = crypto::rand<crypto::hash>();
+      const crypto::key_image image = crypto::rand<crypto::key_image>();
+
+      lws::account real_account{account, {}, {}};
+      real_account.add_out(
+        lws::db::output{
+          link,
+          lws::db::output::spend_meta_{
+            lws::db::output_id{500, 30},
+            std::uint64_t(40000),
+            std::uint32_t(16),
+            std::uint32_t(2),
+            tx_public
+          },
+          std::uint64_t(7000),
+          std::uint64_t(4670),
+          tx_prefix,
+          pub,
+          ringct,
+          {0, 0, 0, 0, 0, 0, 0},
+          lws::db::pack(extra, sizeof(crypto::hash)),
+          payment_id_,
+          std::uint64_t(100),
+          lws::db::address_index{lws::db::major_index(2), lws::db::minor_index(66)}
+        }
+      );
+      real_account.add_spend(
+        lws::db::spend{
+          link,
+          image,
+          lws::db::output_id{500, 30},
+          std::uint64_t(66),
+          std::uint64_t(1500),
+          std::uint32_t(16),
+          {0, 0, 0},
+          32,
+          payment_id,
+          lws::db::address_index{lws::db::major_index(4), lws::db::minor_index(55)}     
+        }
+      );
+ 
+      {
+        std::vector<crypto::hash> hashes{
+          last_block.hash,
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>()
+        };
+
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"40000\","
+        "\"total_sent\":\"40000\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"spent_outputs\":[{"
+          "\"amount\":\"40000\","
+          "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
+          "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
+          "\"out_index\":2,"
+          "\"mixin\":16,"
+          "\"sender\":{\"maj_i\":4,\"min_i\":55}"
+        "}]}"
+      );
+
+      response = invoke(client, "/get_address_txs", message);
+      EXPECT(response ==
+        "{\"total_received\":\"40000\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"transactions\":["
+          "{\"id\":0,"
+          "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"timestamp\":\"1970-01-01T01:56:40Z\","
+          "\"total_received\":\"40000\","
+          "\"total_sent\":\"40000\","
+          "\"fee\":\"100\","
+          "\"unlock_time\":4670,"
+          "\"height\":4000,"
+          "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_)) + "\","
+          "\"coinbase\":true,"
+          "\"mempool\":false,"
+          "\"mixin\":16,"
+          "\"spent_outputs\":[{"
+            "\"amount\":\"40000\","
+            "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
+            "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
+            "\"out_index\":2,"
+            "\"mixin\":16,"
+            "\"sender\":{\"maj_i\":4,\"min_i\":55}"
+          "}]}"
+        "]}"
+      );
+    }
+
+  }
+}
+
