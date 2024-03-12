@@ -527,7 +527,7 @@ namespace lws
           MONERO_CHECK(client->send(std::move(msg), std::chrono::seconds{10}));
         }
 
-        if ((req.use_dust && req.use_dust) || !req.dust_threshold)
+        if ((req.use_dust && *req.use_dust) || !req.dust_threshold)
           req.dust_threshold = rpc::safe_uint64(0);
 
         if (!req.mixin)
