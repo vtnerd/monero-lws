@@ -31,9 +31,11 @@
 #include "db/data.h"
 #include "db/storage.test.h"
 #include "db/string.h"
+#include "error.h"
 #include "hex.h" // monero/epee/contrib/include
 #include "net/http_client.h"
 #include "rest_server.h"
+#include "scanner.test.h"
 
 namespace
 {
@@ -43,6 +45,19 @@ namespace
   constexpr const char rest_server[] = "http://127.0.0.1:10000";
   constexpr const char admin_server[] = "http://127.0.0.1:10001";
 
+  struct join
+  {
+      boost::thread& thread;
+      ~join() { thread.join(); }
+  };
+
+  struct rct_bytes
+  {
+    rct::key commitment;
+    rct::key mask;
+    rct::key amount;
+  };
+
   std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
   {
     const enet::http::http_response_info* info = nullptr;
@@ -51,7 +66,38 @@ namespace
     if (info->m_response_code != 200)
       throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(info->m_response_code)};
     return std::string{info->m_body}; 
-  } 
+  }
+
+  epee::byte_slice get_fee_response()
+  {
+    return epee::byte_slice{
+      std::string{
+        "{\"jsonrpc\":2.0,\"id\":0,\"result\":{"
+          "\"estimated_base_fee\":10000,\"fee_mask\":1000,\"size_scale\":256,\"hard_fork_version\":16"
+        "}}"
+      }
+    };
+  }
+
+  rct_bytes get_rct_bytes(const crypto::secret_key& user_key, const crypto::public_key& tx_public, const rct::key& ringct_mask, const std::uint64_t amount, const std::uint32_t index)
+  {
+    rct_bytes out{};
+
+    crypto::key_derivation derived;
+    if (!crypto::generate_key_derivation(tx_public, user_key, derived))
+      MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
+
+    crypto::secret_key scalar;
+    rct::ecdhTuple encrypted{ringct_mask, rct::d2h(amount)};
+
+    crypto::derivation_to_scalar(derived, index, scalar);
+    rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
+
+    out.commitment = rct::commit(amount, ringct_mask);
+    out.mask = encrypted.mask;
+    out.amount = encrypted.amount;
+    return out;
+  }
 }
 
 LWS_CASE("rest_server")
@@ -68,8 +114,9 @@ LWS_CASE("rest_server")
     std::optional<lws::rest_server> server;
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
-    auto rpc_client =
-      lws::rpc::context::make(fake_daemon, {}, {}, {}, std::chrono::minutes{0}); 
+    auto context =
+      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0});
+    const auto rpc = MONERO_UNWRAP(context.connect());
     {
       const lws::rest_server::configuration config{
         {}, {}, 1, 10, {}, false, true, true  
@@ -79,7 +126,7 @@ LWS_CASE("rest_server")
         epee::to_span(addresses),
         std::vector<std::string>{admin_server},
         db.clone(),
-        MONERO_UNWRAP(rpc_client.connect()),
+        MONERO_UNWRAP(rpc.clone()),
         config
       );
     }
@@ -129,6 +176,15 @@ LWS_CASE("rest_server")
         "\"transaction_height\":" + scan_height + ","
         "\"blockchain_height\":" + scan_height + "}"
       );
+
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(get_fee_response());
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      const join on_scope_exit{server_thread};
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
+      response = invoke(client, "/get_unspent_outs", message);
+      EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\"}");
     }
 
     SECTION("One Receive, Zero Spends")
@@ -140,7 +196,12 @@ LWS_CASE("rest_server")
       const lws::db::transaction_link link{
         lws::db::block_id(4000), crypto::rand<crypto::hash>()
       };
-      const crypto::public_key tx_public = crypto::rand<crypto::public_key>();
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
       const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
       const crypto::public_key pub = crypto::rand<crypto::public_key>();
       const rct::key ringct = crypto::rand<rct::key>();
@@ -218,7 +279,36 @@ LWS_CASE("rest_server")
           "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_)) + "\","
           "\"coinbase\":true,"
           "\"mempool\":false,"
-          "\"mixin\":16}"
+          "\"mixin\":16,"
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
+        "]}"
+      );
+
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(get_fee_response());
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      const join on_scope_exit{server_thread};
+
+      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2);
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
+      response = invoke(client, "/get_unspent_outs", message);
+      EXPECT(response ==
+        "{\"per_byte_fee\":39,"
+        "\"fee_mask\":1000,"
+        "\"amount\":\"40000\","
+        "\"outputs\":["
+          "{\"amount\":\"40000\","
+          "\"public_key\":\"" + epee::to_hex::string(epee::as_byte_span(pub)) + "\","
+          "\"index\":2,"
+          "\"global_index\":30,"
+          "\"tx_id\":30,"
+          "\"tx_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"tx_prefix_hash\":\"" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + "\","
+          "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
+          "\"timestamp\":\"1970-01-01T01:56:40Z\","
+          "\"height\":4000,"
+          "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
         "]}"
       );
     }
@@ -232,7 +322,12 @@ LWS_CASE("rest_server")
       const lws::db::transaction_link link{
         lws::db::block_id(4000), crypto::rand<crypto::hash>()
       };
-      const crypto::public_key tx_public = crypto::rand<crypto::public_key>();
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
       const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
       const crypto::public_key pub = crypto::rand<crypto::public_key>();
       const rct::key ringct = crypto::rand<rct::key>();
@@ -334,6 +429,7 @@ LWS_CASE("rest_server")
           "\"coinbase\":true,"
           "\"mempool\":false,"
           "\"mixin\":16,"
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66},"
           "\"spent_outputs\":[{"
             "\"amount\":\"40000\","
             "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
@@ -344,8 +440,36 @@ LWS_CASE("rest_server")
           "}]}"
         "]}"
       );
-    }
 
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(get_fee_response());
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      const join on_scope_exit{server_thread};
+
+      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2);
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
+      response = invoke(client, "/get_unspent_outs", message);
+      EXPECT(response ==
+        "{\"per_byte_fee\":39,"
+        "\"fee_mask\":1000,"
+        "\"amount\":\"40000\","
+        "\"outputs\":["
+          "{\"amount\":\"40000\","
+          "\"public_key\":\"" + epee::to_hex::string(epee::as_byte_span(pub)) + "\","
+          "\"index\":2,"
+          "\"global_index\":30,"
+          "\"tx_id\":30,"
+          "\"tx_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"tx_prefix_hash\":\"" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + "\","
+          "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
+          "\"timestamp\":\"1970-01-01T01:56:40Z\","
+          "\"height\":4000,"
+          "\"spend_key_images\":[\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\"],"
+          "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
+        "]}"
+      );
+    }
   }
 }
 
