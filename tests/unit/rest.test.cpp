@@ -119,7 +119,7 @@ LWS_CASE("rest_server")
     const auto rpc = MONERO_UNWRAP(context.connect());
     {
       const lws::rest_server::configuration config{
-        {}, {}, 1, 10, {}, false, true, true  
+        {}, {}, 1, 20, {}, false, true, true
       };
       std::vector<std::string> addresses{rest_server};
       server.emplace(
@@ -468,6 +468,60 @@ LWS_CASE("rest_server")
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
         "]}"
+      );
+    }
+
+    SECTION("provision_subaddrs")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"maj_i\":0,\"min_i\":0,\"n_maj\":2,\"n_min\":5}";
+
+      response = invoke(client, "/provision_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":0,\"value\":[[0,4]]},"
+          "{\"key\":1,\"value\":[[0,4]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[0,4]]},"
+          "{\"key\":1,\"value\":[[0,4]]}]}"
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"maj_i\":2,\"min_i\":5,\"n_maj\":2,\"n_min\":5}";
+      response = invoke(client, "/provision_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":2,\"value\":[[5,9]]},"
+          "{\"key\":3,\"value\":[[5,9]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[0,4]]},"
+          "{\"key\":1,\"value\":[[0,4]]},"
+          "{\"key\":2,\"value\":[[5,9]]},"
+          "{\"key\":3,\"value\":[[5,9]]}]}"
+      );
+    }
+
+    SECTION("upsert_subaddrs")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"subaddrs\":[{\"key\":0,\"value\":[[1,10]]}]}";
+
+      response = invoke(client, "/upsert_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":0,\"value\":[[1,10]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[1,10]]}]}"
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"subaddrs\":[{\"key\":0,\"value\":[[11,20]]}]}";
+      response = invoke(client, "/upsert_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":0,\"value\":[[11,20]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[1,20]]}]}"
       );
     }
   }
