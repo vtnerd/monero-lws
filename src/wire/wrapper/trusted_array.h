@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <limits>
 #include "wire/traits.h"
 #include "wire/read.h"
@@ -34,6 +35,7 @@
 
 namespace wire
 {
+  //! \brief Wrapper that removes read constraints
   template<typename T>
   struct trusted_array_
   {
