@@ -273,7 +273,7 @@ namespace lws
       WIRE_FIELD_COPY(start_height),
       WIRE_FIELD_COPY(transaction_height),
       WIRE_FIELD_COPY(blockchain_height),
-      wire::field("transactions", wire::array(boost::adaptors::index(self.transactions)))
+      wire::optional_field("transactions", wire::array(boost::adaptors::index(self.transactions)))
     );
   }
 
