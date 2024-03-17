@@ -118,10 +118,10 @@ namespace lws
   {
     wire::object(format,
       wire::field<0>("immutable_", std::ref(immutable)),
-      wire::field<1>("spendable_", wire::trusted_array(std::ref(self.spendable_))),
-      wire::field<2>("pubs_", wire::trusted_array(std::ref(self.pubs_))),
-      wire::field<3>("spends_", wire::trusted_array(std::ref(self.spends_))),
-      wire::field<4>("outputs_", wire::trusted_array(std::ref(self.outputs_))),
+      wire::optional_field<1>("spendable_", wire::trusted_array(std::ref(self.spendable_))),
+      wire::optional_field<2>("pubs_", wire::trusted_array(std::ref(self.pubs_))),
+      wire::optional_field<3>("spends_", wire::trusted_array(std::ref(self.spends_))),
+      wire::optional_field<4>("outputs_", wire::trusted_array(std::ref(self.outputs_))),
       WIRE_FIELD_ID(5, height_)
     );
   }
