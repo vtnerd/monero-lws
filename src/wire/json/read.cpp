@@ -48,13 +48,13 @@ namespace
   };
 
   //! \throw std::system_error by converting `code` into a std::error_code
-  [[noreturn]] void throw_json_error(const epee::span<char> source, const rapidjson::Reader& reader, const wire::error::schema expected)
+  [[noreturn]] void throw_json_error(const epee::span<const std::uint8_t> source, const rapidjson::Reader& reader, const wire::error::schema expected)
   {
     const std::size_t offset = std::min(source.size(), reader.GetErrorOffset());
     const std::size_t start = offset;//std::max(snippet_size / 2, offset) - (snippet_size / 2);
     const std::size_t end = start + std::min(snippet_size, source.size() - start);
 
-    const boost::string_ref text{source.data() + start, end - start};
+    const boost::string_ref text{reinterpret_cast<const char*>(source.data()) + start, end - start};
     const rapidjson::ParseErrorCode parse_error = reader.GetParseErrorCode();
     switch (parse_error)
     {
@@ -178,17 +178,19 @@ namespace wire
 
   void json_reader::read_next_value(rapidjson_sax& handler)
   {
-    rapidjson::InsituStringStream stream{current_.data()};
-    if (!reader_.Parse<rapidjson::kParseStopWhenDoneFlag>(stream, handler))
-      throw_json_error(current_, reader_, handler.expected_);
-    current_.remove_prefix(stream.Tell());
+    rapidjson::MemoryStream stream{reinterpret_cast<const char*>(remaining_.data()), remaining_.size()};
+    rapidjson::EncodedInputStream<rapidjson::UTF8<>, rapidjson::MemoryStream> istream{stream};
+    if (!reader_.Parse<rapidjson::kParseStopWhenDoneFlag>(istream, handler))
+      throw_json_error(remaining_, reader_, handler.expected_);
+    remaining_.remove_prefix(istream.Tell());
   }
 
   char json_reader::get_next_token()
   {
-    rapidjson::InsituStringStream stream{current_.data()};
-    rapidjson::SkipWhitespace(stream);
-    current_.remove_prefix(stream.Tell());
+    rapidjson::MemoryStream stream{reinterpret_cast<const char*>(remaining_.data()), remaining_.size()};
+    rapidjson::EncodedInputStream<rapidjson::UTF8<>, rapidjson::MemoryStream> istream{stream};
+    rapidjson::SkipWhitespace(istream);
+    remaining_.remove_prefix(istream.Tell());
     return stream.Peek();
   }
 
@@ -196,15 +198,15 @@ namespace wire
   {
     if (get_next_token() != '"')
       WIRE_DLOG_THROW_(error::schema::string);
-    current_.remove_prefix(1);
+    remaining_.remove_prefix(1);
 
-    void const* const end = std::memchr(current_.data(), '"', current_.size());
+    void const* const end = std::memchr(remaining_.data(), '"', remaining_.size());
     if (!end)
       WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorStringMissQuotationMark));
 
-    char const* const begin = current_.data();
-    const std::size_t length = current_.remove_prefix(static_cast<const char*>(end) - current_.data() + 1);
-    return {begin, length - 1};
+    std::uint8_t const* const begin = remaining_.data();
+    const std::size_t length = remaining_.remove_prefix(static_cast<const std::uint8_t*>(end) - remaining_.data() + 1);
+    return {reinterpret_cast<const char*>(begin), length - 1};
   }
 
   void json_reader::skip_value()
@@ -214,11 +216,12 @@ namespace wire
   }
 
   json_reader::json_reader(std::string&& source)
-    : reader(),
+    : reader(nullptr),
       source_(std::move(source)),
-      current_(std::addressof(source_[0]), source_.size()),
       reader_()
-  {}
+  {
+    remaining_ = {reinterpret_cast<const std::uint8_t*>(source_.data()), source_.size()};
+  }
 
   void json_reader::check_complete() const
   {
@@ -271,13 +274,13 @@ namespace wire
   {
     if (get_next_token() != '"')
       WIRE_DLOG_THROW_(error::schema::string);
-    current_.remove_prefix(1);
+    remaining_.remove_prefix(1);
 
     const std::uintmax_t out = unsigned_integer();
 
     if (get_next_token() != '"')
       WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorStringMissQuotationMark));
-    current_.remove_prefix(1);
+    remaining_.remove_prefix(1);
 
     return out;
   }
@@ -316,11 +319,11 @@ namespace wire
       WIRE_DLOG_THROW(error::schema::fixed_binary, "of size" << dest.size() * 2 << " but got " << value.size());
   }
 
-  std::size_t json_reader::start_array()
+  std::size_t json_reader::start_array(std::size_t)
   {
     if (get_next_token() != '[')
       WIRE_DLOG_THROW_(error::schema::array);
-    current_.remove_prefix(1);
+    remaining_.remove_prefix(1);
     increment_depth();
     return 0;
   }
@@ -332,7 +335,7 @@ namespace wire
       WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorArrayMissCommaOrSquareBracket));
     if (next == ']')
     {
-      current_.remove_prefix(1);
+      remaining_.remove_prefix(1);
       return true;
     }
 
@@ -340,7 +343,7 @@ namespace wire
     {
       if (next != ',')
         WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorArrayMissCommaOrSquareBracket));
-      current_.remove_prefix(1);
+      remaining_.remove_prefix(1);
     }
     return false;
   }
@@ -349,7 +352,7 @@ namespace wire
   {
     if (get_next_token() != '{')
       WIRE_DLOG_THROW_(error::schema::object);
-    current_.remove_prefix(1);
+    remaining_.remove_prefix(1);
     increment_depth();
     return 0;
   }
@@ -377,7 +380,7 @@ namespace wire
         WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorObjectMissCommaOrCurlyBracket));
       if (next == '}')
       {
-        current_.remove_prefix(1);
+        remaining_.remove_prefix(1);
         return false;
       }
 
@@ -386,7 +389,7 @@ namespace wire
       {
         if (next != ',')
           WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorObjectMissCommaOrCurlyBracket));
-        current_.remove_prefix(1);
+        remaining_.remove_prefix(1);
       }
       ++state;
 
@@ -395,7 +398,7 @@ namespace wire
       index = process_key(json_key.value.string);
       if (get_next_token() != ':')
         WIRE_DLOG_THROW_(error::rapidjson_e(rapidjson::kParseErrorObjectMissColon));
-      current_.remove_prefix(1);
+      remaining_.remove_prefix(1);
 
       // parse value
       if (index != map.size())

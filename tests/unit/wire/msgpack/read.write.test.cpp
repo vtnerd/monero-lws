@@ -30,9 +30,12 @@
 #include <boost/range/algorithm/equal.hpp>
 #include <cstdint>
 #include <type_traits>
+#include "wire/field.h"
 #include "wire/traits.h"
 #include "wire/msgpack.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 #include "wire/base.test.h"
 
@@ -65,9 +68,10 @@ namespace
   template<typename F, typename T>
   void basic_object_map(F& format, T& self)
   {
+    using vec_max = wire::max_element_count<100>;
     wire::object(format,
       WIRE_FIELD_ID(0, utf8),
-      WIRE_FIELD_ID(1, vec),
+      wire::field<1>("vec", wire::array<vec_max>(std::ref(self.vec))),
       WIRE_FIELD_ID(2, data),
       WIRE_FIELD_ID(254, choice)
     );

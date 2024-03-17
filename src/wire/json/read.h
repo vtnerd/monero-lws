@@ -48,7 +48,6 @@ namespace wire
     struct rapidjson_sax;
 
     std::string source_;
-    epee::span<char> current_;
     rapidjson::Reader reader_;
 
     void read_next_value(rapidjson_sax& handler);
@@ -90,7 +89,7 @@ namespace wire
 
 
     //! \throw wire::exception if next token not `[`.
-    std::size_t start_array() override final;
+    std::size_t start_array(std::size_t) override final;
 
     //! Skips whitespace to next token. \return True if next token is eof or ']'.
     bool is_array_end(std::size_t count) override final;

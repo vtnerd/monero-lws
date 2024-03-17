@@ -34,19 +34,24 @@
 #include "wire/field.h"
 #include "wire/traits.h"
 #include "wire/json/read.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 namespace
 {
+  using max_txes_pub = wire::max_element_count<775>;
+
   struct dummy_chain_array
   {
     using value_type = crypto::hash;
 
-    std::uint64_t count;
+    std::size_t count = 0;
     std::reference_wrapper<crypto::hash> id;
 
     void clear() noexcept {}
     void reserve(std::size_t) noexcept {}
 
+    std::size_t size() const noexcept { return count; }
     crypto::hash& back() noexcept { return id; }
     void emplace_back() { ++count; }
   };
@@ -88,7 +93,7 @@ namespace rpc
 
   static void read_bytes(wire::json_reader& source, full_txpool_pub& self)
   {
-    wire_read::array(source, self.txes);
+    wire_read::bytes(source, wire::array<max_txes_pub>(std::ref(self.txes)));
   }
 
   expect<full_txpool_pub> full_txpool_pub::from_json(std::string&& source)

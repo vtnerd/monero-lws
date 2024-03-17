@@ -84,6 +84,52 @@ namespace wire
     : is_array<T> // all array types in old output engine were optional when empty
   {};
 
+  //! A constraint for `wire_read::array` where a max of `N` elements can be read.
+  template<std::size_t N>
+  struct max_element_count
+    : std::integral_constant<std::size_t, N>
+  {
+    // The threshold is low - min_element_size is a better constraint metric
+    static constexpr std::size_t max_bytes() noexcept { return 512 * 1024; } // 512 KiB
+
+    //! \return True if `N` C++ objects of type `T` are below `max_bytes()` threshold.
+    template<typename T>
+    static constexpr bool check() noexcept
+    {
+      return N <= (max_bytes() / sizeof(T));
+    }
+  };
+
+  //! A constraint for `wire_read::array` where each element must use at least `N` bytes on the wire.
+  template<std::size_t N>
+  struct min_element_size
+    : std::integral_constant<std::size_t, N>
+  {
+    static constexpr std::size_t max_ratio() noexcept { return 4; }
+
+    //! \return True if C++ object of type `T` with minimum wire size `N` is below `max_ratio()`.
+    template<typename T>
+    static constexpr bool check() noexcept
+    {
+      return N != 0 ? ((sizeof(T) / N) <= max_ratio()) : false;
+    }
+  };
+
+  /*! Trait used in `wire/read.h` for default `min_element_size` behavior based
+    on an array of `T` objects and `R` reader type. This trait can be used
+    instead of the `wire::array(...)` (and associated macros) functionality, as
+    it sets a global value. The last argument is for `enable_if`. */
+  template<typename R, typename T, typename = void>
+  struct default_min_element_size
+    : std::integral_constant<std::size_t, 0>
+  {};
+
+  //! If `T` is a blob, a safe default for all formats is the size of the blob
+  template<typename R, typename T>
+  struct default_min_element_size<R, T, std::enable_if_t<is_blob<T>::value>>
+    : std::integral_constant<std::size_t, sizeof(T)>
+  {};
+
   // example usage : `wire::sum(std::size_t(wire::available(fields))...)`
 
   inline constexpr int sum() noexcept
@@ -95,6 +141,9 @@ namespace wire
   {
     return head + sum(tail...);
   }
+
+  template<typename... T>
+  using min_element_sizeof = min_element_size<sum(sizeof(T)...)>;
 
   //! If container has no `reserve(0)` function, this function is used
   template<typename... T>

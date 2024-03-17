@@ -44,7 +44,25 @@ namespace wire
   {
     // see constraints directly above `array_` definition
     static_assert(std::is_same<R, void>::value, "array_ must have a read constraint for memory purposes");
-    wire_read::array(source, wrapper.get_read_object());
+  }
+
+  template<typename R, typename T, std::size_t N>
+  inline void read_bytes(R& source, array_<T, max_element_count<N>>& wrapper)
+  {
+    using array_type = array_<T, max_element_count<N>>;
+    using value_type = typename array_type::value_type;
+    using constraint = typename array_type::constraint;
+    static_assert(constraint::template check<value_type>(), "max reserve bytes exceeded for element");
+    wire_read::array(source, wrapper.get_read_object(), min_element_size<0>{}, constraint{});
+  }
+  template<typename R, typename T, std::size_t N>
+  inline void read_bytes(R& source, array_<T, min_element_size<N>>& wrapper)
+  {
+    using array_type = array_<T, min_element_size<N>>;
+    using value_type = typename array_type::value_type;
+    using constraint = typename array_type::constraint;
+    static_assert(constraint::template check<value_type>(), "max compression ratio exceeded for element");
+    wire_read::array(source, wrapper.get_read_object(), constraint{});
   }
 
   template<typename W, typename T, typename C>

@@ -43,8 +43,12 @@ namespace error
         return "Unable to encode integer in msgpack";
       case msgpack::invalid:
         return "Invalid msgpack encoding";
+      case msgpack::max_tree_size:
+        return "Exceeded tag tracking amount";
       case msgpack::not_enough_bytes:
         return "Expected more bytes in the msgpack stream";
+      case msgpack::underflow_tree:
+        return "Expected more tags";
     }
 
     return "Unknown msgpack error";

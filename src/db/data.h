@@ -45,6 +45,7 @@
 #include "wire/json/fwd.h"
 #include "wire/msgpack/fwd.h"
 #include "wire/traits.h"
+#include "wire/wrapper/array.h"
 
 namespace lws
 {
@@ -138,7 +139,8 @@ namespace db
   using index_range = std::array<minor_index, 2>;
 
   //! Ranges within a major index
-  using index_ranges = std::vector<index_range>;
+  using min_index_ranges = wire::min_element_size<2>;
+  using index_ranges = wire::array_<std::vector<index_range>, min_index_ranges>;
 
   //! Compatible with msgpack_table
   using subaddress_dict = std::pair<major_index, index_ranges>;

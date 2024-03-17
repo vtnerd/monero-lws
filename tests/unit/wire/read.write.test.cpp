@@ -36,6 +36,8 @@
 #include "wire/json.h"
 #include "wire/msgpack.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 #include "wire/base.test.h"
 
@@ -70,12 +72,13 @@ namespace
   template<typename F, typename T>
   void complex_map(F& format, T& self)
   {
+    using max_vec = wire::max_element_count<100>;
     wire::object(format,
-      WIRE_FIELD(objects),
-      WIRE_FIELD(ints),
-      WIRE_FIELD(uints),
+      WIRE_FIELD_ARRAY(objects, max_vec),
+      WIRE_FIELD_ARRAY(ints, max_vec),
+      WIRE_FIELD_ARRAY(uints, max_vec),
       WIRE_FIELD(blobs),
-      WIRE_FIELD(strings),
+      WIRE_FIELD_ARRAY(strings, max_vec),
       WIRE_FIELD(choice)
     );
   }

@@ -41,7 +41,9 @@
 #include "wire/msgpack.h"
 #include "wire/uuid.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
 #include "wire/wrapper/defaulted.h"
+#include "wire/wrappers_impl.h"
 
 namespace lws
 {
@@ -82,7 +84,7 @@ namespace db
     {
       wire::object(format,
         wire::field<0>("key", std::ref(self.first)),
-        wire::field<1>("value", std::ref(self.second))
+        wire::optional_field<1>("value", std::ref(self.second))
       );
     }
   }
@@ -91,7 +93,7 @@ namespace db
   {
     bool is_first = true;
     minor_index last = minor_index::primary;
-    for (const auto& elem : self.second)
+    for (const auto& elem : self.second.get_container())
     {
       if (elem[1] < elem[0])
       {
