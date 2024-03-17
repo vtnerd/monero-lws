@@ -54,6 +54,8 @@ namespace wire
     {
       none = 0,        //!< Must be zero for `expect<..>`
       array,           //!< Expected an array value
+      array_max_element,//!< Exceeded max array count 
+      array_min_size,   //!< Below min element wire size
       binary,          //!< Expected a binary value of variable length
       boolean,         //!< Expected a boolean value
       enumeration,     //!< Expected a value from a specific set

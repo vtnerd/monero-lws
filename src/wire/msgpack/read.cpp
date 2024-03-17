@@ -77,7 +77,7 @@ namespace
 
   //! \return Integer `T` encoded as big endian in `source`.
   template<typename T>
-  T read_endian(epee::byte_slice& source)
+  T read_endian(epee::span<const std::uint8_t>& source)
   {
     static_assert(std::is_integral<T>::value, "must be integral type");
     static constexpr const std::size_t bits = 8 * sizeof(T);
@@ -95,12 +95,12 @@ namespace
 
   //! \return Integer `T` encoded as big endian in `source`.
   template<typename T, wire::msgpack::tag U>
-  T read_endian(epee::byte_slice& source, const wire::msgpack::type<T, U>)
+  T read_endian(epee::span<const std::uint8_t>& source, const wire::msgpack::type<T, U>)
   { return read_endian<T>(source); }
 
   //! \return Integer `T` whose encoding is specified by tag `next`
   template<typename T>
-  T read_integer(epee::byte_slice& source, const wire::msgpack::tag next)
+  T read_integer(epee::span<const std::uint8_t>& source, const wire::msgpack::tag next)
   {
     try
     {
@@ -135,20 +135,21 @@ namespace
     WIRE_DLOG_THROW_(wire::error::schema::integer);
   }
 
-  epee::byte_slice read_raw(epee::byte_slice& source, const std::size_t bytes)
+  epee::span<const std::uint8_t> read_raw(epee::span<const std::uint8_t>& source, const std::size_t bytes)
   {
     if (source.size() < bytes)
       WIRE_DLOG_THROW_(wire::error::msgpack::not_enough_bytes);
-    return source.take_slice(bytes);
+    const std::size_t actual = source.remove_prefix(bytes);
+    return {source.data() - actual, actual};
   }
 
   template<typename T>
-  epee::byte_slice read_raw(epee::byte_slice& source)
+  epee::span<const std::uint8_t> read_raw(epee::span<const std::uint8_t>& source)
   {
     return read_raw(source, wire::integer::cast_unsigned<std::size_t>(read_endian<T>(source)));
   }
 
-  epee::byte_slice read_string(epee::byte_slice& source, const wire::msgpack::tag next)
+  epee::span<const std::uint8_t> read_string(epee::span<const std::uint8_t>& source, const wire::msgpack::tag next)
   {
     switch (next)
     {
@@ -170,7 +171,7 @@ namespace
   }
 
   //! \return Binary blob encoded message
-  epee::byte_slice read_binary(epee::byte_slice& source, const wire::msgpack::tag next)
+  epee::span<const std::uint8_t> read_binary(epee::span<const std::uint8_t>& source, const wire::msgpack::tag next)
   {
     switch (next)
     {
@@ -189,21 +190,21 @@ namespace
 
 namespace wire
 {
-  void msgpack_reader::throw_logic_error()
+  void msgpack_reader::throw_wire_exception()
   {
-    throw std::logic_error{"Bug in msgpack_reader usage"};
+    WIRE_DLOG_THROW_(error::msgpack::underflow_tree);
   }
 
   void msgpack_reader::skip_value()
   {
-    assert(remaining_);
-    if (limits<std::size_t>::max() == remaining_)
-      throw std::runtime_error{"msgpack_reader exceeded tree tracking"};
+    assert(tags_remaining_);
+    if (limits<std::size_t>::max() == tags_remaining_)
+      WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
 
-    const std::size_t initial = remaining_;
+    const std::size_t initial = tags_remaining_;
     do
     {
-      const std::size_t size = source_.size();
+      const std::size_t size = remaining_.size();
       const msgpack::tag next = peek_tag();
       switch (next)
       {
@@ -213,59 +214,59 @@ namespace wire
         case msgpack::tag::unused:
         case msgpack::tag::False:
         case msgpack::tag::True:
-          source_.remove_prefix(1);
+          remaining_.remove_prefix(1);
           break;
         case msgpack::tag::binary8:
         case msgpack::tag::binary16:
         case msgpack::tag::binary32:
-          source_.remove_prefix(1);
-          read_binary(source_, next);
+          remaining_.remove_prefix(1);
+          read_binary(remaining_, next);
           break;
         case msgpack::tag::extension8:
-          source_.remove_prefix(1);
-          read_raw<std::uint8_t>(source_);
-          source_.remove_prefix(1);
+          remaining_.remove_prefix(1);
+          read_raw<std::uint8_t>(remaining_);
+          remaining_.remove_prefix(1);
           break;
         case msgpack::tag::extension16:
-          source_.remove_prefix(1);
-          read_raw<std::uint16_t>(source_);
-          source_.remove_prefix(1);
+          remaining_.remove_prefix(1);
+          read_raw<std::uint16_t>(remaining_);
+          remaining_.remove_prefix(1);
           break;
         case msgpack::tag::extension32:
-          source_.remove_prefix(1);
-          read_raw<std::uint32_t>(source_);
-          source_.remove_prefix(1);
+          remaining_.remove_prefix(1);
+          read_raw<std::uint32_t>(remaining_);
+          remaining_.remove_prefix(1);
           break;
         case msgpack::tag::int8:
         case msgpack::tag::uint8:
-          source_.remove_prefix(2);
+          remaining_.remove_prefix(2);
           break;
         case msgpack::tag::int16:
         case msgpack::tag::uint16:
         case msgpack::tag::fixed_extension1:
-          source_.remove_prefix(3);
+          remaining_.remove_prefix(3);
           break;
         case msgpack::tag::int32:
         case msgpack::tag::uint32:
         case msgpack::tag::float32:
-          source_.remove_prefix(5);
+          remaining_.remove_prefix(5);
           break;
         case msgpack::tag::int64:
         case msgpack::tag::uint64:
         case msgpack::tag::float64:
-          source_.remove_prefix(9);
+          remaining_.remove_prefix(9);
           break;
         case msgpack::tag::fixed_extension2:
-          source_.remove_prefix(4);
+          remaining_.remove_prefix(4);
           break;
         case msgpack::tag::fixed_extension4:
-          source_.remove_prefix(6);
+          remaining_.remove_prefix(6);
           break;
         case msgpack::tag::fixed_extension8:
-          source_.remove_prefix(10);
+          remaining_.remove_prefix(10);
           break;
         case msgpack::tag::fixed_extension16:
-          source_.remove_prefix(18);
+          remaining_.remove_prefix(18);
           break;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
@@ -273,8 +274,8 @@ namespace wire
         case msgpack::tag::string8:
         case msgpack::tag::string16:
         case msgpack::tag::string32:
-          source_.remove_prefix(1);
-          read_string(source_, next);
+          remaining_.remove_prefix(1);
+          read_string(remaining_, next);
           break;
         case msgpack::tag(0x90): case msgpack::tag(0x91): case msgpack::tag(0x92):
         case msgpack::tag(0x93): case msgpack::tag(0x94): case msgpack::tag(0x95):
@@ -284,7 +285,7 @@ namespace wire
         case msgpack::tag(0x9f):
         case msgpack::tag::array16:
         case msgpack::tag::array32:
-          start_array();
+          start_array(0);
           break;
         case msgpack::tag(0x80): case msgpack::tag(0x81): case msgpack::tag(0x82):
         case msgpack::tag(0x83): case msgpack::tag(0x84): case msgpack::tag(0x85):
@@ -299,27 +300,27 @@ namespace wire
 #pragma GCC diagnostic pop
       };
 
-      if (size == source_.size())
+      if (size == remaining_.size())
       {
         if (!msgpack::ftag_unsigned::matches(next) && !msgpack::ftag_signed::matches(next))
           WIRE_DLOG_THROW_(error::msgpack::invalid);
-        source_.remove_prefix(1);
+        remaining_.remove_prefix(1);
       }
-      update_remaining();
-    } while (initial <= remaining_);
+      update_tags_remaining();
+    } while (initial <= tags_remaining_);
   }
 
   msgpack::tag msgpack_reader::peek_tag()
   {
-    if (source_.empty())
+    if (remaining_.empty())
       WIRE_DLOG_THROW_(error::msgpack::not_enough_bytes);
-    return msgpack::tag(*source_.data());
+    return msgpack::tag(*remaining_.data());
   }
 
   msgpack::tag msgpack_reader::get_tag()
   {
     const msgpack::tag next = peek_tag();
-    source_.remove_prefix(1);
+    remaining_.remove_prefix(1);
     return next;
   }
 
@@ -327,12 +328,12 @@ namespace wire
   {
     if (msgpack::ftag_signed::matches(next))
       return *reinterpret_cast<const std::int8_t*>(std::addressof(next)); // special case
-    return read_integer<std::intmax_t>(source_, next);
+    return read_integer<std::intmax_t>(remaining_, next);
   }
 
   std::uintmax_t msgpack_reader::do_unsigned_integer(const msgpack::tag next)
   {
-    return read_integer<std::uintmax_t>(source_, next);
+    return read_integer<std::uintmax_t>(remaining_, next);
   }
 
   template<typename T, typename U>
@@ -347,7 +348,7 @@ namespace wire
     {
       if (type.Tag() == next)
       {
-        out = integer::cast_unsigned<std::size_t>(read_endian(source_, type));
+        out = integer::cast_unsigned<std::size_t>(read_endian(remaining_, type));
         return true;
       }
       return false;
@@ -361,13 +362,13 @@ namespace wire
 
   void msgpack_reader::check_complete() const
   {
-    if (remaining_)
+    if (tags_remaining_)
       WIRE_DLOG_THROW_(error::msgpack::incomplete);
   }
 
   bool msgpack_reader::boolean()
   {
-    update_remaining();
+    update_tags_remaining();
     switch (get_tag())
     {
       case msgpack::tag::True:
@@ -382,14 +383,14 @@ namespace wire
 
   double msgpack_reader::real()
   {
-    update_remaining();
+    update_tags_remaining();
 
     const auto read_float = [this](auto value)
     {
-      if (source_.size() < sizeof(value))
+      if (remaining_.size() < sizeof(value))
         WIRE_DLOG_THROW_(error::msgpack::not_enough_bytes);
-      std::memcpy(std::addressof(value), source_.data(), sizeof(value));
-      source_.remove_prefix(sizeof(value));
+      std::memcpy(std::addressof(value), remaining_.data(), sizeof(value));
+      remaining_.remove_prefix(sizeof(value));
       return value;
     };
 
@@ -407,34 +408,38 @@ namespace wire
 
   std::string msgpack_reader::string()
   {
-    update_remaining();
-    const epee::byte_slice bytes = read_string(source_, get_tag());
+    update_tags_remaining();
+    const epee::span<const std::uint8_t> bytes = read_string(remaining_, get_tag());
     return std::string{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
   }
 
   std::vector<std::uint8_t> msgpack_reader::binary()
   {
-    update_remaining();
-    const epee::byte_slice bytes = read_binary(source_, get_tag());
+    update_tags_remaining();
+    const epee::span<const std::uint8_t> bytes = read_binary(remaining_, get_tag());
     return std::vector<std::uint8_t>{bytes.begin(), bytes.end()};
   }
 
   void msgpack_reader::binary(epee::span<std::uint8_t> dest)
   {
-    update_remaining();
-    const epee::byte_slice bytes = read_binary(source_, get_tag());
+    update_tags_remaining();
+    const epee::span<const std::uint8_t> bytes = read_binary(remaining_, get_tag());
     if (dest.size() != bytes.size())
       WIRE_DLOG_THROW(error::schema::fixed_binary, "of size " << dest.size() << " but got " << bytes.size());
     std::memcpy(dest.data(), bytes.data(), dest.size());
   }
 
-  std::size_t msgpack_reader::start_array()
+  std::size_t msgpack_reader::start_array(const std::size_t min_element_size)
   {
     const std::size_t upcoming =
       read_count<msgpack::ftag_array, msgpack::array_types>(error::schema::array);
-    if (limits<std::size_t>::max() - remaining_ < upcoming)
-      throw std::runtime_error{"Exceeded max tree tracking for msgpack_reader"};
-    remaining_ += upcoming;
+    if (limits<std::size_t>::max() - tags_remaining_ < upcoming)
+      WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
+    if (min_element_size && (remaining_.size() / min_element_size) < upcoming)
+      WIRE_DLOG_THROW(error::schema::array, upcoming << " array elements of at least " << min_element_size << " bytes each exceeds " << remaining_.size() << " remaining bytes");
+
+    tags_remaining_ += upcoming;
+    increment_depth();
     return upcoming;
   }
 
@@ -442,7 +447,7 @@ namespace wire
   {
     if (count)
       return false;
-    update_remaining();
+    update_tags_remaining();
     return true;
   }
 
@@ -451,10 +456,11 @@ namespace wire
     const std::size_t upcoming =
       read_count<msgpack::ftag_object, msgpack::object_types>(error::schema::object);
     if (limits<std::size_t>::max() / 2 < upcoming)
-      throw std::runtime_error{"Exceeded max object tracking for msgpack_reader"};
-    if (limits<std::size_t>::max() - remaining_ < upcoming * 2)
-      throw std::runtime_error{"Exceeded msgpack_reader:: tree tracking"};
-    remaining_ += upcoming * 2;
+      WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
+    if (limits<std::size_t>::max() - tags_remaining_ < upcoming * 2)
+      WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
+    tags_remaining_ += upcoming * 2;
+    increment_depth();
     return upcoming;
   }
 
@@ -463,14 +469,14 @@ namespace wire
     index = map.size();
     for ( ;state; --state)
     {
-      update_remaining(); // for key
+      update_tags_remaining(); // for key
       const msgpack::tag next = get_tag();
       const bool single = msgpack::ftag_unsigned::matches(next);
       if (single || matches<msgpack::unsigned_types>(next))
       {
         unsigned key = std::uint8_t(next);
         if (!single)
-          key = read_integer<unsigned>(source_, next);
+          key = read_integer<unsigned>(remaining_, next);
         for (const key_map& elem : map)
         {
           if (elem.id == key)
@@ -482,7 +488,7 @@ namespace wire
       }
       else if (msgpack::ftag_string::matches(next) || matches<msgpack::string_types>(next))
       {
-        const epee::byte_slice key = read_string(source_, next);
+        const epee::span<const std::uint8_t> key = read_string(remaining_, next);
         for (const key_map& elem : map)
         {
           const boost::string_ref elem_{elem.name};
@@ -503,7 +509,7 @@ namespace wire
       }
       skip_value();
     } // until state == 0
-    update_remaining(); // for end of object
+    update_tags_remaining(); // for end of object
     return false;
   }
 }

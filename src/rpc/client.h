@@ -204,8 +204,10 @@ namespace rpc
       \param rmq_info Required information for RMQ publishing (if enabled)
       \param rates_interval Frequency to retrieve exchange rates. Set value to
         `<= 0` to disable exchange rate retrieval.
+      \param True if additional size constraints should be placed on
+        daemon messages
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon);
 
     context(context&&) = default;
     context(context const&) = delete;

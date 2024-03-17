@@ -49,7 +49,7 @@ namespace wire
 {
   static void write_bytes(wire::writer& dest, const std::pair<lws::db::webhook_key, std::vector<lws::db::webhook_value>>& self)
   {
-    wire::object(dest, wire::field<0>("key", self.first), wire::field<1>("value", self.second));
+    wire::object(dest, wire::field<0>("key", std::cref(self.first)), wire::field<1>("value", std::cref(self.second)));
   }
 }
 
@@ -119,8 +119,14 @@ namespace
   template<typename T, typename... U>
   void read_addresses(wire::reader& source, T& self, U... field)
   {
+    using min_address_size =
+      wire::min_element_sizeof<crypto::public_key, crypto::public_key>;
+
     std::vector<std::string> addresses;
-    wire::object(source, wire::field("addresses", std::ref(addresses)), std::move(field)...);
+    wire::object(source,
+      wire::field("addresses", wire::array<min_address_size>(std::ref(addresses))),
+      std::move(field)...
+    );
 
     self.addresses.reserve(addresses.size());
     for (const auto& elem : addresses)

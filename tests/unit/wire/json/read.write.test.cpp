@@ -10,6 +10,8 @@
 #include "wire/json/read.h"
 #include "wire/json/write.h"
 #include "wire/vector.h"
+#include "wire/wrapper/array.h"
+#include "wire/wrappers_impl.h"
 
 #include "wire/base.test.h"
 
@@ -31,7 +33,8 @@ namespace
   template<typename F, typename T>
   void basic_object_map(F& format, T& self)
   {
-    wire::object(format, WIRE_FIELD(utf8), WIRE_FIELD(vec), WIRE_FIELD(data), WIRE_FIELD(choice));
+    using max_vec = wire::max_element_count<100>;
+    wire::object(format, WIRE_FIELD(utf8), WIRE_FIELD_ARRAY(vec, max_vec), WIRE_FIELD(data), WIRE_FIELD(choice));
   }
 
   template<typename T>

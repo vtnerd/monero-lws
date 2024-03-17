@@ -321,7 +321,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
   {
     lws::scanner::reset();
     auto rpc = 
-      lws::rpc::context::make(rendevous, {}, {}, {}, std::chrono::minutes{0});
+      lws::rpc::context::make(rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
 
 
     lws::db::test::cleanup_db on_scope_exit{};
@@ -412,7 +412,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           lws::db::subaddress_dict{
             lws::db::major_index::primary,
             lws::db::index_ranges{
-              lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
             }
           }
         };
@@ -421,12 +421,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         EXPECT(result);
         EXPECT(result->size() == 1);
         EXPECT(result->at(0).first == lws::db::major_index::primary);
-        EXPECT(result->at(0).second.size() == 1);
-        EXPECT(result->at(0).second.at(0).size() == 2);
-        EXPECT(result->at(0).second.at(0).at(0) == lws::db::minor_index(1));
-        EXPECT(result->at(0).second.at(0).at(1) == lws::db::minor_index(2));
-      }
- 
+        EXPECT(result->at(0).second.get_container().size() == 1);
+        EXPECT(result->at(0).second.get_container().at(0).size() == 2);
+        EXPECT(result->at(0).second.get_container().at(0).at(0) == lws::db::minor_index(1));
+        EXPECT(result->at(0).second.get_container().at(0).at(1) == lws::db::minor_index(2));
+      } 
+
       std::vector<cryptonote::tx_destination_entry> destinations;
       destinations.emplace_back();
       destinations.back().amount = 8000;

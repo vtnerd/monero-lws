@@ -40,7 +40,9 @@ namespace error
     incomplete,
     integer_encoding,
     invalid,
-    not_enough_bytes
+    max_tree_size,
+    not_enough_bytes,
+    underflow_tree
   };
 
   //! \return Static string describing error `value`.

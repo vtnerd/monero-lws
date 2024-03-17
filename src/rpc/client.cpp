@@ -58,6 +58,8 @@ namespace rpc
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
+    constexpr const std::int64_t max_msg_sub = 10 * 1024 * 1024;  // 50 MiB
+    constexpr const std::int64_t max_msg_req = 350 * 1024 * 1024; // 350 MiB
     constexpr const std::chrono::seconds chain_poll_timeout{20};
     constexpr const std::chrono::minutes chain_sub_timeout{4};
 
@@ -166,13 +168,20 @@ namespace rpc
       MONERO_ZMQ_CHECK(zmq_setsockopt(signal_sub, ZMQ_SUBSCRIBE, signal, sizeof(signal) - 1));
       return success();
     }
+
+    template<typename T>
+    expect<void> do_set_option(void* sock, const int option, const T value) noexcept
+    {
+      MONERO_ZMQ_CHECK(zmq_setsockopt(sock, option, std::addressof(value), sizeof(value)));
+      return success();
+    }
   } // anonymous
 
   namespace detail
   {
     struct context
     {
-      explicit context(zcontext comm, socket signal_pub, socket external_pub, rcontext rmq, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval)
+      explicit context(zcontext comm, socket signal_pub, socket external_pub, rcontext rmq, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , external_pub(std::move(external_pub))
@@ -185,6 +194,7 @@ namespace rpc
         , cached{}
         , sync_pub()
         , sync_rates()
+        , untrusted_daemon(untrusted_daemon)
       {
         if (std::chrono::minutes{0} < cache_interval)
           rates_conn.set_server(crypto_compare.host, boost::none, epee::net_utils::ssl_support_t::e_ssl_support_enabled);
@@ -202,6 +212,7 @@ namespace rpc
       rates cached;
       boost::mutex sync_pub;
       boost::mutex sync_rates;
+      const bool untrusted_daemon;
     };
   } // detail
 
@@ -254,14 +265,15 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
 
-    int option = daemon_zmq_linger;
     client out{std::move(ctx)};
 
     out.daemon.reset(zmq_socket(out.ctx->comm.get(), ZMQ_REQ));
     if (out.daemon.get() == nullptr)
       return net::zmq::get_error_code();
+    MONERO_CHECK(do_set_option(out.daemon.get(), ZMQ_LINGER, daemon_zmq_linger));
+    if (out.ctx->untrusted_daemon)
+      MONERO_CHECK(do_set_option(out.daemon.get(), ZMQ_MAXMSGSIZE, max_msg_req));
     MONERO_ZMQ_CHECK(zmq_connect(out.daemon.get(), out.ctx->daemon_addr.c_str()));
-    MONERO_ZMQ_CHECK(zmq_setsockopt(out.daemon.get(), ZMQ_LINGER, &option, sizeof(option)));
 
     if (!out.ctx->sub_addr.empty())
     {
@@ -269,6 +281,8 @@ namespace rpc
       if (out.daemon_sub.get() == nullptr)
         return net::zmq::get_error_code();
 
+      if (out.ctx->untrusted_daemon)
+        MONERO_CHECK(do_set_option(out.daemon_sub.get(), ZMQ_MAXMSGSIZE, max_msg_sub));
       MONERO_ZMQ_CHECK(zmq_connect(out.daemon_sub.get(), out.ctx->sub_addr.c_str()));
       MONERO_CHECK(do_subscribe(out.daemon_sub.get(), minimal_chain_topic));
       MONERO_CHECK(do_subscribe(out.daemon_sub.get(), full_txpool_topic));
@@ -424,7 +438,7 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon)
   {
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
@@ -502,7 +516,7 @@ namespace rpc
 
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(external_pub), std::move(rmq), std::move(daemon_addr), std::move(sub_addr), rates_interval
+        std::move(comm), std::move(pub), std::move(external_pub), std::move(rmq), std::move(daemon_addr), std::move(sub_addr), rates_interval, untrusted_daemon
       )
     };
   }
