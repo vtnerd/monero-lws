@@ -52,7 +52,7 @@
 #include "rpc/admin.h"
 #include "span.h"         // monero/contrib/epee/include
 #include "string_tools.h" // monero/contrib/epee/include
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/filters.h"
 #include "wire/json/write.h"
 #include "wire/wrapper/array.h"

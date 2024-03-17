@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2020, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,43 +27,37 @@
 
 #pragma once
 
-#include <cstdint>
+#include <type_traits>
 
-namespace lws
-{
-  class account;
-namespace db
-{
-  enum account_flags : std::uint8_t;
-  enum class account_id : std::uint32_t;
-  enum class account_status : std::uint8_t;
-  enum class block_id : std::uint64_t;
-  enum extra : std::uint8_t;
-  enum class extra_and_length : std::uint8_t;
-  enum class major_index : std::uint32_t;
-  enum class minor_index : std::uint32_t;
-  enum class request : std::uint8_t;
-  enum class webhook_type : std::uint8_t; 
+#include "crypto/crypto.h"   // monero/src
+#include "span.h"            // monero/contrib/include
+#include "ringct/rctTypes.h" // monero/src
+#include "wire/traits.h"
 
-  struct account;
-  struct account_address;
-  struct address_index;
-  struct block_info;
-  struct key_image;
-  struct output;
-  struct output_id;
-  struct request_info;
-  struct spend;
-  class storage;
-  struct subaddress_map;
-  struct transaction_link;
-  struct view_key;
-  struct webhook_data;
-  struct webhook_dupsort;
-  struct webhook_event;
-  struct webhook_key;
-  struct webhook_new_account;
-  struct webhook_output;
-  struct webhook_tx_confirmation;
-} // db
-} // lws
+namespace crypto
+{
+  template<typename R>
+  void read_bytes(R& source, crypto::secret_key& self)
+  {
+    source.binary(epee::as_mut_byte_span(unwrap(unwrap(self))));
+  }
+
+  template<typename W>
+  void write_bytes(W& dest, const crypto::secret_key& self)
+  {
+    dest.binary(epee::as_byte_span(unwrap(unwrap(self))));
+  }
+}
+
+namespace wire
+{
+  WIRE_DECLARE_BLOB(crypto::ec_scalar);
+  WIRE_DECLARE_BLOB(crypto::hash);
+  WIRE_DECLARE_BLOB(crypto::hash8);
+  WIRE_DECLARE_BLOB(crypto::key_derivation);
+  WIRE_DECLARE_BLOB(crypto::key_image);
+  WIRE_DECLARE_BLOB(crypto::public_key);
+  WIRE_DECLARE_BLOB(crypto::signature);
+  WIRE_DECLARE_BLOB(crypto::view_tag);
+  WIRE_DECLARE_BLOB(rct::key);
+}

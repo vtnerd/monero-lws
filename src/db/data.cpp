@@ -1,4 +1,4 @@
-// Copyright (c) 2018, The Monero Project
+// Copyright (c) 2018-2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -36,7 +36,7 @@
 #include "ringct/rctTypes.h"   // monero/src
 #include "wire.h"
 #include "wire/adapted/array.h"
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/json/write.h"
 #include "wire/msgpack.h"
 #include "wire/uuid.h"
@@ -54,7 +54,7 @@ namespace db
     template<typename F, typename T>
     void map_output_id(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD(high), WIRE_FIELD(low));
+      wire::object(format, WIRE_FIELD_ID(0, high), WIRE_FIELD_ID(1, low));
     }
   }
   WIRE_DEFINE_OBJECT(output_id, map_output_id);
@@ -72,7 +72,7 @@ namespace db
     template<typename F, typename T>
     void map_account_address(F& format, T& self)
     {
-      wire::object(format, WIRE_FIELD(spend_public), WIRE_FIELD(view_public));
+      wire::object(format, WIRE_FIELD_ID(0, spend_public), WIRE_FIELD_ID(1, view_public));
     }
   }
   WIRE_DEFINE_OBJECT(account_address, map_account_address);
@@ -250,6 +250,55 @@ namespace db
   }
   WIRE_DEFINE_OBJECT(transaction_link, map_transaction_link);
 
+  void read_bytes(wire::reader& source, output& self)
+  {
+    bool coinbase = false;
+    boost::optional<rct::key> rct;
+    boost::optional<std::vector<std::uint8_t>> payment_id;
+
+    wire::object(source,
+      wire::optional_field<0>("id", wire::defaulted(std::ref(self.spend_meta.id), output_id::txpool())),
+      wire::optional_field<1>("block", wire::defaulted(std::ref(self.link.height), block_id::txpool)),
+      wire::field<2>("index", std::ref(self.spend_meta.index)),
+      wire::field<3>("amount", std::ref(self.spend_meta.amount)),
+      wire::field<4>("timestamp", std::ref(self.timestamp)),
+      wire::field<5>("tx_hash", std::ref(self.link.tx_hash)),
+      wire::field<6>("tx_prefix_hash", std::ref(self.tx_prefix_hash)),
+      wire::field<7>("tx_public", std::ref(self.spend_meta.tx_public)),
+      wire::optional_field<8>("rct_mask", std::ref(rct)),
+      wire::optional_field<9>("payment_id", std::ref(payment_id)),
+      wire::field<10>("unlock_time", std::ref(self.unlock_time)),
+      wire::field<11>("mixin_count", std::ref(self.spend_meta.mixin_count)),
+      wire::field<12>("coinbase", std::ref(coinbase)),
+      wire::field<13>("fee", std::ref(self.fee)),
+      wire::field<14>("recipient", std::ref(self.recipient)),
+      wire::field<15>("pub", std::ref(self.pub))
+    );
+
+    std::uint8_t pay_length = 0;
+    if (payment_id)
+      pay_length = payment_id->size();
+
+    if (pay_length && pay_length != 8 && pay_length != 32)
+      WIRE_DLOG_THROW(wire::error::schema::binary, "Unexpected binary size");
+    if (pay_length == 8)
+      std::memcpy(std::addressof(self.payment_id.short_), payment_id->data(), 8);
+    if (pay_length == 32)
+      std::memcpy(std::addressof(self.payment_id.long_), payment_id->data(), 32);
+
+    if (rct)
+      std::memcpy(std::addressof(self.ringct_mask), std::addressof(*rct), sizeof(self.ringct_mask));
+    else
+      std::memset(std::addressof(self.ringct_mask), 0, sizeof(self.ringct_mask));
+
+    extra flags{};
+    if (coinbase)
+      flags = lws::db::coinbase_output;
+    if (rct)
+      flags = extra(lws::db::ringct_output | flags);
+    self.extra = db::pack(flags, pay_length);
+  }
+
   void write_bytes(wire::writer& dest, const output& self)
   {
     const std::pair<db::extra, std::uint8_t> unpacked =
@@ -286,7 +335,8 @@ namespace db
       wire::field<11>("mixin_count", self.spend_meta.mixin_count),
       wire::field<12>("coinbase", coinbase),
       wire::field<13>("fee", self.fee),
-      wire::field<14>("recipient", self.recipient)
+      wire::field<14>("recipient", self.recipient),
+      wire::field<15>("pub", std::cref(self.pub))
     );
   }
 
@@ -296,15 +346,15 @@ namespace db
     void map_spend(F& format, T1& self, T2& payment_id)
     {
       wire::object(format,
-        wire::field("height", std::ref(self.link.height)),
-        wire::field("tx_hash", std::ref(self.link.tx_hash)),
-        WIRE_FIELD(image),
-        WIRE_FIELD(source),
-        WIRE_FIELD(timestamp),
-        WIRE_FIELD(unlock_time),
-        WIRE_FIELD(mixin_count),
-        wire::optional_field("payment_id", std::ref(payment_id)),
-        WIRE_FIELD(sender)
+        wire::field<0>("height", std::ref(self.link.height)),
+        wire::field<1>("tx_hash", std::ref(self.link.tx_hash)),
+        WIRE_FIELD_ID(2, image),
+        WIRE_FIELD_ID(3, source),
+        WIRE_FIELD_ID(4, timestamp),
+        WIRE_FIELD_ID(5, unlock_time),
+        WIRE_FIELD_ID(6, mixin_count),
+        wire::optional_field<7>("payment_id", std::ref(payment_id)),
+        WIRE_FIELD_ID(8, sender)
       );
     }
   }

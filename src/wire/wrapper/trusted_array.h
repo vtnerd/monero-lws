@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,43 +27,50 @@
 
 #pragma once
 
-#include <cstdint>
+#include <cstddef>
+#include <limits>
+#include "wire/traits.h"
+#include "wire/read.h"
+#include "wire/write.h"
 
-namespace lws
+namespace wire
 {
-  class account;
-namespace db
-{
-  enum account_flags : std::uint8_t;
-  enum class account_id : std::uint32_t;
-  enum class account_status : std::uint8_t;
-  enum class block_id : std::uint64_t;
-  enum extra : std::uint8_t;
-  enum class extra_and_length : std::uint8_t;
-  enum class major_index : std::uint32_t;
-  enum class minor_index : std::uint32_t;
-  enum class request : std::uint8_t;
-  enum class webhook_type : std::uint8_t; 
+  //! \brief Wrapper that removes read constraints
+  template<typename T>
+  struct trusted_array_
+  {
+    using container_type = wire::unwrap_reference_t<T>;
+    T container;
 
-  struct account;
-  struct account_address;
-  struct address_index;
-  struct block_info;
-  struct key_image;
-  struct output;
-  struct output_id;
-  struct request_info;
-  struct spend;
-  class storage;
-  struct subaddress_map;
-  struct transaction_link;
-  struct view_key;
-  struct webhook_data;
-  struct webhook_dupsort;
-  struct webhook_event;
-  struct webhook_key;
-  struct webhook_new_account;
-  struct webhook_output;
-  struct webhook_tx_confirmation;
-} // db
-} // lws
+    const container_type& get_container() const noexcept { return container; }
+    container_type& get_container() noexcept { return container; }
+
+    // concept requirements for optional fields
+
+    explicit operator bool() const noexcept { return !get_container().empty(); }
+    trusted_array_& emplace() noexcept { return *this; }
+
+    trusted_array_& operator*() noexcept { return *this; }
+    const trusted_array_& operator*() const noexcept { return *this; }
+
+    void reset() { get_container().clear(); }
+  };
+
+  template<typename T>
+  trusted_array_<T> trusted_array(T value)
+  {
+    return {std::move(value)};
+  }
+
+  template<typename R, typename T>
+  void read_bytes(R& source, trusted_array_<T> dest)
+  {
+    wire_read::array_unchecked(source, dest.get_container(), 0, std::numeric_limits<std::size_t>::max());
+  }
+
+  template<typename W, typename T>
+  void write_bytes(W& dest, const trusted_array_<T> source)
+  {
+    wire_write::array(dest, source.get_container());
+  }
+}

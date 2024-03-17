@@ -36,6 +36,8 @@
 #include "fwd.h"
 #include "db/data.h"
 #include "db/fwd.h"
+#include "wire/fwd.h"
+#include "wire/msgpack/fwd.h"
 
 namespace lws
 {
@@ -54,7 +56,13 @@ namespace lws
     explicit account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs) noexcept;
     void null_check() const;
 
+    template<typename F, typename T, typename U>
+    static void map(F& format, T& self, U& immutable);
+
   public:
+
+    //! Construct an "invalid" account (for de-serialization)
+    account() noexcept;
 
     //! Construct an account from `source` and current `spendable` outputs.
     explicit account(db::account const& source, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs);
@@ -70,6 +78,12 @@ namespace lws
     ~account() noexcept;
     account& operator=(const account&) = delete;
     account& operator=(account&&) = default;
+
+    //! Read into `this` from `source`.
+    void read_bytes(::wire::msgpack_reader& source);
+
+    //! Write to `dest` from `this`.
+    void write_bytes(::wire::msgpack_writer& dest) const;
 
     //! \return A copy of `this`.
     account clone() const;

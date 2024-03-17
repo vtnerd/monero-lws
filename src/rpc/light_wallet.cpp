@@ -40,7 +40,7 @@
 #include "ringct/rctOps.h"     // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
 #include "wire/traits.h"
