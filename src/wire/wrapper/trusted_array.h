@@ -39,11 +39,21 @@ namespace wire
   template<typename T>
   struct trusted_array_
   {
-    using value_type = wire::unwrap_reference_t<T>;
-    T value;
+    using container_type = wire::unwrap_reference_t<T>;
+    T container;
 
-    const value_type& get_value() const { return value; }
-    value_type& get_value() { return value; }      
+    const container_type& get_container() const noexcept { return container; }
+    container_type& get_container() noexcept { return container; }
+
+    // concept requirements for optional fields
+
+    explicit operator bool() const noexcept { return !get_container().empty(); }
+    trusted_array_& emplace() noexcept { return *this; }
+
+    trusted_array_& operator*() noexcept { return *this; }
+    const trusted_array_& operator*() const noexcept { return *this; }
+
+    void reset() { get_container().clear(); }
   };
 
   template<typename T>
@@ -55,12 +65,12 @@ namespace wire
   template<typename R, typename T>
   void read_bytes(R& source, trusted_array_<T> dest)
   {
-    wire_read::array_unchecked(source, dest.get_value(), 0, std::numeric_limits<std::size_t>::max());
+    wire_read::array_unchecked(source, dest.get_container(), 0, std::numeric_limits<std::size_t>::max());
   }
 
   template<typename W, typename T>
   void write_bytes(W& dest, const trusted_array_<T> source)
   {
-    wire_write::array(dest, source.get_value());
+    wire_write::array(dest, source.get_container());
   }
 }
