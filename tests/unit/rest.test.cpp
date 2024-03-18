@@ -115,7 +115,7 @@ LWS_CASE("rest_server")
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     auto context =
-      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0});
+      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
     const auto rpc = MONERO_UNWRAP(context.connect());
     {
       const lws::rest_server::configuration config{
