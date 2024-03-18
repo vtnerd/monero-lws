@@ -34,7 +34,7 @@ add_subdirectory(db)
 add_subdirectory(rpc)
 add_subdirectory(wire)
 
-add_executable(monero-lws-unit main.cpp scanner.test.cpp)
+add_executable(monero-lws-unit main.cpp rest.test.cpp scanner.test.cpp)
 target_link_libraries(monero-lws-unit
   monero::libraries
   monero-lws-daemon-common
