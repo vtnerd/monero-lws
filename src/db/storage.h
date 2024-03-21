@@ -274,7 +274,7 @@ namespace db
       \param chain List of block hashes that `accts` were scanned against.
       \param accts Updated to `height + chain.size()` scan height.
 
-      \return True iff LMDB successfully committed the update.
+      \return Number of updated accounts, and a list of webhooks that triggered.
     */
     expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>>
       update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow);
