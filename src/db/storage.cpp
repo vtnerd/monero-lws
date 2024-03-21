@@ -899,6 +899,29 @@ namespace db
     return accounts.get_value<account>(value);
   }
 
+  expect<lws::account> storage_reader::get_full_account(const account& user)
+  {
+    std::vector<std::pair<db::output_id, db::address_index>> receives{};
+    std::vector<crypto::public_key> pubs{};
+    auto receive_list = get_outputs(user.id);
+    if (!receive_list)
+      return receive_list.error();
+
+    const std::size_t elems = receive_list->count();
+    receives.reserve(elems);
+    pubs.reserve(elems);
+
+    for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
+    {
+      auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+      auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
+      receives.emplace_back(std::move(id), std::move(subaddr));
+      pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
+    }
+
+    return lws::account{user, std::move(receives), std::move(pubs)};
+  }
+
   expect<std::pair<account_status, account>>
   storage_reader::get_account(account_address const& address) noexcept
   {

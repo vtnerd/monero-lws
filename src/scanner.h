@@ -31,9 +31,11 @@
 #include <cstdint>
 #include <string>
 
+#include "db/fwd.h"
 #include "db/storage.h"
 #include "net/net_ssl.h" // monero/contrib/epee/include
 #include "rpc/client.h"
+#include "span.h"        // monero/contrib/epee/include
 
 namespace lws
 {
@@ -45,6 +47,13 @@ namespace lws
     scanner() = delete;
 
   public:
+
+    //! Send receive payment `events` to webhooks/zmq/rmq
+    static void send_payment_hook(rpc::client& client, epee::span<const db::webhook_tx_confirmation> events, epee::net_utils::ssl_verification_t verify_mode);
+
+    //! Blocks until `stop()` called.
+    //void scan_loop(thread_sync& self, std::shared_ptr<thread_data> data, const bool untrusted_daemon, const bool leader_thread) noexcept
+
     //! Use `client` to sync blockchain data, and \return client if successful.
     static expect<rpc::client> sync(db::storage disk, rpc::client client, const bool untrusted_daemon = false);
 

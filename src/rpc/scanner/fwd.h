@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -24,11 +24,18 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 #pragma once
 
-namespace lws
+namespace lws { namespace rpc { namespace scanner
 {
-  struct rates;
-  class scan_manager;  
-}
+  class client;
+  struct connection;
+  struct give_accounts;
+  struct header;
+  struct push_accounts;
+  template<typename> struct read_commands;
+  class server;
+  struct take_accounts;
+  struct update_accounts;
+  template<typename> struct write_commands;
+}}} // lws // rpc // scanner

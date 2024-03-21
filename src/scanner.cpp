@@ -173,12 +173,7 @@ namespace lws
       }
       return true;
     }
-
-    void send_payment_hook(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events, net::ssl_verification_t verify_mode)
-    {
-      rpc::send_webhook(client, events, "json-full-payment_hook:", "msgpack-full-payment_hook:", std::chrono::seconds{5}, verify_mode);
-    }
-
+ 
     std::size_t get_target_time(db::block_id height)
     {
       const hardfork_t* fork = nullptr;
@@ -215,15 +210,7 @@ namespace lws
       while (DIFFICULTY_BLOCKS_COUNT < vec.size())
         vec.erase(vec.begin());
     };
-
-    struct by_height
-    {
-      bool operator()(account const& left, account const& right) const noexcept
-      {
-        return left.scan_height() < right.scan_height();
-      }
-    };
-
+ 
     struct add_spend
     {
       void operator()(lws::account& user, const db::spend& spend) const
@@ -306,7 +293,7 @@ namespace lws
           else
             events.pop_back(); //cannot compute tx_hash
         }
-        send_payment_hook(client_, epee::to_span(events), verify_mode_);
+        scanner::send_payment_hook(client_, epee::to_span(events), verify_mode_);
         return true;
       }
     };
@@ -613,6 +600,7 @@ namespace lws
       else if (*new_rates)
         MINFO("Updated exchange rates: " << *(*new_rates));
     }
+  //} // anonymous
 
     void scan_loop(thread_sync& self, std::shared_ptr<thread_data> data, const bool untrusted_daemon, const bool leader_thread) noexcept
     {
@@ -908,7 +896,7 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
+          scanner::send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
@@ -929,29 +917,10 @@ namespace lws
         scanner::stop();
         MERROR("Unknown exception");
       }
-    }
+    } // end scan_loop
 
-    lws::account prep_account(db::storage_reader& reader, const lws::db::account& user)
-    {
-      std::vector<std::pair<db::output_id, db::address_index>> receives{};
-      std::vector<crypto::public_key> pubs{};
-      auto receive_list = MONERO_UNWRAP(reader.get_outputs(user.id));
-
-      const std::size_t elems = receive_list.count();
-      receives.reserve(elems);
-      pubs.reserve(elems);
-
-      for (auto output = receive_list.make_iterator(); !output.is_end(); ++output)
-      {
-        auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
-        auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
-        receives.emplace_back(std::move(id), std::move(subaddr));
-        pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
-      }
-
-      return lws::account{user, std::move(receives), std::move(pubs)};
-    }
-
+  //namespace
+  //{ 
     /*!
       Launches `thread_count` threads to run `scan_loop`, and then polls for
       active account changes in background
@@ -1033,7 +1002,7 @@ namespace lws
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(users), opts
         );
-        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, false /*leader thread*/));
+        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, leader_thread));
       }
 
       auto last_check = std::chrono::steady_clock::now();
@@ -1089,7 +1058,7 @@ namespace lws
           const auto loc = std::lower_bound(active_copy.begin(), active_copy.end(), user_id);
           if (loc == active_copy.end() || *loc != user_id)
           {
-            new_.emplace_back(prep_account(*reader, user.get_value<db::account>()));
+            new_.emplace_back(MONERO_UNWRAP(reader->get_full_account(user.get_value<db::account>())));
             active.insert(
               std::lower_bound(active.begin(), active.end(), user_id), user_id
             );
@@ -1326,6 +1295,11 @@ namespace lws
     }
   } // anonymous
 
+  void scanner::send_payment_hook(rpc::client& client, const epee::span<const db::webhook_tx_confirmation> events, net::ssl_verification_t verify_mode)
+  {
+    rpc::send_webhook(client, events, "json-full-payment_hook:", "msgpack-full-payment_hook:", std::chrono::seconds{5}, verify_mode);
+  }
+
   expect<rpc::client> scanner::sync(db::storage disk, rpc::client client, const bool untrusted_daemon)
   {
     if (untrusted_daemon)
@@ -1356,7 +1330,7 @@ namespace lws
 
         for (db::account user : accounts.make_range())
         {
-          users.emplace_back(prep_account(reader, user));
+          users.emplace_back(MONERO_UNWRAP(reader.get_full_account(user)));
           active.insert(
             std::lower_bound(active.begin(), active.end(), user.id), user.id
           );

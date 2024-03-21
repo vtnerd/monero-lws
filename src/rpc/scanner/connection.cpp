@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,10 +25,31 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "connection.h"
 
-namespace lws
+#include "misc_log_ex.h" // monero/contrib/epee/include
+
+namespace lws { namespace rpc { namespace scanner
 {
-  struct rates;
-  class scan_manager;  
-}
+  boost::asio::mutable_buffer connection::read_buffer(const std::size_t size)
+  {
+    read_buf_.clear();
+    read_buf_.put_n(0, size);
+    return boost::asio::mutable_buffer(read_buf_.data(), size);
+  }
+
+  std::string connection::remote_address() const
+  {
+    const auto endpoint = sock_.remote_endpoint();
+    return endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
+  }
+
+  void connection::base_cleanup()
+  {
+    if (!cleanup_)
+      MINFO("Disconnected from " << remote_address());
+    cleanup_ = true;
+    sock_.cancel();
+    write_timeout_.cancel();
+  }
+}}} // lws // rpc // scanner
