@@ -193,7 +193,13 @@ namespace wire_write
 
   template<typename T>
   inline std::size_t array_size_(std::true_type, const T& source)
-  { return boost::size(source); }
+  {
+    static_assert(
+      !std::is_same<typename std::iterator_traits<typename T::const_iterator>::iterator_category, std::input_iterator_tag>{},
+      "Input iterators must use json (or similar) derived classes directly"
+    );
+    return boost::size(source);
+  }
 
   template<typename T>
   inline constexpr std::size_t array_size_(std::false_type, const T&) noexcept

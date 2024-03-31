@@ -29,5 +29,9 @@
 
 namespace lws
 {
+  namespace rpc
+  {
+    class client;
+  }
   struct rates;
 }

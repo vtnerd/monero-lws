@@ -15,6 +15,10 @@ option. Users are still required to "subscribe" to topics:
     creation that has recently triggered (identical output as webhook).
   * `msgpack-full-new_account_hook`: A msgpack object of a single new account
     creation that has recently triggered (identical output as webhook).
+  * `json-minimal-scanned`: A JSON object of a list of user primary addresses,
+    with their new height and block hash.
+  * `msgpack-minimal-scanned:` A msgpack object of a list of user primary
+    addresses with their new height and block hash.
 
 
 ### `json-full-payment_hook`/`msgpack-full-payment_hook`
@@ -95,3 +99,25 @@ PUB/SUB subscription model. The subscriber requests data from a certain "topic"
 where matching is done by string prefixes.
 
 > `index` is a counter used to detect dropped messages.
+
+
+### `json-minimal-scanned`/`msgpack-minimal-scanned`
+These topics receive PUB messages when a thread has finished scanning 1+
+accounts. The last block height and hash is sent.
+
+Example of the "raw" output from ZMQ-SUB side:
+```json
+json-minimal-scanned:{
+  "index": 13,
+  "event": {
+    "height": 2438536,
+    "id": "9197e1c6f3de28a98dfc579325903e5416ef1ba2681043c54b5fff0d39645a7f",
+    "addresses": [
+      "9xkhhJSa7ZhS5sAcTix6ozL14RwdgxbV7JZVFW4rCghN7GidutaykfxDHfgW45UPiCTXncuvZ91GNSGgxs3b2Cin9TU8nP3"
+    ]
+  }
+}
+```
+
+> `index` is a counter used to detect dropped messages
+
