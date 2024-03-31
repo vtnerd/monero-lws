@@ -2574,9 +2574,10 @@ namespace db
       return success();
     }
 
-    expect<void> check_spends(std::vector<webhook_tx_spend>& out, MDB_cursor& webhooks_cur, const lws::account& user)
+    expect<void> check_spends(std::vector<webhook_tx_spend>& out, MDB_cursor& webhooks_cur, MDB_cursor& outputs_cur, const lws::account& user)
     {
-      const webhook_key hook_key{user.id(), webhook_type::tx_spend};
+      const account_id user_id = user.id();
+      const webhook_key hook_key{user_id, webhook_type::tx_spend};
       MDB_val key = lmdb::to_val(hook_key);
       MDB_val value{};
 
@@ -2588,7 +2589,6 @@ namespace db
         {
           if (err != MDB_NOTFOUND)
             return {lmdb::error(err)};
-
           break;
         }
 
@@ -2598,8 +2598,25 @@ namespace db
           out.reserve(user.spends().size());
           for (const spend& s : user.spends())
           {
+            key = lmdb::to_val(user_id);
+            value = lmdb::to_val(s.link.height);
+            err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_GET_BOTH_RANGE);
+
+            expect<output::spend_meta_> meta{common_error::kInvalidArgument};
+            for (;;)
+            {
+              if (err)
+                return {lmdb::error(err)};
+              meta = outputs.get_value<MONERO_FIELD(output, spend_meta)>(value);
+              if (!meta)
+                return meta.error();
+              if (meta->id == s.source)
+                break;
+              err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_PREV_DUP);
+            }
+
             out.push_back(
-              webhook_tx_spend{hook_key, *hook, s}
+              webhook_tx_spend{hook_key, *hook, {s, *meta}}
             );
           }
         }
@@ -2780,7 +2797,7 @@ namespace db
             out.confirm_pubs, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update + 1)
           )
         );
-        MONERO_CHECK(check_spends(out.spend_pubs, *webhooks_cur, *user));
+        MONERO_CHECK(check_spends(out.spend_pubs, *webhooks_cur, *outputs_cur, *user));
 
         ++out.accounts_updated;
       } // ... for every account being updated ...

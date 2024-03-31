@@ -423,6 +423,22 @@ namespace db
     );
   }
 
+  static void write_bytes(wire::writer& dest, const output::spend_meta_& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD_ID(0, id),
+      wire::field<1>("amount", self.amount),
+      wire::field<2>("mixin", self.mixin_count),
+      wire::field<3>("index", self.index),
+      WIRE_FIELD_ID(4, tx_public)
+    );
+  }
+
+  static void write_bytes(wire::writer& dest, const webhook_tx_spend::tx_info_& self)
+  {
+    wire::object(dest, WIRE_FIELD_ID(0, input), WIRE_FIELD_ID(1, source));
+  }
+
   void write_bytes(wire::writer& dest, const webhook_tx_spend& self)
   {
     wire::object(dest,

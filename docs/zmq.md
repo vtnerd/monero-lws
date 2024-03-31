@@ -19,6 +19,10 @@ option. Users are still required to "subscribe" to topics:
     with their new height and block hash.
   * `msgpack-minimal-scanned:` A msgpack object of a list of user primary
     addresses with their new height and block hash.
+  * `json-full-spend_hook': A JSON object of a webhook spend event that has
+    recently triggerd (identical output as webhook).
+  * `msgpack-full-spend_hook`: A msgpack object of a single new account
+    creation that has recently triggered (identical output as webhook).
 
 
 ### `json-full-payment_hook`/`msgpack-full-payment_hook`
@@ -100,7 +104,6 @@ where matching is done by string prefixes.
 
 > `index` is a counter used to detect dropped messages.
 
-
 ### `json-minimal-scanned`/`msgpack-minimal-scanned`
 These topics receive PUB messages when a thread has finished scanning 1+
 accounts. The last block height and hash is sent.
@@ -115,9 +118,61 @@ json-minimal-scanned:{
     "addresses": [
       "9xkhhJSa7ZhS5sAcTix6ozL14RwdgxbV7JZVFW4rCghN7GidutaykfxDHfgW45UPiCTXncuvZ91GNSGgxs3b2Cin9TU8nP3"
     ]
+
+> `index` is a counter used to detect dropped messages.
+
+### `json-full-spend_hook`/`msgpack-full-spend_hook`
+These topics receive PUB messages when a webhook ([`webhook_add`](administration.md)),
+event is triggered for a spend (`tx-spend`). If the specified URL is
+`zmq`, then notifications are only done over the ZMQ-PUB socket, otherwise the
+notification is sent over ZMQ-PUB socket AND the specified URL. Invoking
+`webhook_add` with a `payment_id` or `confirmation` results in a NOP because
+both fields are unused for spends. This event is only triggered on
+confirmation==1 (`confirmation` field on `webhook_add`s have no effect, and
+mempool spends are not scanned). The intent is to notify the user of unexpected
+spend operations. The end user will need to use `tx_info.input.image`,
+`tx_info.source.index`, and `tx_info.source.tx_public` to determine if the
+output was actually spent or being used as a decoy.
+
+Example of the "raw" output from ZMQ-SUB side:
+
+```json
+json-full-spend_hook:{
+  "index": 0,
+  "event": {
+    "event": "tx-spend",
+    "token": "spend-xmr",
+    "event_id": "7ff047aa74e14f4aa978469bc0eec8ec",
+    "tx_info": {
+      "input": {
+        "height": 2464207,
+        "tx_hash": "97d4e66c4968b16fec7662adc9f8562c49108d3c5e7030c4d6dd32d97fb62540",
+        "image": "b0fe7acd9e17bb8b9ac2daae36d4cb607ac60ed8a101cc9b2e1f74016cf80b24",
+        "source": {
+          "high": 0,
+          "low": 6246316
+        },
+        "timestamp": 1711902214,
+        "unlock_time": 0,
+        "mixin_count": 15,
+        "sender": {
+          "maj_i": 0,
+          "min_i": 0
+        }
+      },
+      "source": {
+        "id": {
+          "high": 0,
+          "low": 6246316
+        },
+        "amount": 10000000000,
+        "mixin": 15,
+        "index": 0,
+        "tx_public": "426ccd6d39535a1ee8636d14978581e580fcea35c8d3843ceb32eb688a0197f7"
+      }
+    }
   }
 }
 ```
 
 > `index` is a counter used to detect dropped messages
-

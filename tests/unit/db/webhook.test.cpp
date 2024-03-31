@@ -73,7 +73,7 @@ namespace
           crypto::rand<crypto::hash>()
         },
         crypto::rand<crypto::key_image>(),
-        lws::db::output_id{0, 200},
+        lws::db::output_id{0, 100},
         std::uint64_t(2000),
         std::uint64_t(0),
         std::uint32_t(16),
@@ -273,14 +273,17 @@ LWS_CASE("db::storage::*_webhook")
 
       lws::account full_account = lws::db::test::make_account(account, view);
       full_account.updated(last_block.id);
-      add_spend(full_account, lws::db::block_id(105));
+      EXPECT(add_out(full_account, last_block.id, 500));
+      add_spend(full_account, last_block.id);
+      const auto outs = full_account.outputs();
       const auto spends = full_account.spends();
+      EXPECT(outs.size() == 1);
       EXPECT(spends.size() == 1);
 
-      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
+      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1});
       EXPECT(!updated.has_error());
       EXPECT(updated->accounts_updated == 1);
-      EXPECT(updated->confirm_pubs.empty());
+      EXPECT(updated->confirm_pubs.size() == 3);
       EXPECT(updated->spend_pubs.size() == 1);
 
       EXPECT(updated->spend_pubs[0].key.user == lws::db::account_id(1));
@@ -291,15 +294,21 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(updated->spend_pubs[0].value.second.token == "the_token_spend");
       EXPECT(updated->spend_pubs[0].value.second.confirmations == 0);
 
-      EXPECT(updated->spend_pubs[0].tx_info.link == spends[0].link);
-      EXPECT(updated->spend_pubs[0].tx_info.image == spends[0].image);
-      EXPECT(updated->spend_pubs[0].tx_info.timestamp == spends[0].timestamp);
-      EXPECT(updated->spend_pubs[0].tx_info.unlock_time == spends[0].unlock_time);
-      EXPECT(updated->spend_pubs[0].tx_info.mixin_count == spends[0].mixin_count);
-      EXPECT(updated->spend_pubs[0].tx_info.length == spends[0].length);
-      EXPECT(updated->spend_pubs[0].tx_info.payment_id == spends[0].payment_id);
-      EXPECT(updated->spend_pubs[0].tx_info.sender.maj_i == lws::db::major_index(1));
-      EXPECT(updated->spend_pubs[0].tx_info.sender.min_i == lws::db::minor_index(0));
+      EXPECT(updated->spend_pubs[0].tx_info.input.link == spends[0].link);
+      EXPECT(updated->spend_pubs[0].tx_info.input.image == spends[0].image);
+      EXPECT(updated->spend_pubs[0].tx_info.input.timestamp == spends[0].timestamp);
+      EXPECT(updated->spend_pubs[0].tx_info.input.unlock_time == spends[0].unlock_time);
+      EXPECT(updated->spend_pubs[0].tx_info.input.mixin_count == spends[0].mixin_count);
+      EXPECT(updated->spend_pubs[0].tx_info.input.length == spends[0].length);
+      EXPECT(updated->spend_pubs[0].tx_info.input.payment_id == spends[0].payment_id);
+      EXPECT(updated->spend_pubs[0].tx_info.input.sender.maj_i == lws::db::major_index(1));
+      EXPECT(updated->spend_pubs[0].tx_info.input.sender.min_i == lws::db::minor_index(0));
+
+      EXPECT(updated->spend_pubs[0].tx_info.source.id == outs[0].spend_meta.id);
+      EXPECT(updated->spend_pubs[0].tx_info.source.amount == outs[0].spend_meta.amount);
+      EXPECT(updated->spend_pubs[0].tx_info.source.mixin_count == outs[0].spend_meta.mixin_count);
+      EXPECT(updated->spend_pubs[0].tx_info.source.index == outs[0].spend_meta.index);
+      EXPECT(updated->spend_pubs[0].tx_info.source.tx_public == outs[0].spend_meta.tx_public);
     }
   }
 }

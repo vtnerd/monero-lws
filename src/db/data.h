@@ -390,7 +390,11 @@ namespace db
   {
     webhook_key key;
     webhook_value value;
-    spend tx_info;
+    struct tx_info_
+    {
+      spend input;
+      output::spend_meta_ source;
+    } tx_info;
   };
   void write_bytes(wire::writer&, const webhook_tx_spend&);
 
