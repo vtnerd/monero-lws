@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,44 +27,12 @@
 
 #pragma once
 
-#include <cstdint>
+#include "db/fwd.h"
+#include "rpc/fwd.h"
+#include "crypto/hash.h" // monero/src
+#include "span.h"
 
-namespace lws
+namespace lws { namespace rpc
 {
-  class account;
-
-namespace db
-{
-  enum account_flags : std::uint8_t;
-  enum class account_id : std::uint32_t;
-  enum class account_status : std::uint8_t;
-  enum class block_id : std::uint64_t;
-  enum extra : std::uint8_t;
-  enum class extra_and_length : std::uint8_t;
-  enum class major_index : std::uint32_t;
-  enum class minor_index : std::uint32_t;
-  enum class request : std::uint8_t;
-  enum class webhook_type : std::uint8_t; 
-
-  struct account;
-  struct account_address;
-  struct address_index;
-  struct block_info;
-  struct key_image;
-  struct output;
-  struct output_id;
-  struct request_info;
-  struct spend;
-  class storage;
-  struct subaddress_map;
-  struct transaction_link;
-  struct view_key;
-  struct webhook_data;
-  struct webhook_dupsort;
-  struct webhook_event;
-  struct webhook_key;
-  struct webhook_new_account;
-  struct webhook_output;
-  struct webhook_tx_confirmation;
-} // db
-} // lws
+  void publish_scanned(rpc::client& client, const crypto::hash& id, epee::span<const account> users); 
+}} // lws // rpc

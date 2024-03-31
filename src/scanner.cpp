@@ -58,6 +58,7 @@
 #include "rpc/daemon_messages.h"   // monero/src
 #include "rpc/daemon_zmq.h"
 #include "rpc/json.h"
+#include "rpc/lws_pub.h"
 #include "rpc/message_data_structs.h" // monero/src
 #include "rpc/webhook.h"
 #include "util/blocks.h"
@@ -741,7 +742,7 @@ namespace lws
           if (untrusted_daemon)
             new_pow.push_back(db::pow_sync{fetched->blocks.front().block.timestamp});
 
-          auto blocks = epee::to_span(fetched->blocks);
+          auto blocks = epee::to_mut_span(fetched->blocks);
           auto indices = epee::to_span(fetched->output_indices);
 
           if (fetched->start_height != 1)
@@ -880,6 +881,7 @@ namespace lws
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
           send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
+ 
           if (updated->first != users.size())
           {
             MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
@@ -888,6 +890,10 @@ namespace lws
 
           for (account& user : users)
             user.updated(db::block_id(fetched->start_height));
+
+          // Publish when all scan threads have past this block
+          if (!blockchain.empty() && client.has_publish())
+            rpc::publish_scanned(client, blockchain.back(), epee::to_span(users));
         }
       }
       catch (std::exception const& e)
