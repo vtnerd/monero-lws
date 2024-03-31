@@ -280,7 +280,7 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(outs.size() == 1);
       EXPECT(spends.size() == 1);
 
-      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1});
+      const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
       EXPECT(!updated.has_error());
       EXPECT(updated->accounts_updated == 1);
       EXPECT(updated->confirm_pubs.size() == 3);
