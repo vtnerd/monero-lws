@@ -489,7 +489,7 @@ namespace db
     {
       cursor::pow cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_pow>(txn, tbl));
 
-      MDB_val key = lmdb::to_val(blocks_version);
+      MDB_val key = lmdb::to_val(pows_version);
       int err = mdb_cursor_get(cur.get(), &key, nullptr, MDB_SET);
       if (err)
       {
