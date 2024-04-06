@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-12, macos-11]
+        os: [ubuntu-latest, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-12]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
     - name: set apt conf (Debian based Linux)
