@@ -31,7 +31,7 @@
 #include "db/account.h"
 #include "rpc/client.h"
 #include "rpc/webhook.h"
-#include "wire/crypto.h"
+#include "wire/adapted/crypto.h"
 #include "wire/wrapper/array.h"
 #include "wire/wrappers_impl.h"
 #include "wire/write.h"
