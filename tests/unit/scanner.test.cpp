@@ -25,10 +25,10 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "scanner.test.h"
 #include "framework.test.h"
 
 #include <boost/thread.hpp>
-#include <iostream>
 
 #include "cryptonote_basic/account.h" // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
@@ -47,7 +47,6 @@
 
 namespace
 {
-  constexpr const char rendevous[] = "inproc://fake_daemon";
   constexpr const std::chrono::seconds message_timeout{3};
 
   template<typename T>
@@ -80,60 +79,6 @@ namespace
     rapidjson::Value id;
     id.SetInt(0);
     return cryptonote::rpc::FullMessage::getResponse(message, id);
-  }
-
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
-  {
-    struct stop_
-    {
-      ~stop_() noexcept { lws::scanner::stop(); }; 
-    } stop{};
-
-    try
-    {
-      net::zmq::socket server{};
-      server.reset(zmq_socket(ctx, ZMQ_REP));
-      if (!server || zmq_bind(server.get(), rendevous))
-      {
-        std::cout << "Failed to create ZMQ server" << std::endl;
-        return;
-      }
-
-      for (const epee::byte_slice& message : reply)
-      {
-        const auto start = std::chrono::steady_clock::now();
-        for (;;)
-        {
-          const auto request = net::zmq::receive(server.get(), ZMQ_DONTWAIT);
-          if (request)
-            break;
-
-          if (request != net::zmq::make_error_code(EAGAIN))
-          {
-            std::cout << "Failed to retrieve message in fake ZMQ server: " << request.error().message() << std::endl;;
-            return;
-          }
-
-          if (message_timeout <= std::chrono::steady_clock::now() - start)
-          {
-            std::cout << "Timeout in dummy RPC server" << std::endl;
-            return;
-          }
-          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
-        } // until error or received message
-
-        const auto sent = net::zmq::send(message.clone(), server.get());
-        if (!sent)
-        {
-          std::cout << "Failed to send dummy RPC message: " << sent.error().message() << std::endl;
-          return;
-        }
-      } // foreach message
-    }
-    catch (const std::exception& e)
-    {
-      std::cout << "Unexpected exception in dummy RPC server: " << e.what() << std::endl;
-    }
   }
 
   struct join
@@ -278,6 +223,63 @@ namespace
     }
     return out;
   }
+} // anonymous
+
+namespace lws_test
+{
+  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
+  {
+    struct stop_
+    {
+      ~stop_() noexcept { lws::scanner::stop(); }; 
+    } stop{};
+
+    try
+    {
+      net::zmq::socket server{};
+      server.reset(zmq_socket(ctx, ZMQ_REP));
+      if (!server || zmq_bind(server.get(), lws_test::rpc_rendevous))
+      {
+        std::cout << "Failed to create ZMQ server" << std::endl;
+        return;
+      }
+
+      for (const epee::byte_slice& message : reply)
+      {
+        const auto start = std::chrono::steady_clock::now();
+        for (;;)
+        {
+          const auto request = net::zmq::receive(server.get(), ZMQ_DONTWAIT);
+          if (request)
+            break;
+
+          if (request != net::zmq::make_error_code(EAGAIN))
+          {
+            std::cout << "Failed to retrieve message in fake ZMQ server: " << request.error().message() << std::endl;;
+            return;
+          }
+
+          if (message_timeout <= std::chrono::steady_clock::now() - start)
+          {
+            std::cout << "Timeout in dummy RPC server" << std::endl;
+            return;
+          }
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+        } // until error or received message
+
+        const auto sent = net::zmq::send(message.clone(), server.get());
+        if (!sent)
+        {
+          std::cout << "Failed to send dummy RPC message: " << sent.error().message() << std::endl;
+          return;
+        }
+      } // foreach message
+    }
+    catch (const std::exception& e)
+    {
+      std::cout << "Unexpected exception in dummy RPC server: " << e.what() << std::endl;
+    }
+  }
 }
 
 LWS_CASE("lws::scanner::sync and lws::scanner::run")
@@ -321,7 +323,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
   {
     lws::scanner::reset();
     auto rpc = 
-      lws::rpc::context::make(rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
+      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
 
 
     lws::db::test::cleanup_db on_scope_exit{};
@@ -343,7 +345,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       std::vector<epee::byte_slice> messages{};
       messages.push_back(to_json_rpc(1));
 
-      boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+      boost::thread server_thread(&lws_test::rpc_thread, rpc.zmq_context(), std::cref(messages));
       const join on_scope_exit{server_thread};
       EXPECT(!lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, hashes);
@@ -375,7 +377,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, {hashes.data(), 1});
       {
-        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&lws_test::rpc_thread, rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
@@ -398,7 +400,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         message.hashes.resize(1);
         messages.push_back(daemon_response(message));
 
-        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&lws_test::rpc_thread, rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
@@ -505,7 +507,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         messages.push_back(daemon_response(hmessage));
 
         {
-          boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+          boost::thread server_thread(&lws_test::rpc_thread, rpc.zmq_context(), std::cref(messages));
           const join on_scope_exit{server_thread};
           EXPECT(lws::scanner::sync(db.clone(), MONERO_UNWRAP(rpc.connect())));
           lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
@@ -524,7 +526,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
-        boost::thread server_thread(&rpc_thread, rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&lws_test::rpc_thread, rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         lws::scanner::run(db.clone(), std::move(rpc), 1, epee::net_utils::ssl_verification_t::none, true);
       }

@@ -262,6 +262,7 @@ namespace lws
         wire::field("coinbase", is_coinbase),
         wire::field("mempool", false),
         wire::field("mixin", self.value().info.spend_meta.mixin_count),
+        wire::field("recipient", self.value().info.recipient),
         wire::field("spent_outputs", std::cref(self.value().spends))
       );
     }
@@ -316,7 +317,7 @@ namespace lws
       WIRE_FIELD_COPY(per_byte_fee),
       WIRE_FIELD_COPY(fee_mask),
       WIRE_FIELD_COPY(amount),
-      wire::field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand)))
+      wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand)))
     );
   }
 
