@@ -1051,13 +1051,6 @@ namespace lws
       } // while scanning
     }
 
-    expect<std::list<crypto::hash>> get_chain_sync(expect<db::storage_reader> reader)
-    {
-      if (!reader)
-        return reader.error();
-      return reader->get_chain_sync();
-    }
-
     template<typename R, typename Q>
     expect<typename R::response> fetch_chain(rpc::client& client, const char* endpoint, const Q& req)
     {
