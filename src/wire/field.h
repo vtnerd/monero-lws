@@ -110,7 +110,7 @@ namespace wire
     static constexpr bool optional_on_empty() noexcept
     { return is_optional_on_empty<value_type>::value; }
 
-    static constexpr bool is_required() noexcept { return Required; }
+    static constexpr bool is_required() noexcept { return Required && !optional_on_empty(); }
     static constexpr std::size_t count() noexcept { return 1; }
     static constexpr unsigned id() noexcept { return I; }
 
