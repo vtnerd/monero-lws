@@ -376,6 +376,18 @@ namespace rpc
     return do_subscribe(signal_sub.get(), abort_scan_signal);
   }
 
+  expect<void> client::enable_pull_accounts()
+  {
+    detail::socket new_sock{zmq_socket(ctx->comm.get(), ZMQ_PULL)};
+    if (new_sock == nullptr)
+      return {net::zmq::get_error_code()};
+    const std::string connect =
+      account_endpoint + std::to_string(ctx->account_counter);
+    MONERO_ZMQ_CHECK(zmq_connect(new_sock.get(), connect.c_str()));
+    account_pull = std::move(new_sock);
+    return success();
+  }
+
   expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -494,15 +506,7 @@ namespace rpc
     MONERO_PRECOND(ctx != nullptr);
 
     if (!account_pull)
-    {
-      detail::socket new_sock{zmq_socket(ctx->comm.get(), ZMQ_PULL)};
-      if (new_sock == nullptr)
-        return {net::zmq::get_error_code()};
-      const std::string connect =
-        account_endpoint + std::to_string(ctx->account_counter);
-      MONERO_ZMQ_CHECK(zmq_connect(new_sock.get(), connect.c_str()));
-      account_pull = std::move(new_sock);
-    }
+      MONERO_CHECK(enable_pull_accounts());
 
     std::vector<lws::account> out{};
     for (;;)

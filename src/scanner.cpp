@@ -1014,6 +1014,9 @@ namespace lws
       threads.reserve(thread_count);
       std::sort(users.begin(), users.end(), by_height{});
 
+      // enable the new bind point before registering pull accounts
+      lws::rpc::account_push pusher = MONERO_UNWRAP(ctx.bind_push());
+
       MINFO("Starting scan loops on " << std::min(thread_count, users.size()) << " thread(s) with " << users.size() << " account(s)");
 
       bool leader_thread = true;
@@ -1027,7 +1030,8 @@ namespace lws
         users.erase(users.end() - count, users.end());
 
         rpc::client client = MONERO_UNWRAP(ctx.connect());
-        client.watch_scan_signals();
+        MONERO_UNWRAP(client.watch_scan_signals());
+        MONERO_UNWRAP(client.enable_pull_accounts());
 
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(thread_users), opts
@@ -1039,7 +1043,8 @@ namespace lws
       if (!users.empty())
       {
         rpc::client client = MONERO_UNWRAP(ctx.connect());
-        client.watch_scan_signals();
+        MONERO_UNWRAP(client.watch_scan_signals());
+        MONERO_UNWRAP(client.enable_pull_accounts());
 
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(users), opts
@@ -1052,7 +1057,6 @@ namespace lws
       lmdb::suspended_txn read_txn{};
       db::cursor::accounts accounts_cur{};
       boost::unique_lock<boost::mutex> lock{self.sync};
-      lws::rpc::account_push pusher = MONERO_UNWRAP(ctx.bind_push());
 
       while (scanner::is_running())
       {

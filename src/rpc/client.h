@@ -157,7 +157,7 @@ namespace rpc
     expect<void> watch_scan_signals() noexcept;
 
     //! Register `this` client as listening for new accounts
-    expect<void> enable_pull_new_accounts() noexcept;
+    expect<void> enable_pull_accounts();
 
     //! Wait for new block announce or internal timeout.
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
