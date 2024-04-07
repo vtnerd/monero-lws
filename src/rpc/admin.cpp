@@ -320,6 +320,10 @@ namespace lws { namespace rpc
         if (req.address)
           return {error::bad_webhook};
         break;
+      case db::webhook_type::tx_spend:
+        if (!req.address)
+          return {error::bad_webhook};
+        break;
       default:
         return {error::bad_webhook};
     }

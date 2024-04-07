@@ -335,7 +335,8 @@ namespace db
   enum class webhook_type : std::uint8_t
   {
     tx_confirmation = 0, // cannot change values - stored in DB
-    new_account
+    new_account,
+    tx_spend
     // unconfirmed_tx,
     // new_block
     // confirmed_tx,
@@ -383,6 +384,19 @@ namespace db
     output tx_info;
   };
   void write_bytes(wire::writer&, const webhook_tx_confirmation&);
+
+  //! Returned by DB when a webhook event "tripped"
+  struct webhook_tx_spend
+  {
+    webhook_key key;
+    webhook_value value;
+    struct tx_info_
+    {
+      spend input;
+      output::spend_meta_ source;
+    } tx_info;
+  };
+  void write_bytes(wire::writer&, const webhook_tx_spend&);
 
   //! References a specific output that triggered a webhook
   struct webhook_output

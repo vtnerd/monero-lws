@@ -217,6 +217,11 @@ namespace lws
         vec.erase(vec.begin());
     };
 
+    void send_spend_hook(rpc::client& client, const epee::span<const db::webhook_tx_spend> events, net::ssl_verification_t verify_mode)
+    {
+      rpc::send_webhook(client, events, "json-full-spend_hook:", "msgpack-full-spend_hook:", std::chrono::seconds{5}, verify_mode);
+    }
+
     struct by_height
     {
       bool operator()(account const& left, account const& right) const noexcept
@@ -880,11 +885,11 @@ namespace lws
           }
 
           MINFO("Processed " << blocks.size() << " block(s) against " << users.size() << " account(s)");
-          send_payment_hook(client, epee::to_span(updated->second), opts.webhook_verify);
- 
-          if (updated->first != users.size())
+          send_payment_hook(client, epee::to_span(updated->confirm_pubs), opts.webhook_verify);
+          send_spend_hook(client, epee::to_span(updated->spend_pubs), opts.webhook_verify);
+          if (updated->accounts_updated != users.size())
           {
-            MWARNING("Only updated " << updated->first << " account(s) out of " << users.size() << ", resetting");
+            MWARNING("Only updated " << updated->accounts_updated << " account(s) out of " << users.size() << ", resetting");
             return;
           }
 

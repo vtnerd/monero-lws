@@ -264,6 +264,13 @@ namespace db
     expect<std::vector<account_address>>
       reject_requests(request req, epee::span<const account_address> addresses);
 
+    //! Status of an `update` request
+    struct updated
+    {
+      std::vector<webhook_tx_spend> spend_pubs;
+      std::vector<webhook_tx_confirmation> confirm_pubs;
+      std::size_t accounts_updated;
+    };
     /*!
       Updates the status of user accounts, even if inactive or hidden. Duplicate
       receives or spends provided in `accts` are silently ignored. If a gap in
@@ -274,15 +281,15 @@ namespace db
       \param chain List of block hashes that `accts` were scanned against.
       \param accts Updated to `height + chain.size()` scan height.
 
-      \return Number of updated accounts, and a list of webhooks that triggered.
+      \return Status via `updated` object.
     */
-    expect<std::pair<std::size_t, std::vector<webhook_tx_confirmation>>>
+    expect<updated>
       update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow);
 
     /*!
       Adds subaddresses to an account. Upon success, an account will
       immediately begin tracking them in the scanner.
-      
+
       \param id of the account to associate new indexes
       \param addresss of the account (needed to generate subaddress publc key)
       \param view_key of the account (needed to generate subaddress public key)
@@ -300,7 +307,7 @@ namespace db
     /*!
       Add webhook to be tracked in the database. The webhook will "call"
       the specified URL with JSON/msgpack information when the event occurs.
-     
+
       \param type The webhook event type to be tracked by the DB.
       \param address is required for `type == tx_confirmation`, and is not
         not needed for all other types.
