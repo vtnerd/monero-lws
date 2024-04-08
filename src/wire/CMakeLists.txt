@@ -27,7 +27,7 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 set(monero-lws-wire_sources error.cpp read.cpp write.cpp)
-set(monero-lws-wire_headers crypto.h error.h field.h filters.h fwd.h json.h read.h traits.h vector.h write.h)
+set(monero-lws-wire_headers error.h field.h filters.h fwd.h json.h read.h traits.h vector.h write.h)
 
 add_library(monero-lws-wire ${monero-lws-wire_sources} ${monero-lws-wire_headers})
 target_include_directories(monero-lws-wire PUBLIC "${LMDB_INCLUDE}")

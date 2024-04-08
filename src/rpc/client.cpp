@@ -34,11 +34,14 @@
 #include <system_error>
 
 #include "common/error.h"    // monero/contrib/epee/include
+#include "db/account.h"
 #include "error.h"
 #include "misc_log_ex.h"     // monero/contrib/epee/include
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
+#include "scanner.h"
 #include "serialization/json_object.h" // monero/src
+#include "wire/msgpack.h"
 #if MLWS_RMQ_ENABLED
   #include <amqp.h>
   #include <amqp_tcp_socket.h>
@@ -53,11 +56,13 @@ namespace rpc
   namespace
   {
     constexpr const char signal_endpoint[] = "inproc://signal";
+    constexpr const char account_endpoint[] = "inproc://account"; // append integer every new `account_push`
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
+    constexpr const int account_zmq_linger = 0;
     constexpr const std::int64_t max_msg_sub = 10 * 1024 * 1024;  // 50 MiB
     constexpr const std::int64_t max_msg_req = 350 * 1024 * 1024; // 350 MiB
     constexpr const std::chrono::seconds chain_poll_timeout{20};
@@ -192,6 +197,7 @@ namespace rpc
         , cache_time()
         , cache_interval(interval)
         , cached{}
+        , account_counter(0)
         , sync_pub()
         , sync_rates()
         , untrusted_daemon(untrusted_daemon)
@@ -210,11 +216,69 @@ namespace rpc
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
       rates cached;
+      std::atomic<unsigned> account_counter;
       boost::mutex sync_pub;
       boost::mutex sync_rates;
       const bool untrusted_daemon;
     };
   } // detail
+
+  expect<account_push> account_push::make(std::shared_ptr<detail::context> ctx) noexcept
+  {
+    MONERO_PRECOND(ctx != nullptr);
+
+    account_push out{ctx};
+    out.sock.reset(zmq_socket(ctx->comm.get(), ZMQ_PUSH));
+    if (out.sock == nullptr)
+      return {net::zmq::get_error_code()};
+
+    const std::string bind = account_endpoint + std::to_string(++ctx->account_counter);
+    MONERO_CHECK(do_set_option(out.sock.get(), ZMQ_LINGER, account_zmq_linger));
+    MONERO_ZMQ_CHECK(zmq_bind(out.sock.get(), bind.c_str()));
+    return {std::move(out)};
+  }
+
+  account_push::~account_push() noexcept
+  {}
+
+  expect<void> account_push::push(epee::span<const lws::account> accounts, std::chrono::seconds timeout)
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(sock.get() != nullptr);
+
+    for (const lws::account& account : accounts)
+    {
+      // use integer id values (quick and fast)
+      wire::msgpack_slice_writer dest{true};
+      try
+      {
+        wire_write::bytes(dest, account);
+      }
+      catch (const wire::exception& e)
+      {
+        return {e.code()};
+      }
+      epee::byte_slice message{dest.take_sink()};
+
+      /* This is being pushed by the thread that monitors for shutdown, so
+        no signal is expected. */
+      expect<void> sent;
+      const auto start = std::chrono::steady_clock::now();
+      while (!(sent = net::zmq::send(message.clone(), sock.get(), ZMQ_DONTWAIT)))
+      {
+        if (sent != net::zmq::make_error_code(EAGAIN))
+          return sent.error();
+        if (!scanner::is_running())
+          return {error::signal_abort_process};
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (timeout <= elapsed)
+          return {error::daemon_timeout};
+
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+      }
+    }
+    return success();
+  }
 
   expect<void> client::get_response(cryptonote::rpc::Message& response, const std::chrono::seconds timeout, const source_location loc)
   {
@@ -310,6 +374,18 @@ namespace rpc
     MONERO_PRECOND(ctx != nullptr);
     assert(signal_sub != nullptr);
     return do_subscribe(signal_sub.get(), abort_scan_signal);
+  }
+
+  expect<void> client::enable_pull_accounts()
+  {
+    detail::socket new_sock{zmq_socket(ctx->comm.get(), ZMQ_PULL)};
+    if (new_sock == nullptr)
+      return {net::zmq::get_error_code()};
+    const std::string connect =
+      account_endpoint + std::to_string(ctx->account_counter);
+    MONERO_ZMQ_CHECK(zmq_connect(new_sock.get(), connect.c_str()));
+    account_pull = std::move(new_sock);
+    return success();
   }
 
   expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
@@ -425,6 +501,32 @@ namespace rpc
     return rc;
   }
 
+  expect<std::vector<lws::account>> client::pull_accounts()
+  {
+    MONERO_PRECOND(ctx != nullptr);
+
+    if (!account_pull)
+      MONERO_CHECK(enable_pull_accounts());
+
+    std::vector<lws::account> out{};
+    for (;;)
+    {
+      expect<std::string> next = net::zmq::receive(account_pull.get(), ZMQ_DONTWAIT);
+      if (!next)
+      {
+        if (net::zmq::make_error_code(EAGAIN))
+          break;
+        return next.error();
+      }
+      out.emplace_back();
+      const std::error_code error =
+        wire::msgpack::from_bytes(epee::byte_slice{std::move(*next)}, out.back());
+      if (error)
+        return error;
+    }
+    return {std::move(out)};
+  }
+
   expect<rates> client::get_rates() const
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -459,7 +561,7 @@ namespace rpc
       if (zmq_bind(external_pub.get(), pub_addr.c_str()) < 0)
         MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
     }
-
+ 
     rcontext rmq{};
 #ifdef MLWS_RMQ_ENABLED
     if (!rmq_info.address.empty())

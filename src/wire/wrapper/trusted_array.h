@@ -25,65 +25,52 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "lws_pub.h"
+#pragma once
 
-#include <boost/range/adaptor/transformed.hpp>
-#include "db/account.h"
-#include "rpc/client.h"
-#include "rpc/webhook.h"
-#include "wire/adapted/crypto.h"
-#include "wire/wrapper/array.h"
-#include "wire/wrappers_impl.h"
+#include <cstddef>
+#include <limits>
+#include "wire/traits.h"
+#include "wire/read.h"
 #include "wire/write.h"
 
-namespace
+namespace wire
 {
-  constexpr const char json_topic[] = "json-minimal-scanned:";
-  constexpr const char msgpack_topic[] = "msgpack-minimal-scanned:";
-
-  struct get_address
+  //! \brief Wrapper that removes read constraints
+  template<typename T>
+  struct trusted_array_
   {
-    std::reference_wrapper<const lws::account> user;
+    using container_type = wire::unwrap_reference_t<T>;
+    T container;
+
+    const container_type& get_container() const noexcept { return container; }
+    container_type& get_container() noexcept { return container; }
+
+    // concept requirements for optional fields
+
+    explicit operator bool() const noexcept { return !get_container().empty(); }
+    trusted_array_& emplace() noexcept { return *this; }
+
+    trusted_array_& operator*() noexcept { return *this; }
+    const trusted_array_& operator*() const noexcept { return *this; }
+
+    void reset() { get_container().clear(); }
   };
 
-  void write_bytes(wire::writer& dest, const get_address& self)
+  template<typename T>
+  trusted_array_<T> trusted_array(T value)
   {
-    wire_write::bytes(dest, self.user.get().address());
+    return {std::move(value)};
   }
 
-  struct minimal_scanned
+  template<typename R, typename T>
+  void read_bytes(R& source, trusted_array_<T> dest)
   {
-    std::reference_wrapper<const crypto::hash> id;
-    const lws::db::block_id height;
-    epee::span<const lws::account> users;
-  };
-
-  void write_bytes(wire::writer& dest, const minimal_scanned& self)
-  {
-    const auto just_address = [] (const lws::account& user)
-    {
-      return get_address{std::cref(user)};
-    };
-
-    wire::object(dest,
-      WIRE_FIELD_ID(0, height),
-      WIRE_FIELD_ID(1, id),
-      wire::field<2>("addresses", wire::array(self.users | boost::adaptors::transformed(just_address)))
-    );
+    wire_read::array_unchecked(source, dest.get_container(), 0, std::numeric_limits<std::size_t>::max());
   }
-} // anonymous
 
-namespace lws { namespace rpc
-{
-  void publish_scanned(rpc::client& client, const crypto::hash& id, epee::span<const account> users)
+  template<typename W, typename T>
+  void write_bytes(W& dest, const trusted_array_<T> source)
   {
-    if (users.empty())
-      return;
-
-    const minimal_scanned output{
-      std::cref(id), users[0].scan_height(), users
-    };
-    const epee::span<const minimal_scanned> event{std::addressof(output), 1};
-    zmq_send(client, event, json_topic, msgpack_topic);
+    wire_write::array(dest, source.get_container());
   }
-}} // lws // rpc
+}
