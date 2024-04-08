@@ -1020,6 +1020,7 @@ namespace lws
       MINFO("Starting scan loops on " << std::min(thread_count, users.size()) << " thread(s) with " << users.size() << " account(s)");
 
       bool leader_thread = true;
+      bool remaining_threads = true;
       while (!users.empty() && --thread_count)
       {
         const std::size_t per_thread = std::max(std::size_t(1), users.size() / (thread_count + 1));
@@ -1050,6 +1051,7 @@ namespace lws
           std::move(client), disk.clone(), std::move(users), opts
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, leader_thread));
+        remaining_threads = false;
       }
 
       auto last_check = std::chrono::steady_clock::now();
@@ -1120,6 +1122,12 @@ namespace lws
         }
         if (!new_.empty())
         {
+          if (remaining_threads)
+          {
+            MINFO("Received new account(s), starting more thread(s)");
+            return;
+          }
+
           const auto pushed = pusher.push(epee::to_span(new_), std::chrono::seconds{1});
           if (!pushed)
           {
