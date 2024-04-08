@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master", "develop", "release-*" ]
   pull_request:
-    branches: [ "master", "develop" ]
+    branches: [ "master", "develop", "release-*" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -49,6 +49,7 @@ jobs:
         repository: monero-project/monero
         path: ${{github.workspace}}/monero/
         submodules: recursive
+        ref: release-v0.18
 
     - name: Configure Monero
       run: cmake -B ${{github.workspace}}/monero/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/monero
