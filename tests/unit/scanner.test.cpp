@@ -49,6 +49,9 @@ namespace
 {
   constexpr const std::chrono::seconds message_timeout{3};
 
+  unsigned char* to_bytes(crypto::ec_scalar &scalar) { return &reinterpret_cast<unsigned char&>(scalar); }
+  const unsigned char* to_bytes(const crypto::ec_scalar &scalar) { return &reinterpret_cast<const unsigned char&>(scalar); }
+
   template<typename T>
   struct json_rpc_response
   {
