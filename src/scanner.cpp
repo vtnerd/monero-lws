@@ -994,7 +994,7 @@ namespace lws
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(users), opts
         );
-        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, false /*leader thread*/));
+        threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, leader_thread));
       }
 
       auto last_check = std::chrono::steady_clock::now();
