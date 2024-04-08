@@ -27,6 +27,7 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 add_library(monero-lws-unit-db OBJECT
+  account.test.cpp
   chain.test.cpp
   data.test.cpp
   storage.test.cpp

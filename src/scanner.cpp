@@ -694,6 +694,35 @@ namespace lws
             return;
           }
 
+          {
+            expect<std::vector<lws::account>> new_accounts = client.pull_accounts();
+            if (!new_accounts)
+            {
+              MERROR("Failed to pull new accounts: " << new_accounts.error().message());
+              return; // get all active accounts the easy way
+            }
+            if (!new_accounts->empty())
+            {
+              MINFO("Received " << new_accounts->size() << " new account(s) for scanning");
+              std::sort(new_accounts->begin(), new_accounts->end(), by_height{});
+              const db::block_id oldest = new_accounts->front().scan_height();
+              users.insert(
+                users.end(),
+                std::make_move_iterator(new_accounts->begin()),
+                std::make_move_iterator(new_accounts->end())
+              );
+              if (std::uint64_t(oldest) < fetched->start_height)
+              {
+                req.start_height = std::uint64_t(oldest);
+                block_request = rpc::client::make_message("get_blocks_fast", req);
+                if (!send(client, block_request.clone()))
+                  return;
+                continue; // to next get_blocks_fast read
+              }
+              // else, the oldest new account is within the newly fetched range
+            }
+          }
+
           // prep for next blocks retrieval
           req.start_height = fetched->start_height + fetched->blocks.size() - 1;
           block_request = rpc::client::make_message("get_blocks_fast", req);
@@ -913,6 +942,27 @@ namespace lws
       }
     }
 
+    lws::account prep_account(db::storage_reader& reader, const lws::db::account& user)
+    {
+      std::vector<std::pair<db::output_id, db::address_index>> receives{};
+      std::vector<crypto::public_key> pubs{};
+      auto receive_list = MONERO_UNWRAP(reader.get_outputs(user.id));
+
+      const std::size_t elems = receive_list.count();
+      receives.reserve(elems);
+      pubs.reserve(elems);
+
+      for (auto output = receive_list.make_iterator(); !output.is_end(); ++output)
+      {
+        auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+        auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
+        receives.emplace_back(std::move(id), std::move(subaddr));
+        pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
+      }
+
+      return lws::account{user, std::move(receives), std::move(pubs)};
+    }
+
     /*!
       Launches `thread_count` threads to run `scan_loop`, and then polls for
       active account changes in background
@@ -964,9 +1014,13 @@ namespace lws
       threads.reserve(thread_count);
       std::sort(users.begin(), users.end(), by_height{});
 
+      // enable the new bind point before registering pull accounts
+      lws::rpc::account_push pusher = MONERO_UNWRAP(ctx.bind_push());
+
       MINFO("Starting scan loops on " << std::min(thread_count, users.size()) << " thread(s) with " << users.size() << " account(s)");
 
       bool leader_thread = true;
+      bool remaining_threads = true;
       while (!users.empty() && --thread_count)
       {
         const std::size_t per_thread = std::max(std::size_t(1), users.size() / (thread_count + 1));
@@ -977,7 +1031,8 @@ namespace lws
         users.erase(users.end() - count, users.end());
 
         rpc::client client = MONERO_UNWRAP(ctx.connect());
-        client.watch_scan_signals();
+        MONERO_UNWRAP(client.watch_scan_signals());
+        MONERO_UNWRAP(client.enable_pull_accounts());
 
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(thread_users), opts
@@ -989,12 +1044,14 @@ namespace lws
       if (!users.empty())
       {
         rpc::client client = MONERO_UNWRAP(ctx.connect());
-        client.watch_scan_signals();
+        MONERO_UNWRAP(client.watch_scan_signals());
+        MONERO_UNWRAP(client.enable_pull_accounts());
 
         auto data = std::make_shared<thread_data>(
           std::move(client), disk.clone(), std::move(users), opts
         );
         threads.emplace_back(attrs, std::bind(&scan_loop, std::ref(self), std::move(data), opts.untrusted_daemon, leader_thread));
+        remaining_threads = false;
       }
 
       auto last_check = std::chrono::steady_clock::now();
@@ -1035,22 +1092,51 @@ namespace lws
         auto current_users = MONERO_UNWRAP(
           reader->get_accounts(db::account_status::active, std::move(accounts_cur))
         );
-        if (current_users.count() != active.size())
+        if (current_users.count() < active.size())
+        {
+          // cannot remove accounts via ZMQ (yet)
+          MINFO("Decrease in active user accounts detected, stopping scan threads...");
+          return;
+        }
+        std::vector<db::account_id> active_copy = active;
+        std::vector<lws::account> new_;
+        for (auto user = current_users.make_iterator(); !user.is_end(); ++user)
+        {
+          const db::account_id user_id = user.get_value<MONERO_FIELD(db::account, id)>();
+          const auto loc = std::lower_bound(active_copy.begin(), active_copy.end(), user_id);
+          if (loc == active_copy.end() || *loc != user_id)
+          {
+            new_.emplace_back(prep_account(*reader, user.get_value<db::account>()));
+            active.insert(
+              std::lower_bound(active.begin(), active.end(), user_id), user_id
+            );
+          }
+          else
+            active_copy.erase(loc);
+        }
+
+        if (!active_copy.empty())
         {
           MINFO("Change in active user accounts detected, stopping scan threads...");
           return;
         }
-
-        for (auto user = current_users.make_iterator(); !user.is_end(); ++user)
+        if (!new_.empty())
         {
-          const db::account_id user_id = user.get_value<MONERO_FIELD(db::account, id)>();
-          if (!std::binary_search(active.begin(), active.end(), user_id))
+          if (remaining_threads)
           {
-            MINFO("Change in active user accounts detected, stopping scan threads...");
+            MINFO("Received new account(s), starting more thread(s)");
             return;
           }
-        }
 
+          const auto pushed = pusher.push(epee::to_span(new_), std::chrono::seconds{1});
+          if (!pushed)
+          {
+            MERROR("Failed to push new account to workers: " << pushed.error().message());
+            return; // pull in new accounts by resetting state
+          }
+          else
+            MINFO("Pushed " << new_.size() << " new accounts to worker thread(s)");
+        }
         read_txn = reader->finish_read();
         accounts_cur = current_users.give_cursor();
       } // while scanning
@@ -1293,23 +1379,7 @@ namespace lws
 
         for (db::account user : accounts.make_range())
         {
-          std::vector<std::pair<db::output_id, db::address_index>> receives{};
-          std::vector<crypto::public_key> pubs{};
-          auto receive_list = MONERO_UNWRAP(reader.get_outputs(user.id));
-
-          const std::size_t elems = receive_list.count();
-          receives.reserve(elems);
-          pubs.reserve(elems);
-
-          for (auto output = receive_list.make_iterator(); !output.is_end(); ++output)
-          {
-            auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
-            auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
-            receives.emplace_back(std::move(id), std::move(subaddr));
-            pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
-          }
-
-          users.emplace_back(user, std::move(receives), std::move(pubs));
+          users.emplace_back(prep_account(reader, user));
           active.insert(
             std::lower_bound(active.begin(), active.end(), user.id), user.id
           );

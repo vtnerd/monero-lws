@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,31 +27,24 @@
 
 #pragma once
 
-#include <type_traits>
-
-#include "crypto/crypto.h"   // monero/src
-#include "span.h"            // monero/contrib/include
-#include "ringct/rctTypes.h" // monero/src
-#include "wire/traits.h"
-
-namespace crypto
-{
-  template<typename R>
-  void read_bytes(R& source, crypto::secret_key& self)
-  {
-    source.binary(epee::as_mut_byte_span(unwrap(unwrap(self))));
-  }
-}
+#include "wire/field.h"
+#include "wire/read.h"
+#include "wire/write.h"
 
 namespace wire
 {
-  WIRE_DECLARE_BLOB(crypto::ec_scalar);
-  WIRE_DECLARE_BLOB(crypto::hash);
-  WIRE_DECLARE_BLOB(crypto::hash8);
-  WIRE_DECLARE_BLOB(crypto::key_derivation);
-  WIRE_DECLARE_BLOB(crypto::key_image);
-  WIRE_DECLARE_BLOB(crypto::public_key);
-  WIRE_DECLARE_BLOB(crypto::signature);
-  WIRE_DECLARE_BLOB(crypto::view_tag);
-  WIRE_DECLARE_BLOB(rct::key);
+  template<typename F, typename T>
+  void map_pair(F& format, T& self)
+  {
+    wire::object(format, WIRE_FIELD_ID(0, first), WIRE_FIELD_ID(1, second));
+  }
+
+  template<typename R, typename T, typename U>
+  void read_bytes(R& source, std::pair<T, U>& dest)
+  { map_pair(source, dest); }
+
+  template<typename W, typename T, typename U>
+  void write_bytes(W& dest, const std::pair<T, U>& source)
+  { map_pair(dest, source); }
 }
+
