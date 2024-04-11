@@ -27,7 +27,7 @@
 
 #include "framework.test.h"
 
-#include <optional>
+#include <boost/optional/optional.hpp>
 #include "db/data.h"
 #include "db/storage.test.h"
 #include "db/string.h"
@@ -111,7 +111,7 @@ LWS_CASE("rest_server")
 
   SETUP("Database and login")
   {
-    std::optional<lws::rest_server> server;
+    boost::optional<lws::rest_server> server;
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     auto context =
