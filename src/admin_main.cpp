@@ -130,17 +130,21 @@ namespace
     return out;
   }
 
-  std::vector<lws::db::account_address> get_addresses(epee::span<const std::string> arguments)
+  std::vector<lws::db::account_address> get_addresses_(epee::span<const std::string> arguments)
   {
-    // first entry is currently always some other option
-    assert(!arguments.empty());
-    arguments.remove_prefix(1);
-
     std::vector<lws::db::account_address> addresses{};
     addresses.reserve(arguments.size());
     for (std::string const& address : arguments)
       addresses.push_back(lws::db::address_string(address).value());
     return addresses;
+  }
+
+  std::vector<lws::db::account_address> get_addresses(epee::span<const std::string> arguments)
+  {
+    // first entry is currently always some other option
+    assert(!arguments.empty());
+    arguments.remove_prefix(1);
+    return get_addresses_(arguments);
   }
 
   void accept_requests(program prog, std::ostream& out)
@@ -276,6 +280,35 @@ namespace
     json.finish();
   }
 
+  void webhook_delete(program prog, std::ostream& out)
+  {
+    if (prog.arguments.size() < 1)
+      throw std::runtime_error{"webhook_delete requires 1 or more arguments"};
+
+    lws::rpc::webhook_delete_req req{
+      get_addresses_(epee::to_span(prog.arguments))
+    };
+    run_command(lws::rpc::webhook_delete, out, std::move(prog.disk), std::move(req));
+  }
+
+  void webhook_delete_uuid(program prog, std::ostream& out)
+  {
+    if (prog.arguments.size() < 1)
+      throw std::runtime_error{"webhook_delete_uuid requires 1 or more arguments"};
+
+    std::vector<boost::uuids::uuid> ids{};
+    ids.reserve(prog.arguments.size());
+    for (const auto id : prog.arguments)
+    {
+      ids.emplace_back();
+      if (!epee::from_hex::to_buffer(epee::as_mut_byte_span(ids.back()), id))
+        throw std::runtime_error{"webhook_delete_uuid given invalid event_id/uuid"};
+    }
+
+    lws::rpc::webhook_delete_uuid_req req{std::move(ids)};
+    run_command(lws::rpc::webhook_delete_uuid, out, std::move(prog.disk), std::move(req));
+  }
+
   struct command
   {
     char const* const name;
@@ -295,7 +328,9 @@ namespace
     {"modify_account_status", &modify_account,  "<\"active\"|\"inactive\"|\"hidden\"> <base58 address> [base 58 address]..."},
     {"reject_requests",       &reject_requests, "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
     {"rescan",                &rescan,          "<height> <base58 address> [base 58 address]..."},
-    {"rollback",              &rollback,        "<height>"}
+    {"rollback",              &rollback,        "<height>"},
+    {"webhook_delete",        &webhook_delete,  "<base58 address> [base 58 address]..."},
+    {"webhook_delete_uuid",   &webhook_delete_uuid, "<event_id> [event_id]..."}
   };
 
   void print_help(std::ostream& out)
