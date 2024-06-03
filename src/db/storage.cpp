@@ -2537,38 +2537,42 @@ namespace db
         const webhook_event event =
           MONERO_UNWRAP(events_by_account_id.get_value<webhook_event>(value));
 
-        MDB_val rkey = lmdb::to_val(hook_key);
-        MDB_val rvalue = lmdb::to_val(event.link_webhook);
-        MONERO_LMDB_CHECK(mdb_cursor_get(&webhooks_cur, &rkey, &rvalue, MDB_GET_BOTH));
-
-        MDB_val okey = lmdb::to_val(user);
-        MDB_val ovalue = lmdb::to_val(event.link);
-        MONERO_LMDB_CHECK(mdb_cursor_get(&outputs_cur, &okey, &ovalue, MDB_GET_BOTH));
-
-        events.push_back(
-          webhook_tx_confirmation{
-            MONERO_UNWRAP(webhooks.get_key(rkey)),
-            MONERO_UNWRAP(webhooks.get_value(rvalue)),
-            MONERO_UNWRAP(outputs.get_value<output>(ovalue))
-          }
-        );
-
-        const std::uint32_t requested_confirmations =
-          events.back().value.second.confirmations;
-
-        events.back().value.second.confirmations =
-          lmdb::to_native(begin) - lmdb::to_native(event.link.tx.height) + 1;
-
-        // copy next blocks from first
-        for (const auto block_num : boost::counting_range(lmdb::to_native(begin) + 1, lmdb::to_native(end)))
+        const block_id this_begin = std::max(begin, event.link.tx.height);
+        if (this_begin < end)
         {
+          MDB_val rkey = lmdb::to_val(hook_key);
+          MDB_val rvalue = lmdb::to_val(event.link_webhook);
+          MONERO_LMDB_CHECK(mdb_cursor_get(&webhooks_cur, &rkey, &rvalue, MDB_GET_BOTH));
+
+          MDB_val okey = lmdb::to_val(user);
+          MDB_val ovalue = lmdb::to_val(event.link);
+          MONERO_LMDB_CHECK(mdb_cursor_get(&outputs_cur, &okey, &ovalue, MDB_GET_BOTH));
+
+          events.push_back(
+            webhook_tx_confirmation{
+              MONERO_UNWRAP(webhooks.get_key(rkey)),
+              MONERO_UNWRAP(webhooks.get_value(rvalue)),
+              MONERO_UNWRAP(outputs.get_value<output>(ovalue))
+            }
+          );
+
+          const std::uint32_t requested_confirmations =
+            events.back().value.second.confirmations;
+
+          events.back().value.second.confirmations =
+            lmdb::to_native(this_begin) - lmdb::to_native(event.link.tx.height) + 1;
+
+          // copy next blocks from first
+          for (const auto block_num : boost::counting_range(lmdb::to_native(this_begin) + 1, lmdb::to_native(end)))
+          {
+            if (requested_confirmations <= events.back().value.second.confirmations)
+              break;
+            events.push_back(events.back());
+            ++(events.back().value.second.confirmations);
+          }
           if (requested_confirmations <= events.back().value.second.confirmations)
-            break;
-          events.push_back(events.back());
-          ++(events.back().value.second.confirmations);
-	      }
-        if (requested_confirmations <= events.back().value.second.confirmations)
-          MONERO_LMDB_CHECK(mdb_cursor_del(&events_cur, 0));
+            MONERO_LMDB_CHECK(mdb_cursor_del(&events_cur, 0));
+        }
         err = mdb_cursor_get(&events_cur, &key, &value, MDB_NEXT_DUP);
       }
       return success();
@@ -2777,7 +2781,7 @@ namespace db
 
         const block_id existing_height = existing->scan_height;
 
-        existing->scan_height = block_id(last_update);
+        existing->scan_height = std::max(existing_height, block_id(last_update));
         value = lmdb::to_val(*existing);
         MONERO_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_CURRENT));
 

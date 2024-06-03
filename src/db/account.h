@@ -88,7 +88,7 @@ namespace lws
     //! \return A copy of `this`.
     account clone() const;
 
-    //! \return A copy of `this` with a new height and `outputs().empty()`.
+    //! \post `height() == max(new_height, height())`, `outputs().empty()`, and `spends.empty()`.
     void updated(db::block_id new_height) noexcept;
 
     //! \return Unique ID from the account database, possibly `db::account_id::kInvalid`.

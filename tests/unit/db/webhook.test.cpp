@@ -157,7 +157,7 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(outs.size() == 1);
 
       lws::db::block_info head = last_block;
-      for (unsigned i = 0; i < 1; ++i)
+      for (unsigned i = 0; i < 4; ++i)
       {
         crypto::hash chain[2] = {head.hash, crypto::rand<crypto::hash>()};
 
@@ -184,15 +184,17 @@ LWS_CASE("db::storage::*_webhook")
         else
           EXPECT(updated->confirm_pubs.empty());
 
-        full_account.updated(head.id);
-        head = {lws::db::block_id(lmdb::to_native(head.id) + 1), chain[1]};
+        const auto next = lws::db::block_id(lmdb::to_native(head.id) + 1);
+        full_account.updated(next);
+        head = {next, chain[1]};
       }
     }
 
     SECTION("storage::update(...) all at once")
     {
-      const crypto::hash chain[5] = {
+      const crypto::hash chain[6] = {
         last_block.hash,
+        crypto::rand<crypto::hash>(),
         crypto::rand<crypto::hash>(),
         crypto::rand<crypto::hash>(),
         crypto::rand<crypto::hash>(),
@@ -201,7 +203,7 @@ LWS_CASE("db::storage::*_webhook")
 
       lws::account full_account = lws::db::test::make_account(account, view);
       full_account.updated(last_block.id);
-      EXPECT(add_out(full_account, last_block.id, 500));
+      EXPECT(add_out(full_account, lws::db::block_id(lmdb::to_native(last_block.id) + 1), 500));
 
       const std::vector<lws::db::output> outs = full_account.outputs();
       EXPECT(outs.size() == 1);
@@ -228,6 +230,61 @@ LWS_CASE("db::storage::*_webhook")
         EXPECT(updated->confirm_pubs[i].tx_info.payment_id.short_ == outs[0].payment_id.short_);
       }
     }
+
+    SECTION("rescan with existing event")
+    {
+      crypto::hash chain[2] = {
+        last_block.hash,
+        crypto::rand<crypto::hash>()
+      };
+
+      lws::account full_account = lws::db::test::make_account(account, view);
+      full_account.updated(last_block.id);
+      EXPECT(add_out(full_account, last_block.id, 500));
+
+      const std::vector<lws::db::output> outs = full_account.outputs();
+      EXPECT(outs.size() == 1);
+
+      auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(updated->confirm_pubs.size() == 1);
+
+      EXPECT(updated->confirm_pubs[0].key.user == lws::db::account_id(1));
+      EXPECT(updated->confirm_pubs[0].key.type == lws::db::webhook_type::tx_confirmation);
+      EXPECT(updated->confirm_pubs[0].value.first.payment_id == 500);
+      EXPECT(updated->confirm_pubs[0].value.first.event_id == id);
+      EXPECT(updated->confirm_pubs[0].value.second.url == "http://the_url");
+      EXPECT(updated->confirm_pubs[0].value.second.token == "the_token");
+      EXPECT(updated->confirm_pubs[0].value.second.confirmations == 1);
+
+      EXPECT(updated->confirm_pubs[0].tx_info.link == outs[0].link);
+      EXPECT(updated->confirm_pubs[0].tx_info.spend_meta.id == outs[0].spend_meta.id);
+      EXPECT(updated->confirm_pubs[0].tx_info.pub == outs[0].pub);
+      EXPECT(updated->confirm_pubs[0].tx_info.payment_id.short_ == outs[0].payment_id.short_);
+
+      // issue a rescan, and ensure that 
+      const std::size_t chain_size = std::end(chain) - std::begin(chain);
+      const auto new_height = lws::db::block_id(lmdb::to_native(last_block.id) - chain_size);
+      const auto rescanned =
+        db.rescan(new_height, {std::addressof(full_account.db_address()), 1});
+      EXPECT(rescanned.has_value());
+      EXPECT(rescanned->size() == 1);
+
+      full_account.updated(new_height);
+      EXPECT(full_account.scan_height() == last_block.id);
+
+      full_account = lws::db::test::make_account(account, view);
+      full_account.updated(new_height);
+      EXPECT(full_account.scan_height() == new_height);
+      updated = db.update(new_height, chain, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(updated->confirm_pubs.size() == 0);
+    }
+
     SECTION("Add db spend")
     {
       const boost::uuids::uuid other_id = boost::uuids::random_generator{}();
