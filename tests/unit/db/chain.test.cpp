@@ -130,6 +130,19 @@ LWS_CASE("db::storage::sync_chain")
       const auto sync_result = db.sync_chain(lws::db::block_id(point->first), fchain);
       EXPECT(sync_result == lws::error::bad_blockchain);
     }
+
+    SECTION("Old Blocks dont rollback height")
+    {
+      lws::account accounts[1] {lws::account{get_account(), {}, {}}};
+      const auto old_block = lws::db::block_id(lmdb::to_native(last_block.id) - 5);
+      const auto new_block = lws::db::block_id(lmdb::to_native(last_block.id) + 4);
+      EXPECT(accounts[0].scan_height() == new_block);
+      EXPECT(db.update(old_block, chain, accounts, nullptr));
+      EXPECT(get_account().scan_height == new_block);
+
+      accounts[0].updated(old_block);
+      EXPECT(accounts[0].scan_height() == new_block);
+    }
   }
 }
 
