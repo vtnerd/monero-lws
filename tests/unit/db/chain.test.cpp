@@ -73,7 +73,13 @@ LWS_CASE("db::storage::sync_chain")
     {
       return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account)).second;
     };
+
+    const auto get_height = [&db] (const lws::db::block_id height) -> std::vector<lws::db::account_id>
+    {
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).accounts_at_height(height));
+    };
    
+    const auto scan_height = lws::db::block_id(lmdb::to_native(last_block.id) + 4);
     const crypto::hash chain[5] = {
       last_block.hash,
       crypto::rand<crypto::hash>(),
@@ -90,17 +96,27 @@ LWS_CASE("db::storage::sync_chain")
     {
       const lws::account accounts[1] = {lws::account{get_account(), {}, {}}};
       EXPECT(accounts[0].scan_height() == last_block.id);
-      EXPECT(db.update(last_block.id, chain, accounts, nullptr));
-      EXPECT(get_account().scan_height == lws::db::block_id(std::uint64_t(last_block.id) + 4));
+      const auto updated = db.update(last_block.id, chain, accounts, nullptr);
+      EXPECT(updated);
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->confirm_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(get_account().scan_height == scan_height);
+
+      const auto height = get_height(scan_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
     }
 
     SECTION("Verify Append")
     {
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, chain);
+      EXPECT(get_height(lws::db::block_id(0)).empty());
     }
 
     SECTION("Fork Chain")
     {
+      const auto fork_height = lws::db::block_id(lmdb::to_native(last_block.id) + 1);
       const crypto::hash fchain[5] = {
         chain[0],
         chain[1],
@@ -111,7 +127,11 @@ LWS_CASE("db::storage::sync_chain")
 
       EXPECT(db.sync_chain(last_block.id, fchain));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, fchain);
-      EXPECT(get_account().scan_height == lws::db::block_id(std::uint64_t(last_block.id) + 1));
+      EXPECT(get_account().scan_height == fork_height);
+
+      const auto height = get_height(fork_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
     }
 
     SECTION("Fork past checkpoint")
@@ -129,6 +149,11 @@ LWS_CASE("db::storage::sync_chain")
 
       const auto sync_result = db.sync_chain(lws::db::block_id(point->first), fchain);
       EXPECT(sync_result == lws::error::bad_blockchain);
+      EXPECT(get_account().scan_height == scan_height);
+
+      const auto height = get_height(scan_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
     }
 
     SECTION("Old Blocks dont rollback height")
@@ -137,11 +162,19 @@ LWS_CASE("db::storage::sync_chain")
       const auto old_block = lws::db::block_id(lmdb::to_native(last_block.id) - 5);
       const auto new_block = lws::db::block_id(lmdb::to_native(last_block.id) + 4);
       EXPECT(accounts[0].scan_height() == new_block);
-      EXPECT(db.update(old_block, chain, accounts, nullptr));
+      const auto updated = db.update(old_block, chain, accounts, nullptr);
+      EXPECT(updated);
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->confirm_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
       EXPECT(get_account().scan_height == new_block);
 
+      const auto height = get_height(scan_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
+
       accounts[0].updated(old_block);
-      EXPECT(accounts[0].scan_height() == new_block);
+      EXPECT(accounts[0].scan_height() == scan_height);
     }
   }
 }
