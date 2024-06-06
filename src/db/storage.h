@@ -118,6 +118,9 @@ namespace db
     //! \return Objects for use with cryptonote::next_difficulty and median timestamp check
     expect<pow_window> get_pow_window(block_id last);
 
+    //! \return Accounts at height (possible empty).
+    expect<std::vector<account_id>> accounts_at_height(block_id height);
+
     //! \return All registered `account`s.
     expect<lmdb::key_stream<account_status, account, cursor::close_accounts>>
       get_accounts(cursor::accounts cur = nullptr) noexcept;
