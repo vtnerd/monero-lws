@@ -859,6 +859,41 @@ namespace db
     return out;
   }
 
+  expect<std::vector<account_id>> storage_reader::accounts_at_height(block_id height)
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+
+    MONERO_CHECK(check_cursor(*txn, db->tables.accounts_bh, curs.accounts_bh_cur));
+
+    std::vector<account_id> out{};
+
+    MDB_val key = lmdb::to_val(height);
+    MDB_val value{};
+    int err = mdb_cursor_get(curs.accounts_bh_cur.get(), &key, &value, MDB_SET_KEY);
+    {
+      std::size_t count = 0;
+      MONERO_LMDB_CHECK(mdb_cursor_count(curs.accounts_bh_cur.get(), &count));
+      out.reserve(count);
+    }
+    for (;;)
+    {
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          break;
+        return {lmdb::error(err)};
+      }
+
+      out.push_back(
+        MONERO_UNWRAP(accounts_by_height.get_value<MONERO_FIELD(account_lookup, id)>(value))
+      );
+      err = mdb_cursor_get(curs.accounts_bh_cur.get(), &key, &value, MDB_NEXT_DUP);
+    }
+
+    return out;
+  }
+
   expect<lmdb::key_stream<account_status, account, cursor::close_accounts>>
   storage_reader::get_accounts(cursor::accounts cur) noexcept
   {
@@ -2779,9 +2814,14 @@ namespace db
         if (!existing || existing->scan_height != user->scan_height())
           continue; // to next account
 
+        // Don't re-store data if already scanned
+        ++out.accounts_updated;
+        if (block_id(last_update) <= existing->scan_height)
+          continue; // to next account
+
         const block_id existing_height = existing->scan_height;
 
-        existing->scan_height = std::max(existing_height, block_id(last_update));
+        existing->scan_height = block_id(last_update);
         value = lmdb::to_val(*existing);
         MONERO_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_CURRENT));
 
@@ -2802,8 +2842,6 @@ namespace db
           )
         );
         MONERO_CHECK(check_spends(out.spend_pubs, *webhooks_cur, *outputs_cur, *user));
-
-        ++out.accounts_updated;
       } // ... for every account being updated ...
       return {std::move(out)};
     });

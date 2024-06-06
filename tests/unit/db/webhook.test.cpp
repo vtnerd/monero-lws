@@ -101,6 +101,11 @@ LWS_CASE("db::storage::*_webhook")
       MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
     MONERO_UNWRAP(db.add_account(account, view));
 
+    const auto get_height = [&db] (const lws::db::block_id height) -> std::vector<lws::db::account_id>
+    {
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).accounts_at_height(height));
+    };
+
     const boost::uuids::uuid id = boost::uuids::random_generator{}();
     {
       lws::db::webhook_value value{
@@ -233,6 +238,7 @@ LWS_CASE("db::storage::*_webhook")
 
     SECTION("rescan with existing event")
     {
+      const auto scan_height = lws::db::block_id(lmdb::to_native(last_block.id) + 1);
       crypto::hash chain[2] = {
         last_block.hash,
         crypto::rand<crypto::hash>()
@@ -264,7 +270,24 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(updated->confirm_pubs[0].tx_info.pub == outs[0].pub);
       EXPECT(updated->confirm_pubs[0].tx_info.payment_id.short_ == outs[0].payment_id.short_);
 
-      // issue a rescan, and ensure that 
+      full_account.updated(scan_height);
+      EXPECT(full_account.scan_height() == scan_height);
+      EXPECT(get_height(last_block.id).empty());
+      auto height = get_height(scan_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
+
+      updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->confirm_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(get_height(last_block.id).empty());
+      height = get_height(scan_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
+
+      // issue a rescan, and ensure that hooks are not triggered
       const std::size_t chain_size = std::end(chain) - std::begin(chain);
       const auto new_height = lws::db::block_id(lmdb::to_native(last_block.id) - chain_size);
       const auto rescanned =
@@ -272,8 +295,14 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(rescanned.has_value());
       EXPECT(rescanned->size() == 1);
 
+      EXPECT(get_height(last_block.id).empty());
+      EXPECT(get_height(scan_height).empty());
+      height = get_height(new_height);
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
+
       full_account.updated(new_height);
-      EXPECT(full_account.scan_height() == last_block.id);
+      EXPECT(full_account.scan_height() == scan_height);
 
       full_account = lws::db::test::make_account(account, view);
       full_account.updated(new_height);
@@ -283,6 +312,13 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(updated->spend_pubs.empty());
       EXPECT(updated->accounts_updated == 1);
       EXPECT(updated->confirm_pubs.size() == 0);
+
+      EXPECT(get_height(last_block.id).empty());
+      EXPECT(get_height(scan_height).empty());
+      EXPECT(get_height(new_height).empty());
+      height = get_height(lws::db::block_id(lmdb::to_native(new_height) + 1));
+      EXPECT(height.size() == 1);
+      EXPECT(height[0] == lws::db::account_id(1));
     }
 
     SECTION("Add db spend")
