@@ -2835,10 +2835,11 @@ namespace db
         MONERO_CHECK(bulk_insert(*outputs_cur, user->id(), epee::to_span(user->outputs())));
         MONERO_CHECK(add_spends(*spends_cur, *images_cur, user->id(), epee::to_span(user->spends())));
 
+        const auto ongoing_start = std::max(first_new, lmdb::to_native(existing_height) + 1);
         MONERO_CHECK(check_hooks(*webhooks_cur, *events_cur, *user));
         MONERO_CHECK(
           add_ongoing_hooks(
-            out.confirm_pubs, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(first_new), block_id(last_update + 1)
+            out.confirm_pubs, *webhooks_cur, *outputs_cur, *events_cur, user->id(), block_id(ongoing_start), block_id(last_update + 1)
           )
         );
         MONERO_CHECK(check_spends(out.spend_pubs, *webhooks_cur, *outputs_cur, *user));
