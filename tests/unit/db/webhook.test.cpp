@@ -236,6 +236,68 @@ LWS_CASE("db::storage::*_webhook")
       }
     }
 
+    SECTION("Skip Already Scanned/Published")
+    {
+      const crypto::hash chain[5] = {
+        last_block.hash,
+        crypto::rand<crypto::hash>(),
+        crypto::rand<crypto::hash>(),
+        crypto::rand<crypto::hash>(),
+        crypto::rand<crypto::hash>()
+      };
+
+      lws::account full_account = lws::db::test::make_account(account, view);
+      full_account.updated(last_block.id);
+      EXPECT(add_out(full_account, lws::db::block_id(lmdb::to_native(last_block.id) + 1), 500));
+
+      const std::vector<lws::db::output> outs = full_account.outputs();
+      EXPECT(outs.size() == 1);
+
+      auto updated = db.update(last_block.id, {chain, 3}, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(updated->confirm_pubs.size() == 1);
+
+      EXPECT(updated->confirm_pubs[0].key.user == lws::db::account_id(1));
+      EXPECT(updated->confirm_pubs[0].key.type == lws::db::webhook_type::tx_confirmation);
+      EXPECT(updated->confirm_pubs[0].value.first.payment_id == 500);
+      EXPECT(updated->confirm_pubs[0].value.first.event_id == id);
+      EXPECT(updated->confirm_pubs[0].value.second.url == "http://the_url");
+      EXPECT(updated->confirm_pubs[0].value.second.token == "the_token");
+      EXPECT(updated->confirm_pubs[0].value.second.confirmations == 1);
+
+      EXPECT(updated->confirm_pubs[0].tx_info.link == outs[0].link);
+      EXPECT(updated->confirm_pubs[0].tx_info.spend_meta.id == outs[0].spend_meta.id);
+      EXPECT(updated->confirm_pubs[0].tx_info.pub == outs[0].pub);
+      EXPECT(updated->confirm_pubs[0].tx_info.payment_id.short_ == outs[0].payment_id.short_);
+
+      full_account.updated(lws::db::block_id(lmdb::to_native(last_block.id) + 2));
+      EXPECT(full_account.outputs().empty());
+
+      updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(updated->confirm_pubs.size() == 2);
+
+      for (unsigned i = 0; i < 2; ++i)
+      {
+        EXPECT(updated->confirm_pubs[i].key.user == lws::db::account_id(1));
+        EXPECT(updated->confirm_pubs[i].key.type == lws::db::webhook_type::tx_confirmation);
+        EXPECT(updated->confirm_pubs[i].value.first.payment_id == 500);
+        EXPECT(updated->confirm_pubs[i].value.first.event_id == id);
+        EXPECT(updated->confirm_pubs[i].value.second.url == "http://the_url");
+        EXPECT(updated->confirm_pubs[i].value.second.token == "the_token");
+        EXPECT(updated->confirm_pubs[i].value.second.confirmations == i + 2);
+
+        EXPECT(updated->confirm_pubs[i].tx_info.link == outs[0].link);
+        EXPECT(updated->confirm_pubs[i].tx_info.spend_meta.id == outs[0].spend_meta.id);
+        EXPECT(updated->confirm_pubs[i].tx_info.pub == outs[0].pub);
+        EXPECT(updated->confirm_pubs[i].tx_info.payment_id.short_ == outs[0].payment_id.short_);
+      }
+    }
+
     SECTION("rescan with existing event")
     {
       const auto scan_height = lws::db::block_id(lmdb::to_native(last_block.id) + 1);
