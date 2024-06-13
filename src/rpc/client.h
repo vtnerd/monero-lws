@@ -68,31 +68,6 @@ namespace rpc
     std::string routing;
   };
 
-  //! Every scanner "reset", a new socket is created so old messages are discarded
-  class account_push
-  {
-    std::shared_ptr<detail::context> ctx;
-    detail::socket sock;
-
-    explicit account_push(std::shared_ptr<detail::context> ctx) noexcept
-      : ctx(std::move(ctx)), sock()
-    {}
-
-  public:
-    static expect<account_push> make(std::shared_ptr<detail::context> ctx) noexcept;
-
-    account_push(const account_push&) = delete;
-    account_push(account_push&&) = default;
-
-    ~account_push() noexcept;
-
-    account_push& operator=(const account_push&) = delete;
-    account_push& operator=(account_push&&) = default;
-
-    //! Push new `accounts` to worker threads. Each account is sent in unique message
-    expect<void> push(epee::span<const lws::account> accounts, std::chrono::seconds timeout);
-  };
-
   //! Abstraction for ZMQ RPC client. Only `get_rates()` thread-safe; use `clone()`.
   class client
   {
@@ -100,10 +75,9 @@ namespace rpc
     detail::socket daemon;
     detail::socket daemon_sub;
     detail::socket signal_sub;
-    detail::socket account_pull;
 
     explicit client(std::shared_ptr<detail::context> ctx) noexcept
-      : ctx(std::move(ctx)), daemon(), daemon_sub(), signal_sub(), account_pull()
+      : ctx(std::move(ctx)), daemon(), daemon_sub(), signal_sub()
     {}
 
     //! Expect `response` as the next message payload unless error.
@@ -155,9 +129,6 @@ namespace rpc
 
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
     expect<void> watch_scan_signals() noexcept;
-
-    //! Register `this` client as listening for new accounts
-    expect<void> enable_pull_accounts();
 
     //! Wait for new block announce or internal timeout.
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
@@ -259,16 +230,13 @@ namespace rpc
     //! \return The full address of the monerod ZMQ daemon.
     std::string const& daemon_address() const;
 
+    //! \return Exchange rate checking interval
+    std::chrono::minutes cache_interval() const; 
+
     //! \return Client connection. Thread-safe.
     expect<client> connect() const noexcept
     {
       return client::make(ctx);
-    }
-
-    //! Create a new account push state
-    expect<account_push> bind_push() const noexcept
-    {
-      return account_push::make(ctx);
     }
 
     /*!
