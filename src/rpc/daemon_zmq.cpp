@@ -163,9 +163,9 @@ namespace rct
       using rf_min_size = wire::min_element_sizeof<key64, key64, key64, key>;
       using bf_max = wire::max_element_count<BULLETPROOF_MAX_OUTPUTS>;
       using bf_plus_max = wire::max_element_count<BULLETPROOF_PLUS_MAX_OUTPUTS>;
-      using mlsags_max = wire::max_element_count<256>;
-      using clsags_max = wire::max_element_count<256>;
-      using pseudo_outs_max = wire::max_element_count<256>;
+      using mlsags_max = max_inputs_per_tx;
+      using clsags_max = max_inputs_per_tx;
+      using pseudo_outs_min_size = wire::min_element_sizeof<key>;
 
       wire::object(source,
         wire::field("range_proofs", wire::array<rf_min_size>(std::ref(self.prunable.rangeSigs))),
@@ -173,7 +173,7 @@ namespace rct
         wire::field("bulletproofs_plus", wire::array<bf_plus_max>(std::ref(self.prunable.bulletproofs_plus))),
         wire::field("mlsags", wire::array<mlsags_max>(std::ref(self.prunable.MGs))),
         wire::field("clsags", wire::array<clsags_max>(std::ref(self.prunable.CLSAGs))),
-        wire::field("pseudo_outs", wire::array<pseudo_outs_max>(std::ref(self.pseudo_outs)))
+        wire::field("pseudo_outs", wire::array<pseudo_outs_min_size>(std::ref(self.pseudo_outs)))
       );
 
       const bool pruned =
