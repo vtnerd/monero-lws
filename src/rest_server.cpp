@@ -759,16 +759,16 @@ namespace lws
         const std::uint32_t n_major = req.n_maj.value_or(50);
         const std::uint32_t n_minor = req.n_min.value_or(500);
         const bool get_all = req.get_all.value_or(true);
-
-        if (std::numeric_limits<std::uint32_t>::max() / n_major < n_minor)
-          return {lws::error::max_subaddresses};
-        if (options.max_subaddresses < n_major * n_minor)
-          return {lws::error::max_subaddresses};
-
+ 
         std::vector<db::subaddress_dict> new_ranges;
         std::vector<db::subaddress_dict> all_ranges;
         if (n_major && n_minor)
         {
+          if (std::numeric_limits<std::uint32_t>::max() / n_major < n_minor)
+            return {lws::error::max_subaddresses};
+          if (options.max_subaddresses < n_major * n_minor)
+            return {lws::error::max_subaddresses};
+
           std::vector<db::subaddress_dict> ranges;
           ranges.reserve(n_major);
           for (std::uint64_t elem : boost::counting_range(std::uint64_t(major_i), std::uint64_t(major_i) + n_major))
