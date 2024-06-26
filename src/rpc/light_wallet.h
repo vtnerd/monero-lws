@@ -33,8 +33,10 @@
 #include <utility>
 #include <vector>
 
-#include "common/expect.h" // monero/src
-#include "crypto/crypto.h" // monero/src
+#include "common/expect.h"     // monero/src
+#include "cryptonote_config.h" // monero/src
+#include "cryptonote_basic/difficulty.h" // monero/src
+#include "crypto/crypto.h"     // monero/src
 #include "db/data.h"
 #include "rpc/rates.h"
 #include "util/fwd.h"
@@ -63,6 +65,44 @@ namespace rpc
     crypto::secret_key key;
   };
   void read_bytes(wire::json_reader&, account_credentials&);
+
+
+  enum class daemon_state : std::uint8_t
+  {
+    ok = 0,
+    no_connections,
+    synchronizing,
+    unavailable
+  };
+  WIRE_DECLARE_ENUM(daemon_state);
+
+  enum class network_type : std::uint8_t
+  {
+    main = 0,
+    test,
+    stage,
+    fake
+  };
+  WIRE_DECLARE_ENUM(network_type);
+
+  struct daemon_status_request
+  {
+    daemon_status_request() = delete;
+  };
+  inline void read_bytes(const wire::reader&, const daemon_status_request&)
+  {}
+
+  struct daemon_status_response
+  {
+    daemon_status_response() = delete;
+    std::uint64_t outgoing_connections_count;
+    std::uint64_t incoming_connections_count;
+    std::uint64_t height;
+    std::uint64_t target_height;
+    network_type network;
+    daemon_state state;
+  };
+  void write_bytes(wire::json_writer&, const daemon_status_response&);
 
 
   struct new_subaddrs_response

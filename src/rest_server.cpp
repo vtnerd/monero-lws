@@ -37,6 +37,7 @@
 
 #include "common/error.h"          // monero/src
 #include "common/expect.h"         // monero/src
+#include "config.h"
 #include "crypto/crypto.h"         // monero/src
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
@@ -209,6 +210,60 @@ namespace lws
       epee::net_utils::ssl_verification_t webhook_verify;
       bool disable_admin_auth;
       bool auto_accept_creation;
+    };
+
+    struct daemon_status
+    {
+      using request = rpc::daemon_status_request;
+      using response = rpc::daemon_status_response;
+
+      static expect<response> handle(request, const db::storage&, const rpc::client& gclient, const runtime_options&)
+      {
+        using info_rpc = cryptonote::rpc::GetInfo;
+
+        const expect<rpc::client*> tclient = thread_client(gclient);
+        if (!tclient)
+          return tclient.error();
+        if (*tclient == nullptr)
+          throw std::logic_error{"Unexpected rpc::client nullptr"};
+
+        // default to an unavailable daemon
+        response resp{
+          .network = rpc::network_type(lws::config::network),
+          .state = rpc::daemon_state::unavailable
+        };
+
+        info_rpc::Request daemon_req{};
+        epee::byte_slice message = rpc::client::make_message("get_info", daemon_req);
+        const expect<void> sent = send_with_retry(**tclient, std::move(message), std::chrono::seconds{2});
+        if (!sent)
+        {
+          if (sent.matches(std::errc::timed_out))
+            return resp;
+          return sent.error();
+        }
+
+        const auto daemon_resp = (*tclient)->receive<info_rpc::Response>(std::chrono::seconds{4}, MLWS_CURRENT_LOCATION);
+        if (!daemon_resp)
+        {
+          if (daemon_resp.matches(std::errc::timed_out))
+            return resp;
+          return daemon_resp.error();
+        }
+
+        resp.outgoing_connections_count = daemon_resp->info.outgoing_connections_count;
+        resp.incoming_connections_count = daemon_resp->info.incoming_connections_count;
+        resp.height = daemon_resp->info.height;
+        resp.target_height = daemon_resp->info.target_height;
+
+        if (!resp.outgoing_connections_count && !resp.incoming_connections_count)
+          resp.state = rpc::daemon_state::no_connections;
+        else if (resp.target_height && (resp.target_height - resp.height) >= 5)
+          resp.state = rpc::daemon_state::synchronizing;
+        else
+          resp.state = rpc::daemon_state::ok;
+        return resp;
+      }
     };
 
     struct get_address_info
@@ -956,6 +1011,7 @@ namespace lws
 
     constexpr const endpoint endpoints[] =
     {
+      {"/daemon_status",         call<daemon_status>,          1024},
       {"/get_address_info",      call<get_address_info>,   2 * 1024},
       {"/get_address_txs",       call<get_address_txs>,    2 * 1024},
       {"/get_random_outs",       call<get_random_outs>,    2 * 1024},
