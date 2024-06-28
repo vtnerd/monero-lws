@@ -457,20 +457,37 @@ namespace db
     map_webhook_value(dest, source, payment_id);
   }
 
-  void write_bytes(wire::writer& dest, const webhook_tx_confirmation& self)
+  namespace
+  {
+    template<typename F, typename T, typename U>
+    void map_webhook_confirmation(F& format, T& self, U& payment_id)
+    {
+       wire::object(format,
+        wire::field<0>("event", std::ref(self.key.type)),
+        wire::field<1>("payment_id", std::ref(payment_id)),
+        wire::field<2>("token", std::ref(self.value.second.token)),
+        wire::field<3>("confirmations", std::ref(self.value.second.confirmations)),
+        wire::field<4>("event_id", std::ref(self.value.first.event_id)),
+        WIRE_FIELD_ID(5, tx_info)
+      );
+    }
+  }
+
+  void read_bytes(wire::reader& source, webhook_tx_confirmation& dest)
+  {
+    crypto::hash8 payment_id{};
+    map_webhook_confirmation(source, dest, payment_id);
+
+    static_assert(sizeof(payment_id) == sizeof(dest.value.first.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(dest.value.first.payment_id), std::addressof(payment_id), sizeof(payment_id));
+  }
+  void write_bytes(wire::writer& dest, const webhook_tx_confirmation& source)
   {
     crypto::hash8 payment_id;
-    static_assert(sizeof(payment_id) == sizeof(self.value.first.payment_id), "bad memcpy");
-    std::memcpy(std::addressof(payment_id), std::addressof(self.value.first.payment_id), sizeof(payment_id));
-    // to be sent to remote url
-    wire::object(dest,
-      wire::field<0>("event", std::cref(self.key.type)),
-      wire::field<1>("payment_id", std::cref(payment_id)),
-      wire::field<2>("token", std::cref(self.value.second.token)),
-      wire::field<3>("confirmations", std::cref(self.value.second.confirmations)),
-      wire::field<4>("event_id", std::cref(self.value.first.event_id)),
-      WIRE_FIELD_ID(5, tx_info)
-    );
+    static_assert(sizeof(payment_id) == sizeof(source.value.first.payment_id), "bad memcpy");
+    std::memcpy(std::addressof(payment_id), std::addressof(source.value.first.payment_id), sizeof(payment_id));
+    
+    map_webhook_confirmation(dest, source, payment_id);
   }
 
   static void write_bytes(wire::writer& dest, const output::spend_meta_& self)

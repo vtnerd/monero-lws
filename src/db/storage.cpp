@@ -934,6 +934,29 @@ namespace db
     return accounts.get_value<account>(value);
   }
 
+  expect<lws::account> storage_reader::get_full_account(const account& user)
+  {
+    std::vector<std::pair<db::output_id, db::address_index>> receives{};
+    std::vector<crypto::public_key> pubs{};
+    auto receive_list = get_outputs(user.id);
+    if (!receive_list)
+      return receive_list.error();
+
+    const std::size_t elems = receive_list->count();
+    receives.reserve(elems);
+    pubs.reserve(elems);
+
+    for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
+    {
+      auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+      auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
+      receives.emplace_back(std::move(id), std::move(subaddr));
+      pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
+    }
+
+    return lws::account{user, std::move(receives), std::move(pubs)};
+  }
+
   expect<std::pair<account_status, account>>
   storage_reader::get_account(account_address const& address) noexcept
   {
@@ -2810,8 +2833,13 @@ namespace db
             accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(temp_value).value().status;
           MONERO_LMDB_CHECK(mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_GET_BOTH));
         }
+
+        /* The check below is `<` instead of `!=` because of remote scanning -
+          a "check-in" can occur before the user accounts are replaced.
+          Duplicate writes should be supported as this (duplicate writes)
+          happened historically due to a different bug involving scan heights.*/
         expect<account> existing = accounts.get_value<account>(value);
-        if (!existing || existing->scan_height != user->scan_height())
+        if (!existing || existing->scan_height < user->scan_height())
           continue; // to next account
 
         // Don't re-store data if already scanned

@@ -25,12 +25,61 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "fwd.h"
+#include "commands.h"
 
-namespace lws_test
+#include "db/account.h"
+#include "db/data.h"
+#include "wire/adapted/crypto.h"
+#include "wire/vector.h"
+#include "wire/msgpack.h"
+#include "wire/wrapper/trusted_array.h"
+
+namespace lws { namespace rpc { namespace scanner
 {
-  constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
-}
+  namespace
+  {
+    template<typename F, typename T>
+    void map_initialize(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, pass), WIRE_FIELD_ID(1, threads));
+    }
+  }
+  WIRE_MSGPACK_DEFINE_OBJECT(initialize, map_initialize);
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_account_update(F& format, T& self)
+    {
+      wire::object(format,
+        wire::optional_field<0>("users", wire::trusted_array(std::ref(self.users))),
+        wire::optional_field<1>("blocks", wire::trusted_array(std::ref(self.blocks)))
+      );
+    }
+  } 
+  WIRE_MSGPACK_DEFINE_OBJECT(update_accounts, map_account_update)
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_push_accounts(F& format, T& self)
+    {
+      wire::object(format,
+        wire::optional_field<0>("users", wire::trusted_array(std::ref(self.users)))
+      );
+    }
+  }
+  WIRE_MSGPACK_DEFINE_OBJECT(push_accounts, map_push_accounts);
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_replace_accounts(F& format, T& self)
+    {
+      wire::object(format,
+        wire::optional_field<0>("users", wire::trusted_array(std::ref(self.users)))
+      );
+    }
+  }
+  WIRE_MSGPACK_DEFINE_OBJECT(replace_accounts, map_replace_accounts);
+}}} // lws // rpc // scanner

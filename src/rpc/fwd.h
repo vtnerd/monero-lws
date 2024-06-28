@@ -34,4 +34,5 @@ namespace lws
     class client;
   }
   struct rates;
+  class scan_manager;  
 }

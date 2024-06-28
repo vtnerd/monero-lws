@@ -40,6 +40,7 @@
 #include "lmdb/transaction.h"
 #include "lmdb/key_stream.h"
 #include "lmdb/value_stream.h"
+#include "wire/msgpack/fwd.h"
 
 namespace cryptonote { class checkpoints; }
 namespace lws
@@ -131,6 +132,9 @@ namespace db
 
     //! \return Info for account `id` iff it has `status`.
     expect<account> get_account(const account_status status, const account_id id) noexcept;
+
+    //! \return Account with outputs and spends
+    expect<lws::account> get_full_account(const account&);
 
     //! \return Info related to `address`.
     expect<std::pair<account_status, account>>

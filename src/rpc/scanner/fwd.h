@@ -24,13 +24,19 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#pragma once
 
-#include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "fwd.h"
-
-namespace lws_test
+namespace lws { namespace rpc { namespace scanner
 {
-  constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
-}
+  class client;
+  struct connection;
+  struct give_accounts;
+  struct header;
+  struct push_accounts;
+  class queue;
+  template<typename> struct do_read_commands;
+  class server;
+  struct take_accounts;
+  struct update_accounts;
+  template<typename> struct write_commands;
+}}} // lws // rpc // scanner

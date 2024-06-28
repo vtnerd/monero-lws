@@ -40,7 +40,7 @@
 #include "wire/msgpack/fwd.h"
 
 namespace lws
-{
+{ 
   //! Tracks a subset of DB account info for scanning/updating.
   class account
   {
@@ -127,4 +127,18 @@ namespace lws
     //! Track a possible `spend`.
     void add_spend(db::spend const& spend);
   };
+
+  struct by_height
+  {
+    bool operator()(account const& left, account const& right) const noexcept
+    {
+      return left.scan_height() < right.scan_height();
+    }
+
+    bool operator()(db::account const& left, db::account const& right) const noexcept
+    {
+      return left.scan_height < right.scan_height;
+    }
+  };
+
 } // lws
