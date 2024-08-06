@@ -40,6 +40,7 @@
 #include "ringct/rctOps.h"     // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
+#include "wire.h"
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
@@ -193,6 +194,29 @@ namespace lws
       wire::field("view_key", std::ref(unwrap(unwrap(self.key))))
     );
     convert_address(address, self.address);
+  }
+
+  namespace rpc
+  {
+    namespace
+    {
+      constexpr const char* map_daemon_state[] = {"ok", "no_connections", "synchronizing", "unavailable"};
+      constexpr const char* map_network_type[] = {"main", "test", "stage", "fake"};
+    }
+    WIRE_DEFINE_ENUM(daemon_state, map_daemon_state);
+    WIRE_DEFINE_ENUM(network_type, map_network_type);
+  }
+
+  void rpc::write_bytes(wire::json_writer& dest, const daemon_status_response& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(outgoing_connections_count),
+      WIRE_FIELD(incoming_connections_count),
+      WIRE_FIELD(height),
+      WIRE_FIELD(target_height),
+      WIRE_FIELD(network),
+      WIRE_FIELD(state)
+    );
   }
 
   void rpc::write_bytes(wire::json_writer& dest, const new_subaddrs_response& self)
