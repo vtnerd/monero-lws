@@ -28,6 +28,7 @@
 
 include_directories(.)
 
+add_subdirectory(lmdb)
 add_subdirectory(wire)
 add_subdirectory(db)
 add_subdirectory(rpc)

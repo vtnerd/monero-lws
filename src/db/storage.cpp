@@ -48,7 +48,7 @@
 #include "db/string.h"
 #include "error.h"
 #include "hex.h"
-#include "lmdb/database.h"
+#include "lmdb/lws_database.h"
 #include "lmdb/error.h"
 #include "lmdb/key_stream.h"
 #include "lmdb/msgpack_table.h"
@@ -653,7 +653,7 @@ namespace db
     }
   } // anonymous
 
-  struct storage_internal : lmdb::database
+  struct storage_internal : lws_lmdb::database
   {
     struct tables_
     {
@@ -674,8 +674,8 @@ namespace db
 
     const unsigned create_queue_max;
 
-    explicit storage_internal(lmdb::environment env, unsigned create_queue_max)
-      : lmdb::database(std::move(env)), tables{}, create_queue_max(create_queue_max)
+    explicit storage_internal(lws_lmdb::environment env, unsigned create_queue_max)
+      : lws_lmdb::database(std::move(env)), tables{}, create_queue_max(create_queue_max)
     {
       lmdb::write_txn txn = this->create_write_txn().value();
       assert(txn != nullptr);
@@ -1403,7 +1403,7 @@ namespace db
   {
     return {
       std::make_shared<storage_internal>(
-        MONERO_UNWRAP(lmdb::open_environment(path, 20)), create_queue_max
+        MONERO_UNWRAP(lws_lmdb::open_environment(path, 20)), create_queue_max
       )
     };
   }

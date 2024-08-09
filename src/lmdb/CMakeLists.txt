@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2020, The Monero Project
+# Copyright (c) 2024, The Monero Project
 #
 # All rights reserved.
 #
@@ -26,9 +26,9 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-set(monero-lws-db_sources account.cpp data.cpp storage.cpp string.cpp)
-set(monero-lws-db_headers account.h data.h fwd.h storage.h string.h)
+set(monero-lws-lmdb_sources lws_database.cpp)
+set(monero-lws-lmdb_headers lws_database.h msgpack_table.h)
 
-add_library(monero-lws-db ${monero-lws-db_sources} ${monero-lws-db_headers})
-target_include_directories(monero-lws-db PUBLIC "${LMDB_INCLUDE}")
-target_link_libraries(monero-lws-db monero::libraries monero-lws-common monero-lws-lmdb monero-lws-wire-msgpack ${LMDB_LIB_PATH})
+add_library(monero-lws-lmdb ${monero-lws-lmdb_sources} ${monero-lws-lmdb_headers})
+target_include_directories(monero-lws-lmdb PUBLIC "${LMDB_INCLUDE}")
+target_link_libraries(monero-lws-lmdb PRIVATE monero::libraries)
