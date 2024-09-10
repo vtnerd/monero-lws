@@ -288,8 +288,14 @@ namespace lws { namespace rpc
     db::account_address address{};
     crypto::secret_key view_key{};
 
-    if (!convert_key(dest, address.spend_public, req.spend_public_hex, "spend_public_hex"))
+    if (req.spend_public_hex == req.view_public_hex)
+    {
+      output_error(dest, "spend_public_hex", "spend_public_hex and view_public_hex should not be equal");
       return success(); // error is delivered in JSON as opposed to HTTP codes
+    }
+
+    if (!convert_key(dest, address.spend_public, req.spend_public_hex, "spend_public_hex"))
+      return success();
     if (!convert_key(dest, address.view_public, req.view_public_hex, "view_public_hex"))
       return success();
     if (!convert_key(dest, unwrap(unwrap(view_key)), req.view_key_hex, "view_key_hex"))
