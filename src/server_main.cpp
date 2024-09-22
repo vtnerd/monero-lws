@@ -66,6 +66,8 @@ namespace
 #endif
     const command_line::arg_descriptor<std::vector<std::string>> rest_servers;
     const command_line::arg_descriptor<std::vector<std::string>> admin_rest_servers;
+    const command_line::arg_descriptor<std::string> lws_server_addr;
+    const command_line::arg_descriptor<std::string> lws_server_pass;
     const command_line::arg_descriptor<std::string> rest_ssl_key;
     const command_line::arg_descriptor<std::string> rest_ssl_cert;
     const command_line::arg_descriptor<std::size_t> rest_threads;
@@ -111,6 +113,8 @@ namespace
 #endif
       , rest_servers{"rest-server", "[(https|http)://<address>:]<port>[/<prefix>] for incoming connections, multiple declarations allowed"}
       , admin_rest_servers{"admin-rest-server", "[(https|http])://<address>:]<port>[/<prefix>] for incoming admin connections, multiple declarations allowed"}
+      , lws_server_addr{"lws-server-addr", "[<ip>:]<port> to listen for lws-clients", ""}
+      , lws_server_pass{"lws-server-pass", "Password for lws-clients connecting to server", ""}
       , rest_ssl_key{"rest-ssl-key", "<path> to PEM formatted SSL key for https REST server", ""}
       , rest_ssl_cert{"rest-ssl-certificate", "<path> to PEM formatted SSL certificate (chains supported) for https REST server", ""}
       , rest_threads{"rest-threads", "Number of threads to process REST connections", 1}
@@ -135,6 +139,8 @@ namespace
       lws::options::prepare(description);
       command_line::add_arg(description, daemon_rpc);
       command_line::add_arg(description, daemon_sub);
+      command_line::add_arg(description, lws_server_addr);
+      command_line::add_arg(description, lws_server_pass);
       command_line::add_arg(description, zmq_pub);
 #ifdef MLWS_RMQ_ENABLED
       command_line::add_arg(description, rmq_address);
@@ -167,6 +173,8 @@ namespace
     std::string db_path;
     std::vector<std::string> rest_servers;
     std::vector<std::string> admin_rest_servers;
+    std::string lws_server_addr;
+    std::string lws_server_pass;
     lws::rest_server::configuration rest_config;
     std::string daemon_rpc;
     std::string daemon_sub;
@@ -236,11 +244,13 @@ namespace
       command_line::get_arg(args, opts.db_path),
       command_line::get_arg(args, opts.rest_servers),
       command_line::get_arg(args, opts.admin_rest_servers),
+      command_line::get_arg(args, opts.lws_server_addr),
+      command_line::get_arg(args, opts.lws_server_pass),
       lws::rest_server::configuration{
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
-	command_line::get_arg(args, opts.max_subaddresses),
+	      command_line::get_arg(args, opts.max_subaddresses),
         webhook_verify,
         command_line::get_arg(args, opts.external_bind),
         command_line::get_arg(args, opts.disable_admin_auth),
@@ -266,8 +276,12 @@ namespace
       command_line::get_arg(args, opts.untrusted_daemon)
     };
 
+    if (!prog.lws_server_addr.empty() && (prog.rest_config.max_subaddresses || prog.untrusted_daemon))
+      MONERO_THROW(lws::error::configuration, "Remote scanning cannot be used with subaddresses or untrusted daemon");
+
     prog.rest_config.threads = std::max(std::size_t(1), prog.rest_config.threads);
-    prog.scan_threads = std::max(std::size_t(1), prog.scan_threads);
+    if (prog.lws_server_addr.empty())
+      prog.scan_threads = std::max(std::size_t(1), prog.scan_threads);
 
     if (command_line::is_arg_defaulted(args, opts.daemon_rpc))
       prog.daemon_rpc = options::get_default_zmq();
@@ -277,19 +291,20 @@ namespace
 
   void run(program prog)
   {
-    std::signal(SIGINT, [] (int) { lws::scanner::stop(); });
-
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
     auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), std::move(prog.rmq), prog.rates_interval, prog.untrusted_daemon);
 
+    //! SIGINT handle registered by `scanner` constructor
+    lws::scanner scanner{disk.clone()};
+
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
-    auto client = lws::scanner::sync(disk.clone(), ctx.connect().value(), prog.untrusted_daemon).value();
+    auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
     const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
     const auto webhook_verify = prog.rest_config.webhook_verify;
     lws::rest_server server{
-      epee::to_span(prog.rest_servers), prog.admin_rest_servers, disk.clone(), std::move(client), std::move(prog.rest_config)
+      epee::to_span(prog.rest_servers), prog.admin_rest_servers, std::move(disk), std::move(client), std::move(prog.rest_config)
     };
     for (const std::string& address : prog.rest_servers)
       MINFO("Listening for REST clients at " << address);
@@ -297,7 +312,13 @@ namespace
       MINFO("Listening for REST admin clients at " << address);
 
     // blocks until SIGINT
-    lws::scanner::run(std::move(disk), std::move(ctx), prog.scan_threads, webhook_verify, enable_subaddresses, prog.untrusted_daemon);
+    scanner.run(
+      std::move(ctx),
+      prog.scan_threads,
+      std::move(prog.lws_server_addr),
+      std::move(prog.lws_server_pass),
+      lws::scanner_options{webhook_verify, enable_subaddresses, prog.untrusted_daemon}
+    );
   }
 } // anonymous
 

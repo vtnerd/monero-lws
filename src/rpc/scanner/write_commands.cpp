@@ -25,12 +25,31 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "fwd.h"
+#include "write_commands.h"
 
-namespace lws_test
+#include <cstring>
+#include <limits>
+
+
+namespace lws { namespace rpc { namespace scanner
 {
-  constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
-}
+  epee::byte_slice complete_command(const std::uint8_t id, epee::byte_stream sink)
+  {  
+    if (sink.size() < sizeof(header))
+    {
+      MERROR("Message sink was unexpectedly shrunk on message");
+      return nullptr;
+    }
+
+    using value_type = header::length_type::value_type;
+    if (std::numeric_limits<value_type>::max() < sink.size() - sizeof(header))
+    {
+      MERROR("Message to exceeds max size");
+      return nullptr;
+    }
+
+    const header head{0, id, header::length_type{value_type(sink.size() - sizeof(header))}};
+    std::memcpy(sink.data(), std::addressof(head), sizeof(head));
+    return epee::byte_slice{std::move(sink)};
+  }
+}}} // lws // rpc // scanner
