@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024, The Monero Project
+# Copyright (c) 2024, The Monero Project
 #
 # All rights reserved.
 #
@@ -26,11 +26,12 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_subdirectory(scanner)
+set(monero-lws-rpc-scanner_sources
+  client.cpp commands.cpp connection.cpp queue.cpp server.cpp write_commands.cpp
+)
+set(monero-lws-rpc-scanner_headers
+  client.h commands.h connection.h fwd.h queue.h read_commands.h server.h write_commands.h
+)
 
-set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp light_wallet.cpp lws_pub.cpp rates.cpp)
-set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h fwd.h json.h light_wallet.h lws_pub.h rates.h)
-
-add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})
-target_include_directories(monero-lws-rpc PRIVATE ${RMQ_INCLUDE_DIR})
-target_link_libraries(monero-lws-rpc monero::libraries monero-lws-util monero-lws-wire-json monero-lws-wire-wrapper ${RMQ_LIBRARY})
+add_library(monero-lws-rpc-scanner ${monero-lws-rpc-scanner_sources} ${monero-lws-rpc-scanner_headers})
+target_link_libraries(monero-lws-rpc-scanner monero::libraries monero-lws-wire-msgpack)

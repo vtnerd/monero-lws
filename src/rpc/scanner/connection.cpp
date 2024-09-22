@@ -25,12 +25,59 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "fwd.h"
+#include "connection.h"
 
-namespace lws_test
+#include "misc_log_ex.h" // monero/contrib/epee/include
+
+namespace lws { namespace rpc { namespace scanner
 {
-  constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
-}
+  connection::connection(boost::asio::io_service& io)
+    : read_buf_(),
+      write_bufs_(),
+      sock_(io),
+      write_timeout_(io),
+      strand_(io),
+      next_{},
+      cleanup_(false)
+  {}
+
+  connection::~connection()
+  {}
+
+  boost::asio::ip::tcp::endpoint connection::remote_endpoint()
+  {
+    boost::system::error_code error{};
+    return sock_.remote_endpoint(error);
+  }
+
+  boost::asio::mutable_buffer connection::read_buffer(const std::size_t size)
+  {
+    assert(strand_.running_in_this_thread());
+    read_buf_.clear();
+    read_buf_.put_n(0, size);
+    return boost::asio::mutable_buffer(read_buf_.data(), size);
+  }
+
+  boost::asio::const_buffer connection::write_buffer() const
+  {
+    assert(strand_.running_in_this_thread());
+    if (write_bufs_.empty())
+      return boost::asio::const_buffer(nullptr, 0);
+    return boost::asio::const_buffer(write_bufs_.front().data(), write_bufs_.front().size());
+  }
+
+  void connection::base_cleanup()
+  {
+    assert(strand_.running_in_this_thread());
+    if (!cleanup_)
+      MINFO("Disconnected from " << remote_endpoint() << " / " << this);
+    cleanup_ = true;
+    boost::system::error_code error{};
+    sock_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, error);
+    error = boost::system::error_code{};
+    sock_.close(error);
+    if (error)
+      MERROR("Error when closing socket: " << error.message());
+    write_timeout_.cancel();
+  }
+}}} // lws // rpc // scanner

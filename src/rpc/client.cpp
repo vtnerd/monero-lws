@@ -223,63 +223,6 @@ namespace rpc
     };
   } // detail
 
-  expect<account_push> account_push::make(std::shared_ptr<detail::context> ctx) noexcept
-  {
-    MONERO_PRECOND(ctx != nullptr);
-
-    account_push out{ctx};
-    out.sock.reset(zmq_socket(ctx->comm.get(), ZMQ_PUSH));
-    if (out.sock == nullptr)
-      return {net::zmq::get_error_code()};
-
-    const std::string bind = account_endpoint + std::to_string(++ctx->account_counter);
-    MONERO_CHECK(do_set_option(out.sock.get(), ZMQ_LINGER, account_zmq_linger));
-    MONERO_ZMQ_CHECK(zmq_bind(out.sock.get(), bind.c_str()));
-    return {std::move(out)};
-  }
-
-  account_push::~account_push() noexcept
-  {}
-
-  expect<void> account_push::push(epee::span<const lws::account> accounts, std::chrono::seconds timeout)
-  {
-    MONERO_PRECOND(ctx != nullptr);
-    assert(sock.get() != nullptr);
-
-    for (const lws::account& account : accounts)
-    {
-      // use integer id values (quick and fast)
-      wire::msgpack_slice_writer dest{true};
-      try
-      {
-        wire_write::bytes(dest, account);
-      }
-      catch (const wire::exception& e)
-      {
-        return {e.code()};
-      }
-      epee::byte_slice message{dest.take_sink()};
-
-      /* This is being pushed by the thread that monitors for shutdown, so
-        no signal is expected. */
-      expect<void> sent;
-      const auto start = std::chrono::steady_clock::now();
-      while (!(sent = net::zmq::send(message.clone(), sock.get(), ZMQ_DONTWAIT)))
-      {
-        if (sent != net::zmq::make_error_code(EAGAIN))
-          return sent.error();
-        if (!scanner::is_running())
-          return {error::signal_abort_process};
-        const auto elapsed = std::chrono::steady_clock::now() - start;
-        if (timeout <= elapsed)
-          return {error::daemon_timeout};
-
-        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
-      }
-    }
-    return success();
-  }
-
   expect<void> client::get_response(cryptonote::rpc::Message& response, const std::chrono::seconds timeout, const source_location loc)
   {
     expect<std::string> message = get_message(timeout);
@@ -374,18 +317,6 @@ namespace rpc
     MONERO_PRECOND(ctx != nullptr);
     assert(signal_sub != nullptr);
     return do_subscribe(signal_sub.get(), abort_scan_signal);
-  }
-
-  expect<void> client::enable_pull_accounts()
-  {
-    detail::socket new_sock{zmq_socket(ctx->comm.get(), ZMQ_PULL)};
-    if (new_sock == nullptr)
-      return {net::zmq::get_error_code()};
-    const std::string connect =
-      account_endpoint + std::to_string(ctx->account_counter);
-    MONERO_ZMQ_CHECK(zmq_connect(new_sock.get(), connect.c_str()));
-    account_pull = std::move(new_sock);
-    return success();
   }
 
   expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
@@ -499,32 +430,6 @@ namespace rpc
     }
 #endif
     return rc;
-  }
-
-  expect<std::vector<lws::account>> client::pull_accounts()
-  {
-    MONERO_PRECOND(ctx != nullptr);
-
-    if (!account_pull)
-      MONERO_CHECK(enable_pull_accounts());
-
-    std::vector<lws::account> out{};
-    for (;;)
-    {
-      expect<std::string> next = net::zmq::receive(account_pull.get(), ZMQ_DONTWAIT);
-      if (!next)
-      {
-        if (net::zmq::make_error_code(EAGAIN))
-          break;
-        return next.error();
-      }
-      out.emplace_back();
-      const std::error_code error =
-        wire::msgpack::from_bytes(epee::byte_slice{std::move(*next)}, out.back());
-      if (error)
-        return error;
-    }
-    return {std::move(out)};
   }
 
   expect<rates> client::get_rates() const
@@ -641,6 +546,13 @@ namespace rpc
     if (ctx == nullptr)
       MONERO_THROW(common_error::kInvalidArgument, "Invalid lws::rpc::context");
     return ctx->daemon_addr;
+  }
+
+  std::chrono::minutes context::cache_interval() const
+  {
+    if (ctx == nullptr)
+      MONERO_THROW(common_error::kInvalidArgument, "Invalid lws::rpc::context");
+    return ctx->cache_interval;
   }
 
   expect<void> context::raise_abort_scan() noexcept

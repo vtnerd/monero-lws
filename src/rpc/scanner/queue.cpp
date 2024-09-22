@@ -25,12 +25,67 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "fwd.h"
+#include "queue.h"
 
-namespace lws_test
+#include "db/account.h"
+
+namespace lws { namespace rpc { namespace scanner 
 {
-  constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
-}
+  queue::status queue::do_get_accounts()
+  {
+    status out{
+     std::move(replace_), std::move(push_), user_count_
+    };
+    replace_ = std::nullopt;
+    push_.clear();
+    push_.shrink_to_fit();
+    return out; 
+  }
+
+  queue::queue()
+    : replace_(), push_(), user_count_(0), sync_(), poll_(), stop_(false)
+  {}
+
+  queue::~queue()
+  {}
+
+  void queue::stop()
+  {
+    {
+      const boost::lock_guard<boost::mutex> lock{sync_};
+      stop_ = true;
+    }
+    poll_.notify_all();
+  }
+
+  std::size_t queue::user_count()
+  {
+    const boost::lock_guard<boost::mutex> lock{sync_};
+    return user_count_;
+  }
+
+  queue::status queue::get_accounts()
+  {
+    const boost::lock_guard<boost::mutex> lock{sync_};
+    return do_get_accounts();
+  }
+
+  queue::status queue::wait_for_accounts()
+  {
+    boost::unique_lock<boost::mutex> lock{sync_};
+    if (!replace_ && push_.empty() && !stop_)
+      poll_.wait(lock, [this] () { return replace_ || !push_.empty() || stop_; });
+    return do_get_accounts();
+  }
+
+  void queue::replace_accounts(std::vector<lws::account> users)
+  {
+    {
+      const boost::lock_guard<boost::mutex> lock{sync_};
+      replace_ = std::move(users);
+      user_count_ = replace_->size();
+      push_.clear();
+    }
+    poll_.notify_all();
+  }
+}}} // lws // rpc // scanner

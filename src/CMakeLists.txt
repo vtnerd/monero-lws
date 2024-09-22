@@ -50,6 +50,7 @@ target_link_libraries(monero-lws-daemon-common
     monero-lws-common
     monero-lws-db
     monero-lws-rpc
+    monero-lws-rpc-scanner
     monero-lws-wire-json
     monero-lws-util
     ${Boost_CHRONO_LIBRARY}
@@ -67,6 +68,7 @@ target_link_libraries(monero-lws-daemon
   PRIVATE
     monero::libraries
     monero-lws-daemon-common
+    monero-lws-rpc-scanner
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
 )
@@ -83,5 +85,18 @@ target_link_libraries(monero-lws-admin
     Threads::Threads
 )
 
+add_executable(monero-lws-client client_main.cpp)
+target_link_libraries(monero-lws-client
+  PRIVATE
+    monero::libraries
+    monero-lws-common
+    monero-lws-daemon-common
+    monero-lws-rpc
+    monero-lws-rpc-scanner
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    Threads::Threads
+)
+
 install(TARGETS monero-lws-daemon DESTINATION bin)
 install(TARGETS monero-lws-admin DESTINATION bin)
+install(TARGETS monero-lws-client DESTINATION bin)

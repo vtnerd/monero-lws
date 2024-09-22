@@ -291,8 +291,7 @@ namespace db
     sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
     "padding in output"
   );
-  void read_bytes(wire::reader&, output&);
-  void write_bytes(wire::writer&, const output&);
+  WIRE_DECLARE_OBJECT(output);
 
   //! Information about a possible spend of a received `output`.
   struct spend
@@ -384,7 +383,7 @@ namespace db
     webhook_value value;
     output tx_info;
   };
-  void write_bytes(wire::writer&, const webhook_tx_confirmation&);
+  WIRE_DECLARE_OBJECT(webhook_tx_confirmation);
 
   //! Returned by DB when a webhook event "tripped"
   struct webhook_tx_spend
