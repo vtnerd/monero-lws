@@ -28,6 +28,7 @@
 #pragma once
 
 #include <boost/asio/io_service.hpp>
+#include <boost/thread/thread.hpp>
 #include <cstddef>
 #include <list>
 #include <string>
@@ -43,9 +44,15 @@ namespace lws
   class rest_server
   {
     struct internal;
+    template<typename> struct connection;
+    template<typename> struct handler_loop;
+    template<typename> struct accept_loop;
     
-    boost::asio::io_service io_service_;
+    boost::asio::io_service io_service_; //!< Put first so its destroyed last
     std::list<internal> ports_;
+    std::vector<boost::thread> workers_;
+
+    void run_io();
     
   public:
     struct configuration

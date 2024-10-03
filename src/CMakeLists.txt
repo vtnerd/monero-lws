@@ -31,6 +31,7 @@ include_directories(.)
 add_subdirectory(lmdb)
 add_subdirectory(wire)
 add_subdirectory(db)
+add_subdirectory(net)
 add_subdirectory(rpc)
 add_subdirectory(util)
 
@@ -49,12 +50,14 @@ target_link_libraries(monero-lws-daemon-common
     ${MONERO_lmdb}
     monero-lws-common
     monero-lws-db
+    monero-lws-net
     monero-lws-rpc
     monero-lws-rpc-scanner
     monero-lws-wire-json
     monero-lws-util
     ${Boost_CHRONO_LIBRARY}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_SYSTEM_LIBRARY}
     ${Boost_THREAD_LIBRARY}
     ${Boost_THREAD_LIBS_INIT}
     ${EXTRA_LIBRARIES}
