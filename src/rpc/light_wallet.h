@@ -94,7 +94,9 @@ namespace rpc
 
   struct daemon_status_response
   {
-    daemon_status_response() = delete;
+    //! Defaults to current network in unavailable state
+    daemon_status_response();
+
     std::uint64_t outgoing_connections_count;
     std::uint64_t incoming_connections_count;
     std::uint64_t height;

@@ -138,7 +138,7 @@ namespace lws { namespace rpc
   }
 
   template<typename T>
-  void zmq_send(rpc::client& client, const epee::span<const T> events, const boost::string_ref json_topic, const boost::string_ref msgpack_topic)
+  void zmq_send(const rpc::client& client, const epee::span<const T> events, const boost::string_ref json_topic, const boost::string_ref msgpack_topic)
   {
     // Each `T` should have a unique count. This is desired.
     struct zmq_order
@@ -174,7 +174,7 @@ namespace lws { namespace rpc
 
   template<typename T>
   void send_webhook(
-    rpc::client& client,
+    const rpc::client& client,
     const epee::span<const T> events,
     const boost::string_ref json_topic,
     const boost::string_ref msgpack_topic,
