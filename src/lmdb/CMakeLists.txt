@@ -27,7 +27,7 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 set(monero-lws-lmdb_sources lws_database.cpp)
-set(monero-lws-lmdb_headers lws_database.h msgpack_table.h)
+set(monero-lws-lmdb_headers lws_database.h lws_key_stream.h lws_table.h lws_value_stream.h msgpack_table.h)
 
 add_library(monero-lws-lmdb ${monero-lws-lmdb_sources} ${monero-lws-lmdb_headers})
 target_include_directories(monero-lws-lmdb PUBLIC "${LMDB_INCLUDE}")
