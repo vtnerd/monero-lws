@@ -49,6 +49,7 @@
 #include "error.h"
 #include "hex.h"
 #include "lmdb/lws_database.h"
+#include "lmdb/lws_table.h"
 #include "lmdb/error.h"
 #include "lmdb/key_stream.h"
 #include "lmdb/msgpack_table.h"
@@ -333,7 +334,7 @@ namespace db
     constexpr const lmdb::msgpack_table<webhook_key, webhook_dupsort, webhook_data> webhooks{
       "webhooks_by_account_id,payment_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<db::webhook_dupsort>
     };
-    constexpr const lmdb::basic_table<account_id, webhook_event> events_by_account_id{
+    constexpr const lws_lmdb::basic_table<account_id, webhook_event> events_by_account_id{
       "webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<webhook_event>
     };
     constexpr const lmdb::msgpack_table<account_id, major_index, index_ranges> subaddress_ranges{
