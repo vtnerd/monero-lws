@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include "config.h"
 #include "db/string.h"
 #include "error.h"
 #include "time_helper.h"       // monero/contrib/epee/include
@@ -198,6 +199,14 @@ namespace lws
 
   namespace rpc
   {
+    daemon_status_response::daemon_status_response()
+      : outgoing_connections_count(0),
+        incoming_connections_count(0),
+        height(0),
+        network(lws::rpc::network_type(lws::config::network)),
+        state(daemon_state::unavailable)
+    {}
+
     namespace
     {
       constexpr const char* map_daemon_state[] = {"ok", "no_connections", "synchronizing", "unavailable"};
