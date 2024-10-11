@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/asio/io_service.hpp>
 #include <boost/optional/optional.hpp>
 #include <chrono>
 #include <memory>
@@ -36,27 +37,19 @@
 #include "byte_slice.h"    // monero/contrib/epee/include
 #include "db/fwd.h"
 #include "common/expect.h" // monero/src
+#include "net/zmq.h"       // monero/src
 #include "rpc/message.h"   // monero/src
 #include "rpc/daemon_pub.h"
 #include "rpc/rates.h"
 #include "util/source_location.h"
 
+namespace net { namespace zmq { struct async_client; }}
 namespace lws
 {
 namespace rpc
 {
   namespace detail
   {
-    struct close
-    {
-      void operator()(void* ptr) const noexcept
-      {
-        if (ptr)
-          zmq_close(ptr);
-      }
-    };
-    using socket = std::unique_ptr<void, close>;
-
     struct context;
   }
 
@@ -68,17 +61,22 @@ namespace rpc
     std::string routing;
   };
 
-  //! Abstraction for ZMQ RPC client. Only `get_rates()` thread-safe; use `clone()`.
+  expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc = {});
+
+  //! Abstraction for ZMQ RPC client. All `const` and `static` methods are thread-safe.
   class client
   {
     std::shared_ptr<detail::context> ctx;
-    detail::socket daemon;
-    detail::socket daemon_sub;
-    detail::socket signal_sub;
+    net::zmq::socket daemon;
+    net::zmq::socket daemon_sub;
+    net::zmq::socket signal_sub;
 
     explicit client(std::shared_ptr<detail::context> ctx) noexcept
       : ctx(std::move(ctx)), daemon(), daemon_sub(), signal_sub()
     {}
+
+    //! \return Connection to daemon REQ/REP.
+    static expect<net::zmq::socket> make_daemon(const std::shared_ptr<detail::context>& ctx) noexcept;
 
     //! Expect `response` as the next message payload unless error.
     expect<void> get_response(cryptonote::rpc::Message& response, std::chrono::seconds timeout, source_location loc);
@@ -140,6 +138,9 @@ namespace rpc
       return cryptonote::rpc::FullMessage::getRequest(name, message, 0);
     }
 
+    //! \return `async_client` to daemon. Thread safe.
+    expect<net::zmq::async_client> make_async_client(boost::asio::io_service& io) const;
+
     /*!
       Queue `message` for sending to daemon. If the queue is full, wait a
       maximum of `timeout` seconds or until `context::raise_abort_scan` or
@@ -148,11 +149,11 @@ namespace rpc
     expect<void> send(epee::byte_slice message, std::chrono::seconds timeout) noexcept;
 
     //! Publish `payload` to ZMQ external pub socket.
-    expect<void> publish(epee::byte_slice payload);
+    expect<void> publish(epee::byte_slice payload) const;
 
     //! Publish `data` after `topic` to ZMQ external pub socket.
     template<typename F, typename T>
-    expect<void> publish(const boost::string_ref topic, const T& data)
+    expect<void> publish(const boost::string_ref topic, const T& data) const
     {
       epee::byte_stream bytes{};
       bytes.write(topic.data(), topic.size());
@@ -174,15 +175,8 @@ namespace rpc
       return response;
     }
 
-    //! Retrieve new accounts to be scanned on this thread.
-    expect<std::vector<lws::account>> pull_accounts();
-
-    /*!
-      \note This is the one function that IS thread-safe. Multiple threads can
-        call this function with the same `this` argument.
-
-        \return Recent exchange rates.
-    */
+    /*! Never blocks for I/O - that is performed on another thread.
+      \return Recent exchange rates. */
     expect<rates> get_rates() const;
   };
 
