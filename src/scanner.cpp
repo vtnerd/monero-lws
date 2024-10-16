@@ -237,7 +237,7 @@ namespace lws
     };
     struct add_output
     {
-      bool operator()(lws::account& user, const db::output& out) const
+      bool operator()(expect<db::storage_reader>&, lws::account& user, const db::output& out) const
       { return user.add_out(out); }
     };
 
@@ -253,7 +253,7 @@ namespace lws
       net::ssl_verification_t verify_mode_;
       std::unordered_map<crypto::hash, crypto::hash> txpool_;
 
-      bool operator()(lws::account& user, const db::output& out)
+      bool operator()(expect<db::storage_reader>& reader, lws::account& user, const db::output& out)
       {
         /* Upstream monerod does not send all fields for a transaction, so
            mempool notifications cannot compute tx_hash correctly (it is not
@@ -262,14 +262,23 @@ namespace lws
            then use corresponding tx_hash. */
         const db::webhook_key key{user.id(), db::webhook_type::tx_confirmation};
         std::vector<db::webhook_value> hooks{};
+
         {
-          auto reader = disk_.start_read();
-          if (!reader)
+          db::storage_reader* active_reader = reader ?
+            std::addressof(*reader) : nullptr;
+
+          expect<db::storage_reader> temp_reader{common_error::kInvalidArgument};
+          if (!active_reader)
           {
-            MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
-            return false;
+            temp_reader = disk_.start_read();
+            if (!temp_reader)
+            {
+              MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
+              return false;
+            }
+            active_reader = std::addressof(*temp_reader);
           }
-          auto found = reader->find_webhook(key, out.payment_id.short_);
+          auto found = active_reader->find_webhook(key, out.payment_id.short_);
           if (!found)
           {
             MERROR("Failed db lookup for webhooks: " << found.error().message());
@@ -343,7 +352,7 @@ namespace lws
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader,
       std::function<void(lws::account&, const db::spend&)> spend_action,
-      std::function<bool(lws::account&, const db::output&)> output_action)
+      std::function<bool(expect<db::storage_reader>&, lws::account&, const db::output&)> output_action)
     {
       if (2 < tx.version)
         throw std::runtime_error{"Unsupported tx version"};
@@ -547,6 +556,7 @@ namespace lws
             }
           }
           const bool added = output_action(
+            reader.reader,
             user,
             db::output{
               db::transaction_link{height, tx_hash},
