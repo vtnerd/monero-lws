@@ -1,4 +1,4 @@
-# Copyright (c) 2020, The Monero Project
+# Copyright (c) 2024, The Monero Project
 #
 # All rights reserved.
 #
@@ -26,8 +26,8 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-set(monero-lws-util_sources blocks.cpp gamma_picker.cpp random_outputs.cpp source_location.cpp transactions.cpp)
-set(monero-lws-util_headers blocks.h fwd.h gamma_picker.h random_outputs.h source_location.h transactions.h)
+set(monero-lws-net_sources zmq_async.cpp)
+set(monero-lws-net_headers zmq_async.h)
 
-add_library(monero-lws-util ${monero-lws-util_sources} ${monero-lws-util_headers})
-target_link_libraries(monero-lws-util monero::libraries monero-lws-db)
+add_library(monero-lws-net ${monero-lws-net_sources} ${monero-lws-net_headers})
+target_link_libraries(monero-lws-net monero::libraries)
