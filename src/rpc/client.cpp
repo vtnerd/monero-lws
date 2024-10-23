@@ -39,6 +39,7 @@
 #include "misc_log_ex.h"     // monero/contrib/epee/include
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
+#include "net/zmq_async.h"
 #include "scanner.h"
 #include "serialization/json_object.h" // monero/src
 #include "wire/msgpack.h"
@@ -140,7 +141,7 @@ namespace rpc
           break;
         const int err = zmq_errno();
         if (err != EINTR)
-          return net::zmq::make_error_code(err);
+          return ::net::zmq::make_error_code(err);
       }
       if (items[0].revents)
         return success();
@@ -186,7 +187,7 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, socket signal_pub, socket external_pub, rcontext rmq, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
+      explicit context(zcontext comm, net::zmq::socket signal_pub, net::zmq::socket external_pub, rcontext rmq, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , external_pub(std::move(external_pub))
@@ -207,8 +208,8 @@ namespace rpc
       }
 
       zcontext comm;
-      socket signal_pub;
-      socket external_pub;
+      net::zmq::socket signal_pub;
+      net::zmq::socket external_pub;
       rcontext rmq;
       const std::string daemon_addr;
       const std::string sub_addr;
@@ -223,19 +224,15 @@ namespace rpc
     };
   } // detail
 
-  expect<void> client::get_response(cryptonote::rpc::Message& response, const std::chrono::seconds timeout, const source_location loc)
+  expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc)
   {
-    expect<std::string> message = get_message(timeout);
-    if (!message)
-      return message.error();
-
     try
     {
-      cryptonote::rpc::FullMessage fm{std::move(*message)};
+      cryptonote::rpc::FullMessage fm{std::move(msg)};
       const cryptonote::rpc::error json_error = fm.getError();
       if (!json_error.use)
       {
-        response.fromJson(fm.getMessage());
+        parser.fromJson(fm.getMessage());
         return success();
       }
 
@@ -247,6 +244,30 @@ namespace rpc
     }
 
     return {lws::error::bad_daemon_response};
+  }
+
+  expect<net::zmq::socket> client::make_daemon(const std::shared_ptr<detail::context>& ctx) noexcept
+  {
+    assert(ctx != nullptr);
+
+    net::zmq::socket daemon{zmq_socket(ctx->comm.get(), ZMQ_REQ)};
+
+    if (daemon.get() == nullptr)
+      return net::zmq::get_error_code();
+    MONERO_CHECK(do_set_option(daemon.get(), ZMQ_LINGER, daemon_zmq_linger));
+    if (ctx->untrusted_daemon)
+      MONERO_CHECK(do_set_option(daemon.get(), ZMQ_MAXMSGSIZE, max_msg_req));
+    MONERO_ZMQ_CHECK(zmq_connect(daemon.get(), ctx->daemon_addr.c_str()));
+
+    return daemon;
+  }
+
+  expect<void> client::get_response(cryptonote::rpc::Message& response, const std::chrono::seconds timeout, const source_location loc)
+  {
+    expect<std::string> message = get_message(timeout);
+    if (!message)
+      return message.error();
+    return parse_response(response, std::move(*message), loc);
   }
 
   expect<std::string> client::get_message(std::chrono::seconds timeout)
@@ -274,13 +295,10 @@ namespace rpc
 
     client out{std::move(ctx)};
 
-    out.daemon.reset(zmq_socket(out.ctx->comm.get(), ZMQ_REQ));
-    if (out.daemon.get() == nullptr)
-      return net::zmq::get_error_code();
-    MONERO_CHECK(do_set_option(out.daemon.get(), ZMQ_LINGER, daemon_zmq_linger));
-    if (out.ctx->untrusted_daemon)
-      MONERO_CHECK(do_set_option(out.daemon.get(), ZMQ_MAXMSGSIZE, max_msg_req));
-    MONERO_ZMQ_CHECK(zmq_connect(out.daemon.get(), out.ctx->daemon_addr.c_str()));
+    expect<net::zmq::socket> daemon = make_daemon(out.ctx);
+    if (!daemon)
+      return daemon.error();
+    out.daemon = std::move(*daemon);
 
     if (!out.ctx->sub_addr.empty())
     {
@@ -381,6 +399,16 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
+  expect<net::zmq::async_client> client::make_async_client(boost::asio::io_service& io) const
+  {
+    MONERO_PRECOND(ctx != nullptr);
+
+    expect<net::zmq::socket> daemon = make_daemon(ctx);
+    if (!daemon)
+      return daemon.error();
+    return net::zmq::async_client::make(io, std::move(*daemon));
+  }
+
   expect<void> client::send(epee::byte_slice message, std::chrono::seconds timeout) noexcept
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -399,7 +427,7 @@ namespace rpc
     return success();
   }
 
-  expect<void> client::publish(epee::byte_slice payload)
+  expect<void> client::publish(epee::byte_slice payload) const
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(daemon != nullptr);
@@ -451,16 +479,16 @@ namespace rpc
     if (comm == nullptr)
       MONERO_THROW(net::zmq::get_error_code(), "zmq_init");
 
-    detail::socket pub{zmq_socket(comm.get(), ZMQ_PUB)};
+    net::zmq::socket pub{zmq_socket(comm.get(), ZMQ_PUB)};
     if (pub == nullptr)
       MONERO_THROW(net::zmq::get_error_code(), "zmq_socket");
     if (zmq_bind(pub.get(), signal_endpoint) < 0)
       MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
 
-    detail::socket external_pub = nullptr;
+    net::zmq::socket external_pub = nullptr;
     if (!pub_addr.empty())
     {
-      external_pub = detail::socket{zmq_socket(comm.get(), ZMQ_PUB)};
+      external_pub = net::zmq::socket{zmq_socket(comm.get(), ZMQ_PUB)};
       if (external_pub == nullptr)
         MONERO_THROW(net::zmq::get_error_code(), "zmq_socket");
       if (zmq_bind(external_pub.get(), pub_addr.c_str()) < 0)
