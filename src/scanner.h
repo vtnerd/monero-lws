@@ -91,7 +91,10 @@ namespace lws
     void shutdown() { shutdown_ = true; stop(); }
   };
 
-  //! Scans all active `db::account`s. Detects if another process changes active list.
+  /*! Scans all active `db::account`s. Detects if another process changes
+    active list.
+
+    \note Everything except `sync` and `run` is thread-safe. */
   class scanner
   {
     db::storage disk_;

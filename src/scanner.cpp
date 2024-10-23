@@ -1064,7 +1064,7 @@ namespace lws
     }
 
     template<typename R, typename Q>
-    expect<typename R::response> fetch_chain(const scanner_sync& self, rpc::client& client, const char* endpoint, const Q& req)
+    expect<typename R::response> fetch_chain(scanner_sync& self, rpc::client& client, const char* endpoint, const Q& req)
     {
       expect<void> sent{lws::error::daemon_timeout};
 
@@ -1073,6 +1073,9 @@ namespace lws
 
       while (!(sent = client.send(std::move(msg), std::chrono::seconds{1})))
       {
+        // Run possible SIGINT handler
+        self.io_.poll_one();
+        self.io_.reset();
         if (self.has_shutdown())
           return {lws::error::signal_abort_process};
 
@@ -1088,6 +1091,9 @@ namespace lws
 
       while (!(resp = client.get_message(std::chrono::seconds{1})))
       {
+        // Run possible SIGINT handler
+        self.io_.poll_one();
+        self.io_.reset();
         if (self.has_shutdown())
           return {lws::error::signal_abort_process};
 
@@ -1101,7 +1107,7 @@ namespace lws
     }
 
     // does not validate blockchain hashes
-    expect<rpc::client> sync_quick(const scanner_sync& self, db::storage disk, rpc::client client)
+    expect<rpc::client> sync_quick(scanner_sync& self, db::storage disk, rpc::client client)
     {
       MINFO("Starting blockchain sync with daemon");
 
@@ -1140,7 +1146,7 @@ namespace lws
     } 
  
     // validates blockchain hashes
-    expect<rpc::client> sync_full(const scanner_sync& self, db::storage disk, rpc::client client)
+    expect<rpc::client> sync_full(scanner_sync& self, db::storage disk, rpc::client client)
     {
       MINFO("Starting blockchain sync with daemon");
 
