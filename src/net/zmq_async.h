@@ -143,20 +143,20 @@ namespace net { namespace zmq
 
   //! Cannot have an `async_read` and `async_write` at same time (edge trigger)
   template<typename F>
-  void async_read(async_client& sock, std::string& buffer, F&& f)
+  auto async_read(async_client& sock, std::string& buffer, F&& f)
   {
     // async_compose is required for correct strand invocation, etc
-    boost::asio::async_compose<F, void(boost::system::error_code, std::size_t)>(
+    return boost::asio::async_compose<F, void(boost::system::error_code, std::size_t)>(
       read_msg_op{sock, buffer}, f, *sock.asock
     );
   }
 
   //! Cannot have an `async_write` and `async_read` at same time (edge trigger)
   template<typename F>
-  void async_write(async_client& sock, epee::byte_slice msg, F&& f)
+  auto async_write(async_client& sock, epee::byte_slice msg, F&& f)
   {
     // async_compose is required for correct strand invocation, etc
-    boost::asio::async_compose<F, void(boost::system::error_code, std::size_t)>(
+    return boost::asio::async_compose<F, void(boost::system::error_code, std::size_t)>(
       write_msg_op{sock, std::move(msg)}, f, *sock.asock
     );
   }

@@ -157,7 +157,7 @@ if(STATIC)
   set(Boost_USE_STATIC_LIBS ON)
   set(Boost_USE_STATIC_RUNTIME ON)
 endif()
-find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono filesystem program_options regex serialization system thread)
+find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono coroutine filesystem program_options regex serialization system thread)
 
 if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
   message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
