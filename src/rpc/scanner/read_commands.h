@@ -26,7 +26,9 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/coroutine.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/read.hpp>
 #include <cstring>
 #include <limits>
@@ -120,11 +122,15 @@ namespace lws { namespace rpc { namespace scanner
         for (;;) // multiple commands
         {
           // indefinite read timeout (waiting for next command)
-          BOOST_ASIO_CORO_YIELD boost::asio::async_read(self_->sock_, self_->read_buffer(sizeof(self_->next_)), self_->strand_.wrap(*this));
+          BOOST_ASIO_CORO_YIELD boost::asio::async_read(
+            self_->sock_, self_->read_buffer(sizeof(self_->next_)), boost::asio::bind_executor(self_->strand_, *this)
+          );
 
           std::memcpy(std::addressof(self_->next_), self_->read_buf_.data(), sizeof(self_->next_));
           static_assert(std::numeric_limits<header::length_type::value_type>::max() <= std::numeric_limits<std::size_t>::max());
-          BOOST_ASIO_CORO_YIELD boost::asio::async_read(self_->sock_, self_->read_buffer(self_->next_.length.value()), self_->strand_.wrap(*this));
+          BOOST_ASIO_CORO_YIELD boost::asio::async_read(
+            self_->sock_, self_->read_buffer(self_->next_.length.value()), boost::asio::bind_executor(self_->strand_, *this)
+          );
 
           const auto& commands = T::commands();
           if (commands.size() <= self_->next_.id || !commands[self_->next_.id](self_))
@@ -142,7 +148,7 @@ namespace lws { namespace rpc { namespace scanner
   {
     if (!self)
       return false;
-    self->strand_.dispatch(do_read_commands{self});
+    boost::asio::dispatch(self->strand_, do_read_commands{self});
     return true;
   }
 }}} // lws // rpc // scanner

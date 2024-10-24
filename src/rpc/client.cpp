@@ -399,7 +399,7 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
-  expect<net::zmq::async_client> client::make_async_client(boost::asio::io_service& io) const
+  expect<net::zmq::async_client> client::make_async_client(boost::asio::io_context& io) const
   {
     MONERO_PRECOND(ctx != nullptr);
 

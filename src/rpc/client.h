@@ -26,7 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/optional/optional.hpp>
 #include <chrono>
 #include <memory>
@@ -139,7 +139,7 @@ namespace rpc
     }
 
     //! \return `async_client` to daemon. Thread safe.
-    expect<net::zmq::async_client> make_async_client(boost::asio::io_service& io) const;
+    expect<net::zmq::async_client> make_async_client(boost::asio::io_context& io) const;
 
     /*!
       Queue `message` for sending to daemon. If the queue is full, wait a
