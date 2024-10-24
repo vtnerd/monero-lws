@@ -294,7 +294,7 @@ namespace
         boost::this_thread::sleep_for(boost::chrono::seconds{1});
 
       self.stop_ = false;
-      self.io_.reset();
+      self.io_.restart();
       if (self.has_shutdown())
         return;
 

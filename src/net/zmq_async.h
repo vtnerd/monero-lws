@@ -28,7 +28,7 @@
 #pragma once
 
 #include <boost/asio/compose.hpp>
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/system/error_code.hpp>
 #include <cstddef>
@@ -63,7 +63,7 @@ namespace net { namespace zmq
     asocket asock;
     bool close;
 
-    static expect<async_client> make(boost::asio::io_service& io, socket zsock);
+    static expect<async_client> make(boost::asio::io_context& io, socket zsock);
   };
 
   class read_msg_op
@@ -94,7 +94,7 @@ namespace net { namespace zmq
           return self.complete(make_error_code(msg.error()), 0);
 
         // try again
-        sock_->asock->async_read_some(boost::asio::null_buffers(), std::move(self));
+        sock_->asock->async_wait(boost::asio::posix::stream_descriptor::wait_read, std::move(self));
         return;
       }
 
@@ -133,7 +133,7 @@ namespace net { namespace zmq
           return self.complete(make_error_code(status.error()), 0);
 
         // try again
-        sock_->asock->async_write_some(boost::asio::null_buffers(), std::move(self));
+        sock_->asock->async_wait(boost::asio::posix::stream_descriptor::wait_write, std::move(self));
         return;
       }
 

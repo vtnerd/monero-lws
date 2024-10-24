@@ -28,7 +28,7 @@
 
 #include <atomic>
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
@@ -50,12 +50,14 @@ namespace lws { namespace rpc { namespace scanner
     std::deque<epee::byte_slice> write_bufs_;
     boost::asio::ip::tcp::socket sock_;
     boost::asio::steady_timer write_timeout_;
-    boost::asio::io_service::strand strand_;
+    boost::asio::io_context::strand strand_;
     header next_;
     bool cleanup_;
 
-    explicit connection(boost::asio::io_service& io);
+    explicit connection(boost::asio::io_context& io);
     ~connection();
+
+    boost::asio::io_context& context() const { return strand_.context(); }
 
     boost::asio::ip::tcp::endpoint remote_endpoint();
 

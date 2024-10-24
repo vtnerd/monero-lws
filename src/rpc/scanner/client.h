@@ -26,7 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <cstddef>
@@ -81,7 +81,7 @@ namespace lws { namespace rpc { namespace scanner
     //! Send `users` upstream for disk storage
     static void send_update(const std::shared_ptr<client>& self, std::vector<lws::account> users, std::vector<crypto::hash> blocks);
 
-    //! Closes socket and calls stop on `io_service`.
+    //! Closes socket and calls stop on `io_context`.
     void cleanup();
   };
 }}} // lws // rpc // scanner

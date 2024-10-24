@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/coroutine.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/write.hpp>
@@ -118,8 +119,10 @@ namespace lws { namespace rpc { namespace scanner
         while (!self_->write_bufs_.empty())
         {
           self_->write_timeout_.expires_from_now(std::chrono::seconds{10});
-          self_->write_timeout_.async_wait(self_->strand_.wrap(timeout<T>{self_}));
-          BOOST_ASIO_CORO_YIELD boost::asio::async_write(self_->sock_, self_->write_buffer(), self_->strand_.wrap(*this));
+          self_->write_timeout_.async_wait(boost::asio::bind_executor(self_->strand_, timeout<T>{self_}));
+          BOOST_ASIO_CORO_YIELD boost::asio::async_write(
+            self_->sock_, self_->write_buffer(), boost::asio::bind_executor(self_->strand_, *this)
+          );
           self_->write_timeout_.cancel();
           self_->write_bufs_.pop_front(); 
         }
@@ -205,6 +208,6 @@ namespace lws { namespace rpc { namespace scanner
       }
     };
 
-    self->strand_.dispatch(queue_slice{self, std::move(msg)});
+    boost::asio::dispatch(self->strand_, queue_slice{self, std::move(msg)});
   }
 }}} // lws // rpc // scanner

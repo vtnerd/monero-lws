@@ -27,6 +27,7 @@
 
 #include "server.h"
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/coroutine.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/lexical_cast.hpp>
@@ -39,7 +40,6 @@
 #include "common/expect.h" // monero/src/
 #include "error.h"
 #include "misc_log_ex.h"        // monero/contrib/epee/include
-#include "net/net_utils_base.h" // monero/contrib/epee/include
 #include "rpc/scanner/commands.h"
 #include "rpc/scanner/connection.h"
 #include "rpc/scanner/read_commands.h"
@@ -80,7 +80,7 @@ namespace lws { namespace rpc { namespace scanner
     std::size_t threads_; //!< Number of scan threads at remote process
 
   public:
-    explicit server_connection(std::shared_ptr<server> parent, boost::asio::io_service& io)
+    explicit server_connection(std::shared_ptr<server> parent, boost::asio::io_context& io)
       : connection(io),
         parent_(std::move(parent)),
         threads_(0)
@@ -179,8 +179,10 @@ namespace lws { namespace rpc { namespace scanner
       {
         for (;;)
         {
-          next_ = std::make_shared<server_connection>(self_, GET_IO_SERVICE(self_->check_timer_));
-          BOOST_ASIO_CORO_YIELD self_->acceptor_.async_accept(next_->sock_, self_->strand_.wrap(*this));
+          next_ = std::make_shared<server_connection>(self_, self_->strand_.context());
+          BOOST_ASIO_CORO_YIELD self_->acceptor_.async_accept(
+            next_->sock_, boost::asio::bind_executor(self_->strand_, *this)
+          );
 
           MINFO("New connection to " << next_->remote_endpoint() << " / " << next_.get());
 
@@ -202,7 +204,7 @@ namespace lws { namespace rpc { namespace scanner
 
       assert(self_->strand_.running_in_this_thread());
       self_->check_timer_.expires_from_now(account_poll_interval);
-      self_->check_timer_.async_wait(self_->strand_.wrap(*this));
+      self_->check_timer_.async_wait(boost::asio::bind_executor(self_->strand_, *this));
 
       std::size_t total_threads = self_->local_.size();
       std::vector<std::shared_ptr<server_connection>> remotes{};
@@ -456,7 +458,7 @@ namespace lws { namespace rpc { namespace scanner
     };
   }
 
-  server::server(boost::asio::io_service& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify)
+  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify)
     : strand_(io),
       check_timer_(io),
       acceptor_(io),
@@ -517,7 +519,9 @@ namespace lws { namespace rpc { namespace scanner
       return;
 
     auto endpoint = get_endpoint(address);
-    self->strand_.dispatch([self, endpoint = std::move(endpoint), pass = std::move(pass)] ()
+    boost::asio::dispatch(
+      self->strand_,
+      [self, endpoint = std::move(endpoint), pass = std::move(pass)] ()
       {
         self->acceptor_.close();
         self->acceptor_.open(endpoint.protocol());
@@ -531,21 +535,22 @@ namespace lws { namespace rpc { namespace scanner
 
         self->compute_hash(self->pass_hashed_, pass);
         acceptor{std::move(self)}();
-      });
+      }
+    );
   }
 
   void server::start_user_checking(const std::shared_ptr<server>& self)
   {
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
-    self->strand_.dispatch(check_users{self});
+    boost::asio::dispatch(self->strand_, check_users{self});
   }
 
   void server::replace_users(const std::shared_ptr<server>& self)
   {
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
-    self->strand_.dispatch([self] () { self->do_replace_users(); });
+    boost::asio::dispatch(self->strand_, [self] () { self->do_replace_users(); });
   }
 
   void server::store(const std::shared_ptr<server>& self, std::vector<lws::account> users, std::vector<crypto::hash> blocks)
@@ -554,7 +559,9 @@ namespace lws { namespace rpc { namespace scanner
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
 
     std::sort(users.begin(), users.end(), by_height{});
-    self->strand_.dispatch([self, users = std::move(users), blocks = std::move(blocks)] ()
+    boost::asio::dispatch(
+      self->strand_,
+      [self, users = std::move(users), blocks = std::move(blocks)] ()
       {
         const lws::scanner_options opts{self->webhook_verify_, false, false};
         if (!lws::user_data::store(self->disk_, self->zclient_, epee::to_span(blocks), epee::to_span(users), nullptr, opts))

@@ -27,10 +27,10 @@
 
 #pragma once
 
-#include <boost/asio/io_service.hpp>
 #include <boost/thread/thread.hpp>
-#include <cstddef>
+#include <cstdint>
 #include <list>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -41,19 +41,20 @@
 
 namespace lws
 {
+  struct rest_server_data;
   class rest_server
   {
     struct internal;
     template<typename> struct connection;
     template<typename> struct handler_loop;
     template<typename> struct accept_loop;
-    
-    boost::asio::io_service io_service_; //!< Put first so its destroyed last
+
+    std::unique_ptr<rest_server_data> global_;
     std::list<internal> ports_;
     std::vector<boost::thread> workers_;
 
     void run_io();
-    
+
   public:
     struct configuration
     {
@@ -66,14 +67,14 @@ namespace lws
       bool disable_admin_auth;
       bool auto_accept_creation;
     };
-    
+
     explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);
-    
+
     rest_server(rest_server&&) = delete;
     rest_server(rest_server const&) = delete;
-    
+
     ~rest_server() noexcept;
-    
+
     rest_server& operator=(rest_server&&) = delete;
     rest_server& operator=(rest_server const&) = delete;
   };

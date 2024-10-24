@@ -86,7 +86,7 @@ namespace net { namespace zmq
     }
   }
 
-  expect<async_client> async_client::make(boost::asio::io_service& io, socket zsock)
+  expect<async_client> async_client::make(boost::asio::io_context& io, socket zsock)
   {
     MONERO_PRECOND(zsock != nullptr);
 
