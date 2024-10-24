@@ -27,7 +27,7 @@
 #pragma once
 
 #include <atomic>
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/optional/optional.hpp>
 #include <cstdint>
@@ -77,7 +77,7 @@ namespace lws
 
   struct scanner_sync
   {
-    boost::asio::io_service io_;
+    boost::asio::io_context io_;
     std::atomic<bool> stop_;     //!< Stop scanning but do not shutdown
     std::atomic<bool> shutdown_; //!< Exit scanner::run
 

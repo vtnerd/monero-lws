@@ -1323,11 +1323,11 @@ namespace lws
       thread_count = std::max(std::size_t(1), thread_count);
 
     /*! \NOTE Be careful about references and lifetimes of the callbacks. The
-      ones below are safe because no `io_service::run()` call is after the
+      ones below are safe because no `io_context::run()` call is after the
       destruction of the references.
 
       \NOTE That `ctx` will need a strand or lock if multiple
-        `io_service::run()` calls are used. */
+        `io_context::run()` calls are used. */
 
     boost::asio::steady_timer rate_timer{sync_.io_};
     class rate_updater
