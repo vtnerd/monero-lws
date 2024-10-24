@@ -20,27 +20,27 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-13, macos-12]
+        os: [ubuntu-latest, ubuntu-24.04, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-14, macos-13]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
     - name: set apt conf (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
+      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' ||  matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: ${{env.APT_SET_CONF}}
     - name: update apt (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
+      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: sudo apt update
     - name: Install dependencies (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
+      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04'
       run: ${{env.APT_INSTALL_LINUX}}
     - name: Install RabbitMQ iff WITH_RMQ (Debian based Linux)
-      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04')
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04')
       run: sudo apt -y install librabbitmq-dev
 
     - name: Install dependencies (MacOS)
-      if: matrix.os == 'macos-latest' || matrix.os == 'macos-12' || matrix.os == 'macos-13'
+      if: matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14'
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf
     - name: Install RabbitMQ iff WITH_RMQ (MacOS)
-      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-12' || matrix.os == 'macos-13')
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14')
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
   
     - name: Checkout Monero Source
