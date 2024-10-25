@@ -27,6 +27,7 @@
 #include "scanner.h"
 
 #include <algorithm>
+#include <boost/asio/use_future.hpp>
 #include <boost/numeric/conversion/cast.hpp>
 #include <boost/range/combine.hpp>
 #include <boost/thread/condition_variable.hpp>
@@ -1044,23 +1045,27 @@ namespace lws
       users.clear();
       users.shrink_to_fit();
 
-      {
-        auto server = std::make_shared<rpc::scanner::server>(
-          self.io_,
-          disk.clone(),
-          MONERO_UNWRAP(ctx.connect()),
-          queues,
-          std::move(active),
-          opts.webhook_verify
-        );
+      auto server = std::make_shared<rpc::scanner::server>(
+        self.io_,
+        disk.clone(),
+        MONERO_UNWRAP(ctx.connect()),
+        queues,
+        std::move(active),
+        opts.webhook_verify
+      );
 
-        rpc::scanner::server::start_user_checking(server);
-        if (!lws_server_addr.empty())
-          rpc::scanner::server::start_acceptor(std::move(server), lws_server_addr, std::move(lws_server_pass));
-      }
+      rpc::scanner::server::start_user_checking(server);
+      if (!lws_server_addr.empty())
+        rpc::scanner::server::start_acceptor(std::move(server), lws_server_addr, std::move(lws_server_pass));
 
-      // Blocks until sigint, local scanner issue, or exception
+      // Blocks until sigint, local scanner issue, storage issue, or exception
       self.io_.run();
+      self.io_.restart();
+
+      // Make sure server stops because we could re-start after blockchain sync
+      rpc::scanner::server::stop(server);
+      self.io_.poll();
+      self.io_.restart();
     }
 
     template<typename R, typename Q>
@@ -1396,14 +1401,19 @@ namespace lws
 
         boost::asio::steady_timer poll{sync_.io_};
         poll.expires_from_now(rpc::scanner::account_poll_interval);
-        poll.async_wait([] (boost::system::error_code) {});
+        const auto ready = poll.async_wait(boost::asio::use_future);
 
-        sync_.io_.run_one();
+        /* The exchange rates timer could run while waiting, so ensure that
+          the correct timer was run. */
+        while (!has_shutdown() && ready.wait_for(std::chrono::seconds{0}) == std::future_status::timeout)
+        {
+          sync_.io_.run_one();
+          sync_.io_.restart();
+        }
       }
       else
         check_loop(sync_, disk_.clone(), ctx, thread_count, lws_server_addr, lws_server_pass, std::move(users), std::move(active), opts);
 
-      sync_.io_.reset();
       if (has_shutdown())
         return;
 

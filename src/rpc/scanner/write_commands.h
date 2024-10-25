@@ -27,6 +27,7 @@
 #pragma once
 
 #include <boost/asio/coroutine.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/write.hpp>
 #include <chrono>
 #include <memory>
@@ -167,7 +168,7 @@ namespace lws { namespace rpc { namespace scanner
 
     if (msg.empty())
     {
-      self->cleanup();
+      boost::asio::dispatch(self->strand_, [self] () { self->cleanup(); });
       return;
     }
 
