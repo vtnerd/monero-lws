@@ -28,6 +28,7 @@
 #include "server.h"
 
 #include <boost/asio/coroutine.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/numeric/conversion/cast.hpp>
 #include <sodium/utils.h>
@@ -163,12 +164,16 @@ namespace lws { namespace rpc { namespace scanner
 
     void operator()(const boost::system::error_code& error = {})
     {
-      if (!self_ || error)
+      if (error)
       {
         if (error == boost::asio::error::operation_aborted)
           return; // exiting
         MONERO_THROW(error, "server acceptor failed");
       }
+
+      if (!self_ || self_->stop_)
+        return;
+
       assert(self_->strand_.running_in_this_thread());
       BOOST_ASIO_CORO_REENTER(*this)
       {
@@ -192,7 +197,7 @@ namespace lws { namespace rpc { namespace scanner
 
     void operator()(const boost::system::error_code& error = {}) const
     {
-      if (!self_ || error == boost::asio::error::operation_aborted)
+      if (!self_ || self_->stop_ || error == boost::asio::error::operation_aborted)
         return;
 
       assert(self_->strand_.running_in_this_thread());
@@ -223,7 +228,7 @@ namespace lws { namespace rpc { namespace scanner
         return;
       }
 
-      auto reader = self_->disk_.start_read(std::move(self_->read_txn_));
+      auto reader = self_->disk_.start_read();
       if (!reader)
       {
         if (reader.matches(std::errc::no_lock_available))
@@ -240,6 +245,8 @@ namespace lws { namespace rpc { namespace scanner
       if (current_users.count() < self_->active_.size())
       {
         // a shrinking user base, re-shuffle
+        reader->finish_read();
+        self_->accounts_cur_ = current_users.give_cursor();
         self_->do_replace_users();
         return;
       }
@@ -254,6 +261,8 @@ namespace lws { namespace rpc { namespace scanner
           new_accounts.push_back(MONERO_UNWRAP(reader->get_full_account(user.get_value<db::account>())));
           if (replace_threshold < new_accounts.size())
           {
+            reader->finish_read();
+            self_->accounts_cur_ = current_users.give_cursor();
             self_->do_replace_users();
             return;
           }
@@ -268,6 +277,8 @@ namespace lws { namespace rpc { namespace scanner
 
       if (!active_copy.empty())
       {
+        reader->finish_read();
+        self_->accounts_cur_ = current_users.give_cursor();
         self_->do_replace_users();
         return;
       }
@@ -306,7 +317,7 @@ namespace lws { namespace rpc { namespace scanner
 
         self_->next_thread_ %= total_threads;
       }
-      self_->read_txn_ = reader->finish_read();
+      reader->finish_read();
       self_->accounts_cur_ = current_users.give_cursor();
     }
   };
@@ -401,6 +412,28 @@ namespace lws { namespace rpc { namespace scanner
     active_ = std::move(active);
   }
 
+  void server::do_stop()
+  {
+    assert(strand_.running_in_this_thread());
+    if (stop_)
+      return;
+
+    MDEBUG("Stopping rpc::scanner::server async operations");
+    boost::system::error_code error{};
+    check_timer_.cancel(error);
+    acceptor_.cancel(error);
+    acceptor_.close(error);
+
+    for (auto& remote : remote_)
+    {
+      const auto conn = remote.lock();
+      if (conn)
+        boost::asio::dispatch(conn->strand_, [conn] () { conn->cleanup(); });
+    }
+
+    stop_ = true;
+  }
+
   boost::asio::ip::tcp::endpoint server::get_endpoint(const std::string& address)
   {
     std::string host;
@@ -432,12 +465,12 @@ namespace lws { namespace rpc { namespace scanner
       active_(std::move(active)),
       disk_(std::move(disk)),
       zclient_(std::move(zclient)),
-      read_txn_{},
       accounts_cur_{},
       next_thread_(0),
       pass_hashed_(),
       pass_salt_(),
-      webhook_verify_(webhook_verify)
+      webhook_verify_(webhook_verify),
+      stop_(false)
   {
     std::sort(active_.begin(), active_.end());
     for (const auto& local : local_)
@@ -488,6 +521,9 @@ namespace lws { namespace rpc { namespace scanner
       {
         self->acceptor_.close();
         self->acceptor_.open(endpoint.protocol());
+#if !defined(_WIN32)
+        self->acceptor_.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+#endif
         self->acceptor_.bind(endpoint);
         self->acceptor_.listen();
 
@@ -522,7 +558,17 @@ namespace lws { namespace rpc { namespace scanner
       {
         const lws::scanner_options opts{self->webhook_verify_, false, false};
         if (!lws::user_data::store(self->disk_, self->zclient_, epee::to_span(blocks), epee::to_span(users), nullptr, opts))
-          GET_IO_SERVICE(self->check_timer_).stop();
+        {
+          self->do_stop();
+          self->strand_.context().stop();
+        }
       });
+  }
+
+  void server::stop(const std::shared_ptr<server>& self)
+  {
+    if (!self)
+      MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
+    boost::asio::dispatch(self->strand_, [self] () { self->do_stop(); });
   }
 }}} // lws // rpc // scanner
