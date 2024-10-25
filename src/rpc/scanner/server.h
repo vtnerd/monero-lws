@@ -65,12 +65,12 @@ namespace lws { namespace rpc { namespace scanner
     std::vector<db::account_id> active_;
     db::storage disk_;
     rpc::client zclient_;
-    lmdb::suspended_txn read_txn_;
     db::cursor::accounts accounts_cur_;
     std::size_t next_thread_;
     std::array<unsigned char, 32> pass_hashed_;
     std::array<unsigned char, crypto_pwhash_SALTBYTES> pass_salt_;
     const ssl_verification_t webhook_verify_;
+    bool stop_;
 
     //! Async acceptor routine
     class acceptor;
@@ -78,6 +78,9 @@ namespace lws { namespace rpc { namespace scanner
  
     //! Reset `local_` and `remote_` scanners. Must be called in `strand_`.
     void do_replace_users();
+
+    //! Stop all async operations
+    void do_stop();
 
   public:
     static boost::asio::ip::tcp::endpoint get_endpoint(const std::string& address);
@@ -105,6 +108,9 @@ namespace lws { namespace rpc { namespace scanner
     static void replace_users(const std::shared_ptr<server>& self);
 
     //! Update `users` information on local DB
-    static void store(const std::shared_ptr<server>& self, std::vector<lws::account> users, std::vector<crypto::hash> blocks); 
+    static void store(const std::shared_ptr<server>& self, std::vector<lws::account> users, std::vector<crypto::hash> blocks);
+
+    //! Stop a running instance of all operations
+    static void stop(const std::shared_ptr<server>& self);
   };
 }}} // lws // rpc // scanner
