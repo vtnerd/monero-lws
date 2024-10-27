@@ -62,6 +62,7 @@ target_link_libraries(monero-lws-daemon-common
     ${Boost_THREAD_LIBS_INIT}
     ${EXTRA_LIBRARIES}
     ${ZMQ_LIB}
+    ${SODIUM_LIBRARY}
     Threads::Threads
 )
 
