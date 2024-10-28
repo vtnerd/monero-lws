@@ -296,13 +296,12 @@ namespace
     auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), std::move(prog.rmq), prog.rates_interval, prog.untrusted_daemon);
 
     //! SIGINT handle registered by `scanner` constructor
-    lws::scanner scanner{disk.clone()};
+    lws::scanner scanner{disk.clone(), prog.rest_config.webhook_verify};
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
     const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
-    const auto webhook_verify = prog.rest_config.webhook_verify;
     lws::rest_server server{
       epee::to_span(prog.rest_servers), prog.admin_rest_servers, std::move(disk), std::move(client), std::move(prog.rest_config)
     };
@@ -317,7 +316,7 @@ namespace
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),
-      lws::scanner_options{webhook_verify, enable_subaddresses, prog.untrusted_daemon}
+      lws::scanner_options{enable_subaddresses, prog.untrusted_daemon}
     );
   }
 } // anonymous

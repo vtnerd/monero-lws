@@ -195,7 +195,7 @@ namespace
   {
     std::shared_ptr<lws::rpc::scanner::client> client_;
 
-    bool operator()(lws::rpc::client&, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const lws::db::pow_sync> pow, const lws::scanner_options&)
+    bool operator()(boost::asio::io_context&, lws::rpc::client&, net::http::client&, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const lws::db::pow_sync> pow)
     {
       if (!client_)
         return false;
@@ -246,14 +246,12 @@ namespace
 
         if (!users.empty())
         {
-          static constexpr const lws::scanner_options opts{
-            epee::net_utils::ssl_verification_t::system_ca, false, false
-          };
+          static constexpr const lws::scanner_options opts{false, false};
 
           auto new_client = MONERO_UNWRAP(zclient.clone());
           MONERO_UNWRAP(new_client.watch_scan_signals());
           send_users send{client};
-          if (!lws::scanner::loop(self.stop_, std::move(send), std::nullopt, std::move(new_client), std::move(users), *queue, opts, false))
+          if (!lws::scanner::loop(self, std::move(send), std::nullopt, std::move(new_client), std::move(users), *queue, opts, false))
             return;
         }
       }
@@ -275,7 +273,7 @@ namespace
     MINFO("Using monerod ZMQ RPC at " << prog.monerod_rpc);
     auto ctx = lws::rpc::context::make(std::move(prog.monerod_rpc), std::move(prog.monerod_sub), {}, {}, std::chrono::minutes{0}, false);
 
-    lws::scanner_sync self{};
+    lws::scanner_sync self{epee::net_utils::ssl_verification_t::system_ca};
 
     /*! \NOTE `ctx will need a strand or lock if multiple threads use
       `self.io.run()` in the future. */

@@ -64,8 +64,7 @@ namespace lws
   {
     struct crypto_compare_
     {
-      static const char host[];
-      static const char path[];
+      static const char url[];
 
       expect<lws::rates> operator()(std::string&& body) const;
     };
