@@ -701,6 +701,17 @@ namespace lws
             if (is_hidden(account->first))
               return {lws::error::account_not_found};
 
+            // Update access time
+            auto update_result = disk.update_access_time(req.creds.address);
+            if (!update_result)
+              return update_result.error();
+
+            // Move account state to active
+            epee::span<const lws::db::account_address> address_span(&req.creds.address, 1);
+            auto change_status_result = disk.change_status(db::account_status::active, address_span);
+            if (!change_status_result)
+              return change_status_result.error();
+
             // Do not count a request for account creation as login
             return response{false, bool(account->second.flags & db::account_generated_locally)};
           }
