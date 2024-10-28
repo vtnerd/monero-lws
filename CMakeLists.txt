@@ -104,6 +104,9 @@ if(STATIC)
   endif()
 endif()
 
+# monero `master` and `release-v0.18` branches use different LIBSODIUM
+# find routines. So the upstream cmake names differ
+
 load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   Boost_THREAD_LIBRARY_RELEASE
   CMAKE_CXX_COMPILER
@@ -118,6 +121,7 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   OPENSSL_CRYPTO_LIBRARY
   OPENSSL_SSL_LIBRARY
   sodium_LIBRARY_RELEASE
+  SODIUM_LIBRARY
   UNBOUND_LIBRARIES
   ZMQ_INCLUDE_PATH
   ZMQ_LIB
@@ -176,6 +180,11 @@ endif()
 set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
 set(LMDB_LIB_PATH "monero::lmdb")
 set(ZMQ_LIB "${monero_ZMQ_LIB}")
+if (monero_SODIUM_LIBRARY)
+  set(SODIUM_LIBRARY "${monero_SODIUM_LIBRARY}")
+else ()
+  set(SODIUM_LIBRARY "${monero_sodium_LIBRARY_RELEASE}")
+endif ()
 
 if(NOT ZMQ_LIB)
   message(FATAL_ERROR "Could not find required libzmq")
@@ -237,6 +246,7 @@ set_property(TARGET monero::libraries PROPERTY
     "${MONERO_SOURCE_DIR}/external/supercop/include"
     "${MONERO_SOURCE_DIR}/src"
 )
+
 set_property(TARGET monero::libraries PROPERTY
   INTERFACE_LINK_LIBRARIES
     ${IMPORTED_MONERO_LIBRARIES}
@@ -252,7 +262,7 @@ set_property(TARGET monero::libraries PROPERTY
     ${monero_LIBUDEV_LIBRARY}
     ${monero_OPENSSL_SSL_LIBRARY}
     ${monero_OPENSSL_CRYPTO_LIBRARY}
-    ${monero_sodium_LIBRARY_RELEASE}
+    ${SODIUM_LIBRARY}
     ${monero_UNBOUND_LIBRARIES}
     ${CMAKE_DL_LIBS}
 )
