@@ -27,7 +27,7 @@
 #pragma once
 
 #include <array>
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -57,7 +57,7 @@ namespace lws { namespace rpc { namespace scanner
       needed (basically a REST server on either end). */
   class server
   {
-    boost::asio::io_service::strand strand_;
+    boost::asio::io_context::strand strand_;
     boost::asio::steady_timer check_timer_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::set<std::weak_ptr<server_connection>, std::owner_less<std::weak_ptr<server_connection>>> remote_;
@@ -85,7 +85,7 @@ namespace lws { namespace rpc { namespace scanner
   public:
     static boost::asio::ip::tcp::endpoint get_endpoint(const std::string& address);
 
-    explicit server(boost::asio::io_service& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify);
+    explicit server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify);
 
     server(const server&) = delete;
     server(server&&) = delete;

@@ -31,7 +31,7 @@
 
 namespace lws { namespace rpc { namespace scanner
 {
-  connection::connection(boost::asio::io_service& io)
+  connection::connection(boost::asio::io_context& io)
     : read_buf_(),
       write_bufs_(),
       sock_(io),
