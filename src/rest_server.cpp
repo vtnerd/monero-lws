@@ -27,8 +27,10 @@
 #include "rest_server.h"
 
 #include <algorithm>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/io_service.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
@@ -47,6 +49,9 @@
 #include <boost/beast/version.hpp>
 #include <boost/optional/optional.hpp>
 #include <boost/range/counting_range.hpp>
+#include <boost/thread/lock_guard.hpp>
+#include <boost/thread/lock_types.hpp>
+#include <boost/thread/mutex.hpp>
 #include <boost/thread/tss.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <cstring>
@@ -82,6 +87,53 @@
 
 namespace lws
 {
+  struct runtime_options
+  {
+    const std::uint32_t max_subaddresses;
+    const epee::net_utils::ssl_verification_t webhook_verify;
+    const bool disable_admin_auth;
+    const bool auto_accept_creation;
+  };
+
+  struct rest_server_data
+  {
+    boost::asio::io_context io;
+    const db::storage disk;
+    const rpc::client client;
+    const runtime_options options;
+    std::vector<net::zmq::async_client> clients;
+    boost::mutex sync;
+
+    rest_server_data(db::storage disk, rpc::client client, runtime_options options)
+      : io(),
+        disk(std::move(disk)),
+        client(std::move(client)),
+        options(std::move(options)),
+        clients(),
+        sync()
+    {}
+
+    expect<net::zmq::async_client> get_async_client(boost::asio::io_context& io)
+    {
+      boost::unique_lock<boost::mutex> lock{sync};
+      if (!clients.empty())
+      {
+        net::zmq::async_client out{std::move(clients.back())};
+        clients.pop_back();
+        return out;
+      }
+      lock.unlock();
+      return client.make_async_client(io);
+    }
+
+    void store_async_client(net::zmq::async_client&& client)
+    {
+      const boost::lock_guard<boost::mutex> lock{sync};
+      client.close = false;
+      clients.push_back(std::move(client));
+    }
+  };
+
   namespace
   {
     namespace http = epee::net_utils::http;
@@ -213,51 +265,13 @@ namespace lws
 
     std::atomic_flag rates_error_once = ATOMIC_FLAG_INIT;
 
-    struct runtime_options
-    {
-      std::uint32_t max_subaddresses;
-      epee::net_utils::ssl_verification_t webhook_verify;
-      bool disable_admin_auth;
-      bool auto_accept_creation;
-    };
-
-    struct rest_server_data
-    {
-      const db::storage disk;
-      const rpc::client client;
-      const runtime_options options;
-
-      std::vector<net::zmq::async_client> clients;
-      boost::mutex sync;
-
-      expect<net::zmq::async_client> get_async_client(boost::asio::io_service& io)
-      {
-        boost::unique_lock<boost::mutex> lock{sync};
-        if (!clients.empty())
-        {
-          net::zmq::async_client out{std::move(clients.back())};
-          clients.pop_back();
-          return out;
-        }
-        lock.unlock();
-        return client.make_async_client(io);
-      }
-
-      void store_async_client(net::zmq::async_client&& client)
-      {
-        const boost::lock_guard<boost::mutex> lock{sync};
-        client.close = false;
-        clients.push_back(std::move(client));
-      }
-    };
-
     struct daemon_status
     {
       using request = rpc::daemon_status_request;
       using response = epee::byte_slice; // sometimes async
       using async_response = rpc::daemon_status_response;
 
-      static expect<response> handle(const request&, boost::asio::io_service& io, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(const request&, rest_server_data& data, std::function<async_complete>&& resume)
       {
         using info_rpc = cryptonote::rpc::GetInfo;
 
@@ -268,16 +282,16 @@ namespace lws
           std::string in;
           net::zmq::async_client client;
           boost::asio::steady_timer timer;
-          boost::asio::io_service::strand strand;
+          boost::asio::io_context::strand strand;
           std::vector<std::function<async_complete>> resumers;
 
-          frame(rest_server_data& parent, boost::asio::io_service& io, net::zmq::async_client client)
+          frame(rest_server_data& parent, net::zmq::async_client client)
             : parent(std::addressof(parent)),
               out(),
               in(),
               client(std::move(client)),
-              timer(io),
-              strand(io),
+              timer(parent.io),
+              strand(parent.io),
               resumers()
           {
             info_rpc::Request daemon_req{};
@@ -321,6 +335,7 @@ namespace lws
           void send_response(const boost::system::error_code error, const expect<copyable_slice>& value)
           {
             assert(self_ != nullptr);
+            assert(self_->strand.running_in_this_thread());
 
             if (error)
               MERROR("Failure in /daemon_status: " << error.message());
@@ -361,6 +376,7 @@ namespace lws
                 if (!self_ || error == boost::asio::error::operation_aborted)
                   return;
 
+                assert(self_->strand.running_in_this_thread());
                 MWARNING("Timeout on /daemon_status ZMQ call");
                 self_->client.close = true;
                 self_->client.asock->cancel(error);
@@ -371,7 +387,7 @@ namespace lws
             if (!self_->timer.expires_after(timeout) && expecting)
               return false;
 
-            self_->timer.async_wait(self_->strand.wrap(on_timeout{self_}));
+            self_->timer.async_wait(boost::asio::bind_executor(self_->strand, on_timeout{self_}));
             return true;
           }
 
@@ -383,18 +399,19 @@ namespace lws
               return send_response(error, json_response(async_response{}));
 
             frame& self = *self_;
+            assert(self.strand.running_in_this_thread());
             BOOST_ASIO_CORO_REENTER(*this)
             {
               set_timeout(std::chrono::seconds{2}, false);
               BOOST_ASIO_CORO_YIELD net::zmq::async_write(
-                self.client, std::move(self.out), self.strand.wrap(std::move(*this))
+                self.client, std::move(self.out), boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
               if (!set_timeout(std::chrono::seconds{5}, true))
                 return send_response(boost::asio::error::operation_aborted, json_response(async_response{}));
 
               BOOST_ASIO_CORO_YIELD net::zmq::async_read(
-                self.client, self.in, self.strand.wrap(std::move(*this))
+                self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
               if (!self.timer.cancel(error))
@@ -427,18 +444,18 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(io);
+        expect<net::zmq::async_client> client = data.get_async_client(data.io);
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, io, std::move(*client));
+        active = std::make_shared<frame>(data, std::move(*client));
         cache.result = nullptr;
         cache.status = active;
         active->resumers.push_back(std::move(resume));
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /daemon_status");
-        active->strand.dispatch(async_handler{active});
+        boost::asio::dispatch(active->strand, async_handler{active});
         return async_ready();
       }
     };
@@ -448,7 +465,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_address_info_response;
 
-      static expect<response> handle(const request& req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
       {
         auto user = open_account(req, data.disk.clone());
         if (!user)
@@ -522,7 +539,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_address_txs_response;
 
-      static expect<response> handle(const request& req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
       {
         auto user = open_account(req, data.disk.clone());
         if (!user)
@@ -646,7 +663,7 @@ namespace lws
       using response = void; // always asynchronous response
       using async_response = rpc::get_random_outs_response;
 
-      static expect<response> handle(request&& req, boost::asio::io_service& io, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&& resume)
       {
         using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
         using histogram_rpc = cryptonote::rpc::GetOutputHistogram;
@@ -665,11 +682,11 @@ namespace lws
           boost::asio::strand<boost::asio::io_context::executor_type> strand;
           std::deque<std::pair<request, std::function<async_complete>>> resumers;
 
-          frame(rest_server_data& parent, boost::asio::io_service& io, net::zmq::async_client client)
+          frame(rest_server_data& parent, net::zmq::async_client client)
             : parent(std::addressof(parent)),
               client(std::move(client)),
-              timer(io),
-              strand(io.get_executor()),
+              timer(parent.io),
+              strand(parent.io.get_executor()),
               resumers()
           {}
         };
@@ -743,15 +760,15 @@ namespace lws
                 if (error == boost::asio::error::operation_aborted)
                   return;
 
-                self->strand.dispatch(
+                boost::asio::dispatch(
+                  self->strand,
                   [self] ()
                   {
                     boost::system::error_code error{};
                     MWARNING("Timeout on /get_random_outs ZMQ call");
                     self->client.close = true;
                     self->client.asock->cancel(error);
-                  },
-                  boost::asio::get_associated_allocator(*self)
+                  }
                 );
               }
             );
@@ -888,10 +905,6 @@ namespace lws
 
               class zmq_fetch_keys
               {
-                /* `std::function` needs a copyable functor. The functor was made
-                   const and copied in the function instead of using a reference to
-                   make the callback in `std::function` thread-safe. This shouldn't
-                   be a problem now, but this is just-in-case of a future refactor. */
                 async_handler self_;
                 boost::asio::yield_context yield_;
 
@@ -963,11 +976,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(io);
+        expect<net::zmq::async_client> client = data.get_async_client(data.io);
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, io, std::move(*client));
+        active = std::make_shared<frame>(data, std::move(*client));
         cache.status = active;
 
         active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -984,7 +997,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_subaddrs_response;
 
-      static expect<response> handle(request const& req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request const& req, const rest_server_data& data, std::function<async_complete>&&)
       {
         auto user = open_account(req, data.disk.clone());
         if (!user)
@@ -1063,7 +1076,7 @@ namespace lws
         );
       }
 
-      static expect<response> handle(request req, boost::asio::io_service& io, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request&& req, rest_server_data& data, std::function<async_complete>&& resume)
       {
         struct frame
         {
@@ -1072,16 +1085,16 @@ namespace lws
           std::string in;
           net::zmq::async_client client;
           boost::asio::steady_timer timer;
-          boost::asio::io_service::strand strand;
+          boost::asio::io_context::strand strand;
           std::vector<std::pair<request, std::function<async_complete>>> resumers;
 
-          frame(rest_server_data& parent, boost::asio::io_service& io, net::zmq::async_client client)
+          frame(rest_server_data& parent, net::zmq::async_client client)
             : parent(std::addressof(parent)),
               out(),
               in(),
               client(std::move(client)),
-              timer(io),
-              strand(io),
+              timer(parent.io),
+              strand(parent.io),
               resumers()
           {
             rpc_command::Request req{};
@@ -1130,6 +1143,7 @@ namespace lws
           void send_response(const boost::system::error_code error, expect<rpc_command::Response> value)
           {
             assert(self_ != nullptr);
+            assert(self_->strand.running_in_this_thread());
 
             if (error)
             {
@@ -1173,6 +1187,7 @@ namespace lws
                 if (!self_ || error == boost::asio::error::operation_aborted)
                   return;
 
+                assert(self_->strand.running_in_this_thread());
                 MWARNING("Timeout on /get_unspent_outs ZMQ call");
                 self_->client.close = true;
                 self_->client.asock->cancel(error);
@@ -1183,7 +1198,7 @@ namespace lws
             if (!self_->timer.expires_after(timeout) && expecting)
               return false;
 
-            self_->timer.async_wait(self_->strand.wrap(on_timeout{self_}));
+            self_->timer.async_wait(boost::asio::bind_executor(self_->strand, on_timeout{self_}));
             return true;
           }
 
@@ -1197,18 +1212,19 @@ namespace lws
               return send_response(error, default_response{});
 
             frame& self = *self_;
+            assert(self.strand.running_in_this_thread());
             BOOST_ASIO_CORO_REENTER(*this)
             {
               set_timeout(std::chrono::seconds{2}, false);
               BOOST_ASIO_CORO_YIELD net::zmq::async_write(
-                self.client, std::move(self.out), self.strand.wrap(std::move(*this))
+                self.client, std::move(self.out), boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
               if (!set_timeout(std::chrono::seconds{5}, true))
                 return send_response(boost::asio::error::operation_aborted, default_response{});
 
               BOOST_ASIO_CORO_YIELD net::zmq::async_read(
-                self.client, self.in, self.strand.wrap(std::move(*this))
+                self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
               if (!self.timer.cancel(error))
@@ -1226,18 +1242,18 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(io);
+        expect<net::zmq::async_client> client = data.get_async_client(data.io);
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, io, std::move(*client));
+        active = std::make_shared<frame>(data, std::move(*client));
         cache.result = rpc_command::Response{};
         cache.status = active;
         active->resumers.emplace_back(std::move(req), std::move(resume));
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /get_unspent_outs");
-        active->strand.dispatch(async_handler{active});
+        boost::asio::dispatch(active->strand, async_handler{active});
         return async_ready();
       }
     };
@@ -1247,7 +1263,7 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::import_response;
 
-      static expect<response> handle(request req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&&)
       {
         bool new_request = false;
         bool fulfilled = false;
@@ -1287,7 +1303,7 @@ namespace lws
       using request = rpc::login_request;
       using response = rpc::login_response;
 
-      static expect<response> handle(request req, boost::asio::io_service& io, const rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&& resume)
       {
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
@@ -1344,7 +1360,7 @@ namespace lws
       using request = rpc::provision_subaddrs_request;
       using response = rpc::new_subaddrs_response;
 
-      static expect<response> handle(request req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
       {
         if (!req.maj_i && !req.min_i && !req.n_min && !req.n_maj)
           return {lws::error::invalid_range};
@@ -1408,7 +1424,7 @@ namespace lws
       using response = void; // always async
       using async_response = rpc::submit_raw_tx_response;
 
-      static expect<response> handle(request req, boost::asio::io_service& io, rest_server_data& data, std::function<async_complete> resume)
+      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&& resume)
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
@@ -1418,15 +1434,15 @@ namespace lws
           std::string in;
           net::zmq::async_client client;
           boost::asio::steady_timer timer;
-          boost::asio::io_service::strand strand;
+          boost::asio::io_context::strand strand;
           std::deque<std::pair<epee::byte_slice, std::function<async_complete>>> resumers;
 
-          frame(rest_server_data& parent, boost::asio::io_service& io, net::zmq::async_client client)
+          frame(rest_server_data& parent, net::zmq::async_client client)
             : parent(std::addressof(parent)),
               in(),
               client(std::move(client)),
-              timer(io),
-              strand(io),
+              timer(parent.io),
+              strand(parent.io),
               resumers()
           {}
         };
@@ -1468,6 +1484,7 @@ namespace lws
           void send_response(const boost::system::error_code error, expect<copyable_slice> value)
           {
             assert(self_ != nullptr);
+            assert(self_->strand.running_in_this_thread());
 
             std::deque<std::pair<epee::byte_slice, std::function<async_complete>>> resumers;
             {
@@ -1503,6 +1520,7 @@ namespace lws
                 if (!self_ || error == boost::asio::error::operation_aborted)
                   return;
 
+                assert(self_->strand.running_in_this_thread());
                 MWARNING("Timeout on /submit_raw_tx ZMQ call");
                 self_->client.close = true;
                 self_->client.asock->cancel(error);
@@ -1513,7 +1531,7 @@ namespace lws
             if (!self_->timer.expires_after(timeout) && expecting)
               return false;
 
-            self_->timer.async_wait(self_->strand.wrap(on_timeout{self_}));
+            self_->timer.async_wait(boost::asio::bind_executor(self_->strand, on_timeout{self_}));
             return true;
           }
 
@@ -1525,6 +1543,7 @@ namespace lws
               return send_response(error, async_ready());
 
             frame& self = *self_;
+            assert(self.strand.running_in_this_thread());
             epee::byte_slice next = nullptr;
             BOOST_ASIO_CORO_REENTER(*this)
             {
@@ -1543,7 +1562,7 @@ namespace lws
 
                 set_timeout(std::chrono::seconds{10}, false);
                 BOOST_ASIO_CORO_YIELD net::zmq::async_write(
-                  self.client, std::move(next), self.strand.wrap(std::move(*this))
+                  self.client, std::move(next), boost::asio::bind_executor(self.strand, std::move(*this))
                 );
 
                 if (!set_timeout(std::chrono::seconds{20}, true))
@@ -1551,7 +1570,7 @@ namespace lws
 
                 self.in.clear(); // could be in moved-from state
                 BOOST_ASIO_CORO_YIELD net::zmq::async_read(
-                  self.client, self.in, self.strand.wrap(std::move(*this))
+                  self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
                 );
 
                 if (!self.timer.cancel(error))
@@ -1574,18 +1593,18 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(io);
+        expect<net::zmq::async_client> client = data.get_async_client(data.io);
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, io, std::move(*client));
+        active = std::make_shared<frame>(data, std::move(*client));
         cache.status = active;
 
         active->resumers.emplace_back(std::move(msg), std::move(resume));
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /submit_raw_tx");
-        active->strand.dispatch(async_handler{active});
+        boost::asio::dispatch(active->strand, async_handler{active});
         return success();
       }
     };
@@ -1595,7 +1614,7 @@ namespace lws
       using request = rpc::upsert_subaddrs_request;
       using response = rpc::new_subaddrs_response;
 
-      static expect<response> handle(request req, const boost::asio::io_service&, const rest_server_data& data, std::function<async_complete>)
+      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&&)
       {
         if (!data.options.max_subaddresses)
           return {lws::error::max_subaddresses};
@@ -1632,7 +1651,7 @@ namespace lws
     };
 
     template<typename E>
-    expect<epee::byte_slice> call(std::string&& root, boost::asio::io_service& io, rest_server_data& data, std::function<async_complete>&& resume)
+    expect<epee::byte_slice> call(std::string&& root, rest_server_data& data, std::function<async_complete>&& resume)
     {
       using request = typename E::request;
       using response = typename E::response;
@@ -1647,7 +1666,7 @@ namespace lws
       if (error)
         return error;
 
-      expect<response> resp = E::handle(std::move(req), io, data, std::move(resume));
+      expect<response> resp = E::handle(std::move(req), data, std::move(resume));
       if (!resp)
         return resp.error();
       return json_response(std::move(resp));
@@ -1672,7 +1691,7 @@ namespace lws
     }
 
     template<typename E>
-    expect<epee::byte_slice> call_admin(std::string&& root, boost::asio::io_service&, rest_server_data& data, std::function<async_complete>&&)
+    expect<epee::byte_slice> call_admin(std::string&& root, rest_server_data& data, std::function<async_complete>&&)
     {
       using request = typename E::request;
       
@@ -1713,7 +1732,7 @@ namespace lws
     struct endpoint
     {
       char const* const name;
-      expect<epee::byte_slice> (*const run)(std::string&&, boost::asio::io_service&, rest_server_data&, std::function<async_complete>&&);
+      expect<epee::byte_slice> (*const run)(std::string&&, rest_server_data&, std::function<async_complete>&&);
       const unsigned max_size;
       const bool is_async;
     };
@@ -1824,18 +1843,16 @@ namespace lws
 
   struct rest_server::internal
   {
-    rest_server_data data;
     boost::optional<std::string> prefix;
     boost::optional<std::string> admin_prefix;
     boost::optional<boost::asio::ssl::context> ssl_;
     boost::asio::ip::tcp::acceptor acceptor;
 
-    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client, runtime_options options)
-      : data{std::move(disk), std::move(client), std::move(options)}
-      , prefix()
+    explicit internal(boost::asio::io_context& io)
+      : prefix()
       , admin_prefix()
       , ssl_()
-      , acceptor(io_service)
+      , acceptor(io)
     {
       assert(std::is_sorted(std::begin(endpoints), std::end(endpoints), by_name));
     }
@@ -1870,24 +1887,25 @@ namespace lws
   template<typename Sock>
   struct rest_server::connection
   {
+    rest_server_data* global_;
     internal* parent_;
     Sock sock_;
     boost::beast::flat_static_buffer<http_parser_buffer_size> buffer_;
     boost::optional<boost::beast::http::parser<true, boost::beast::http::string_body>> parser_;
     boost::beast::http::response<slice_body> response_;
     boost::asio::steady_timer timer_;
-    boost::asio::io_service::strand strand_;
+    boost::asio::io_context::strand strand_;
     bool keep_alive_;
 
-    static boost::asio::ip::tcp::socket make_socket(std::true_type, internal* parent)
+    static boost::asio::ip::tcp::socket make_socket(std::true_type, rest_server_data* global, internal*)
     {
-      return boost::asio::ip::tcp::socket{GET_IO_SERVICE(parent->acceptor)};
+      return boost::asio::ip::tcp::socket{global->io};
     }
 
-    static boost::asio::ssl::stream<boost::asio::ip::tcp::socket> make_socket(std::false_type, internal* parent)
+    static boost::asio::ssl::stream<boost::asio::ip::tcp::socket> make_socket(std::false_type, rest_server_data* global, internal* parent)
     {
       return boost::asio::ssl::stream<boost::asio::ip::tcp::socket>{
-        GET_IO_SERVICE(parent->acceptor), parent->ssl_.value()
+        global->io, parent->ssl_.value()
       };
     }
 
@@ -1903,14 +1921,15 @@ namespace lws
 
     boost::asio::ip::tcp::socket& sock() { return get_tcp(sock_); }
 
-    explicit connection(internal* parent) noexcept
-      : parent_(parent),
-        sock_(make_socket(std::is_same<Sock, boost::asio::ip::tcp::socket>(), parent)),
+    explicit connection(rest_server_data* global, internal* parent) noexcept
+      : global_(global),
+        parent_(parent),
+        sock_(make_socket(std::is_same<Sock, boost::asio::ip::tcp::socket>(), global, parent)),
         buffer_{},
         parser_{},
         response_{},
-        timer_(GET_IO_SERVICE(parent->acceptor)),
-        strand_(GET_IO_SERVICE(parent->acceptor)),
+        timer_(global->io),
+        strand_(global->io),
         keep_alive_(true)
     {}
 
@@ -1978,6 +1997,7 @@ namespace lws
           if (!self_ || error == boost::asio::error::operation_aborted)
             return;
 
+          assert(self_->strand_.running_in_this_thread());
           MWARNING("Timeout on REST connection to " << self_->sock().remote_endpoint(error) << " / " << self_.get());
           self_->sock().cancel(error);
           self_->shutdown();
@@ -1986,7 +2006,7 @@ namespace lws
 
       if (!self->timer_.expires_after(timeout) && existing)
         return false; // timeout queued, just abort
-      self->timer_.async_wait(self->strand_.wrap(on_timeout{self}));
+      self->timer_.async_wait(boost::asio::bind_executor(self->strand_, on_timeout{self}));
       return true;
     }
 
@@ -2016,7 +2036,7 @@ namespace lws
       connection<Sock>& self = *self_;
       self.sock_.async_handshake(
         boost::asio::ssl::stream<boost::asio::ip::tcp::socket>::server,
-        self.strand_.wrap(std::move(*this))
+        boost::asio::bind_executor(self.strand_, std::move(*this))
       );
     }
 
@@ -2057,7 +2077,9 @@ namespace lws
       {
         /* The `resumer` callback can be invoked in another strand (created
           by the handler function), and therefore needs to be "wrapped" to
-          ensure thread safety. This also allows `resume` to be unwrapped. */
+          ensure thread safety. This also allows `resume` to be unwrapped.
+          DO NOT use `boost::asio::bind_executor` here as it doesn't create
+          a new callable like `wrap` does. */
         const auto& self = self_;
         resumer = self->strand_.wrap(
           [self, resume] (expect<copyable_slice> body) mutable
@@ -2071,7 +2093,7 @@ namespace lws
       }
 
       MDEBUG("Running REST handler " << handler->name << " on " << self_.get());
-      auto body = handler->run(std::move(self_->parser_->get()).body(), GET_IO_SERVICE(self_->timer_), self_->parent_->data, std::move(resumer));
+      auto body = handler->run(std::move(self_->parser_->get()).body(), *self_->global_, std::move(resumer));
       if (!body)
         return self_->bad_request(body.error(), std::forward<F>(resume));
       else if (!handler->is_async || !body->empty())
@@ -2118,7 +2140,7 @@ namespace lws
 
           MDEBUG("Reading new REST request from " << self_.get());
           BOOST_ASIO_CORO_YIELD boost::beast::http::async_read(
-            self.sock_, self.buffer_, *self.parser_, self.strand_.wrap(std::move(*this))
+            self.sock_, self.buffer_, *self.parser_, boost::asio::bind_executor(self.strand_, std::move(*this))
           );
 
           // async_response will have its own timeouts set in handlers if async
@@ -2131,7 +2153,7 @@ namespace lws
 
           connection<Sock>::set_timeout(self_, rest_response_timeout, false);
           BOOST_ASIO_CORO_YIELD boost::beast::http::async_write(
-            self.sock_, self.response_, self.strand_.wrap(std::move(*this))
+            self.sock_, self.response_, boost::asio::bind_executor(self.strand_, std::move(*this))
           );
 
           if (!self.keep_alive_)
@@ -2144,24 +2166,25 @@ namespace lws
   template<typename Sock>
   struct rest_server::accept_loop final : public boost::asio::coroutine
   {
-    internal* self_;
+    rest_server_data* global_;
+    internal* parent_;
     std::shared_ptr<connection<Sock>> next_;
 
-    explicit accept_loop(internal* self) noexcept
-      : self_(self), next_(nullptr)
+    explicit accept_loop(rest_server_data* global, internal* parent) noexcept
+      : global_(global), parent_(parent), next_(nullptr)
     {}
 
     void operator()(boost::system::error_code error = {})
     {
-      if (!self_)
+      if (!global_ || !parent_)
         return;
 
       BOOST_ASIO_CORO_REENTER(*this)
       {
         for (;;)
         {
-          next_ = std::make_shared<connection<Sock>>(self_);
-          BOOST_ASIO_CORO_YIELD self_->acceptor.async_accept(next_->sock(), std::move(*this));
+          next_ = std::make_shared<connection<Sock>>(global_, parent_);
+          BOOST_ASIO_CORO_YIELD parent_->acceptor.async_accept(next_->sock(), std::move(*this));
 
           if (error)
           {
@@ -2170,7 +2193,7 @@ namespace lws
           else
           {
             MDEBUG("New connection to " << next_->sock().remote_endpoint(error) << " / " << next_.get());
-            next_->strand_.dispatch(handler_loop{next_});
+            boost::asio::dispatch(next_->strand_, handler_loop{next_});
           }
         }
       }
@@ -2179,7 +2202,7 @@ namespace lws
 
   void rest_server::run_io()
   {
-    try { io_service_.run(); }
+    try { global_->io.run(); }
     catch (const std::exception& e)
     {
       std::raise(SIGINT);
@@ -2193,13 +2216,15 @@ namespace lws
   }
 
   rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : io_service_(), ports_(), workers_()
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation})),
+      ports_(),
+      workers_()
   {
     if (addresses.empty())
       MONERO_THROW(common_error::kInvalidArgument, "REST server requires 1 or more addresses");
 
     std::sort(admin.begin(), admin.end());
-    const auto init_port = [&admin] (internal& port, const std::string& address, configuration config, const bool is_admin) -> bool
+    const auto init_port = [this, &admin] (internal& port, const std::string& address, configuration config, const bool is_admin) -> bool
     {
       epee::net_utils::http::url_content url{};
       if (!epee::net_utils::parse_url(address, url))
@@ -2295,24 +2320,23 @@ namespace lws
       if (ssl_options)
       {
         port.ssl_ = ssl_options.create_context();
-        accept_loop<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>{std::addressof(port)}();
+        accept_loop<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>{global_.get(), std::addressof(port)}();
       }
       else
-        accept_loop<boost::asio::ip::tcp::socket>{std::addressof(port)}();
+        accept_loop<boost::asio::ip::tcp::socket>{global_.get(), std::addressof(port)}();
       return https;
     };
 
     bool any_ssl = false;
-    const runtime_options options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation};
     for (const std::string& address : addresses)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);
+      ports_.emplace_back(global_->io);
       any_ssl |= init_port(ports_.back(), address, config, false);
     }
 
     for (const std::string& address : admin)
     {
-      ports_.emplace_back(io_service_, disk.clone(), MONERO_UNWRAP(client.clone()), options);
+      ports_.emplace_back(global_->io);
       any_ssl |= init_port(ports_.back(), address, config, true);
     }
 
@@ -2328,7 +2352,7 @@ namespace lws
 
   rest_server::~rest_server() noexcept
   {
-    io_service_.stop();
+    global_->io.stop();
     for (auto& t : workers_)
     {
       if (t.joinable())

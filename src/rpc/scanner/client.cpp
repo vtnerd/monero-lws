@@ -27,14 +27,15 @@
 
 #include "client.h"
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/coroutine.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/numeric/conversion/cast.hpp>
 #include <chrono>
 
 #include "common/expect.h"      // monero/src
 #include "misc_log_ex.h"        // monero/contrib/epee/include
-#include "net/net_utils_base.h" // monero/contrib/epee/include
 #include "rpc/scanner/commands.h"
 #include "rpc/scanner/connection.h"
 #include "rpc/scanner/read_commands.h"
@@ -121,9 +122,13 @@ namespace lws { namespace rpc { namespace scanner
         {
           MINFO("Attempting connection to " << self_->server_address_);
           self_->connect_timer_.expires_from_now(connect_timeout);
-          self_->connect_timer_.async_wait(self_->strand_.wrap(close{self_}));
+          self_->connect_timer_.async_wait(
+            boost::asio::bind_executor(self_->strand_, close{self_})
+          );
 
-          BOOST_ASIO_CORO_YIELD self_->sock_.async_connect(self_->server_address_, self_->strand_.wrap(*this));
+          BOOST_ASIO_CORO_YIELD self_->sock_.async_connect(
+            self_->server_address_, boost::asio::bind_executor(self_->strand_, *this)
+          );
 
           if (!self_->connect_timer_.cancel() || error)
           {
@@ -135,7 +140,9 @@ namespace lws { namespace rpc { namespace scanner
 
           MINFO("Retrying connection in " << std::chrono::seconds{reconnect_interval}.count() << " seconds"); 
           self_->connect_timer_.expires_from_now(reconnect_interval);
-          BOOST_ASIO_CORO_YIELD self_->connect_timer_.async_wait(self_->strand_.wrap(*this));
+          BOOST_ASIO_CORO_YIELD self_->connect_timer_.async_wait(
+            boost::asio::bind_executor(self_->strand_, *this)
+          );
         }
 
         MINFO("Connection made to " << self_->server_address_);
@@ -147,7 +154,7 @@ namespace lws { namespace rpc { namespace scanner
     }
   };
 
-  client::client(boost::asio::io_service& io, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local)
+  client::client(boost::asio::io_context& io, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local)
     : connection(io),
       local_(std::move(local)),
       pass_(std::move(pass)),
@@ -182,11 +189,14 @@ namespace lws { namespace rpc { namespace scanner
   {
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
-    self->strand_.dispatch([self] ()
+    boost::asio::dispatch(
+      self->strand_,
+      [self] ()
       {
         if (!self->sock_.is_open())
           connector{self}();
-      });
+      }
+    );
   }
 
   void client::push_accounts(const std::shared_ptr<client>& self, std::vector<lws::account> users)
@@ -194,7 +204,9 @@ namespace lws { namespace rpc { namespace scanner
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
 
-    self->strand_.dispatch([self, users = std::move(users)] () mutable
+    boost::asio::dispatch(
+      self->strand_,
+      [self, users = std::move(users)] () mutable
       {
         /* Keep this algorithm simple, one user at a time. A little more difficult
           to do multiples at once */
@@ -207,7 +219,8 @@ namespace lws { namespace rpc { namespace scanner
           );
           self->next_push_ %= self->local_.size();
         }
-      });
+      }
+    );
   }
 
   void client::replace_accounts(const std::shared_ptr<client>& self, std::vector<lws::account> users)
@@ -215,7 +228,9 @@ namespace lws { namespace rpc { namespace scanner
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
 
-    self->strand_.dispatch([self, users = std::move(users)] () mutable
+    boost::asio::dispatch(
+      self->strand_,
+      [self, users = std::move(users)] () mutable
       {
         MINFO("Received " << users.size() << " accounts as new workload");
         for (std::size_t i = 0; i < self->local_.size(); ++i)
@@ -230,7 +245,8 @@ namespace lws { namespace rpc { namespace scanner
           self->local_[i]->replace_accounts(std::move(next));
         }
         self->next_push_ = 0;
-      });
+      }
+    );
   }
 
   void client::send_update(const std::shared_ptr<client>& self, std::vector<lws::account> users, std::vector<crypto::hash> blocks)
@@ -238,17 +254,20 @@ namespace lws { namespace rpc { namespace scanner
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
     
-    self->strand_.dispatch([self, users = std::move(users), blocks = std::move(blocks)] () mutable
+    boost::asio::dispatch(
+      self->strand_,
+      [self, users = std::move(users), blocks = std::move(blocks)] () mutable
       {
         if (!self->connected_)
           MONERO_THROW(common_error::kInvalidArgument, "not connected");
         write_command(self, update_accounts{std::move(users), std::move(blocks)});
-      });
+      }
+    );
   }
 
   void client::cleanup()
   {
     base_cleanup();
-    GET_IO_SERVICE(sock_).stop();
+    context().stop();
   }
 }}} // lws // rpc // scanner
