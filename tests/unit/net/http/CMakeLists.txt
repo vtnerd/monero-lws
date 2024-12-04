@@ -1,4 +1,4 @@
-# Copyright (c) 2022, The Monero Project
+# Copyright (c) 2024, The Monero Project
 #
 # All rights reserved.
 #
@@ -26,31 +26,9 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_library(monero-lws-unit-framework framework.test.cpp)
-target_include_directories(monero-lws-unit-framework PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(monero-lws-unit-framework)
-
-add_subdirectory(db)
-add_subdirectory(net)
-add_subdirectory(rpc)
-add_subdirectory(wire)
-
-add_executable(monero-lws-unit main.cpp rest.test.cpp scanner.test.cpp)
-target_link_libraries(monero-lws-unit
-  monero::libraries
-  monero-lws-daemon-common
-  monero-lws-unit-db
-  monero-lws-unit-framework
-  monero-lws-unit-net
+add_library(monero-lws-unit-net-http OBJECT client.test.cpp)
+target_link_libraries(
   monero-lws-unit-net-http
-  monero-lws-unit-rpc
-  monero-lws-unit-wire
-  monero-lws-unit-wire-json
-  monero-lws-unit-wire-msgpack
-  ${Boost_FILESYSTEM_LIBRARY}
-  ${Boost_PROGRAM_OPTIONS_LIBRARY}
-  ${Boost_THREAD_LIBRARY}
-  ${Boost_THREAD_LIBS_INIT}
-  Threads::Threads
-)
-add_test(NAME monero-lws-unit COMMAND monero-lws-unit -v)
+  monero-lws-net-http
+  monero-lws-unit-framework
+  monero::libraries)

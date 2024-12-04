@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -24,59 +24,54 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#include "rates.h"
 
-#include "wire/json.h"
+#pragma once
 
-namespace
+#include <boost/asio/buffer.hpp>
+#include <boost/beast/core/error.hpp>
+#include <boost/beast/http/message.hpp>
+#include <cstdint>
+#include <limits>
+#include "byte_slice.h" // monero/contrib/epee/include
+
+namespace net { namespace http
 {
-  template<typename F, typename T>
-  void map_rates(F& format, T& self)
+  //! Trait for `boost::beast` body type
+  struct slice_body
   {
-    wire::object(format,
-      WIRE_FIELD(AUD),
-      WIRE_FIELD(BRL),
-      WIRE_FIELD(BTC),
-      WIRE_FIELD(CAD),
-      WIRE_FIELD(CHF),
-      WIRE_FIELD(CNY),
-      WIRE_FIELD(EUR),
-      WIRE_FIELD(GBP),
-      WIRE_FIELD(HKD),
-      WIRE_FIELD(INR),
-      WIRE_FIELD(JPY),
-      WIRE_FIELD(KRW),
-      WIRE_FIELD(MXN),
-      WIRE_FIELD(NOK),
-      WIRE_FIELD(NZD),
-      WIRE_FIELD(SEK),
-      WIRE_FIELD(SGD),
-      WIRE_FIELD(TRY),
-      WIRE_FIELD(USD),
-      WIRE_FIELD(RUB),
-      WIRE_FIELD(ZAR)
-    );
-  }
-}
+    using value_type = epee::byte_slice;
 
-namespace lws
-{
-  WIRE_JSON_DEFINE_OBJECT(rates, map_rates);
-
-  namespace rpc
-  {
-    const char crypto_compare_::url[] =
-      "https://min-api.cryptocompare.com"
-        "/data/price?fsym=XMR&tsyms=AUD,BRL,BTC,CAD,CHF,CNY,EUR,GBP,"
-        "HKD,INR,JPY,KRW,MXN,NOK,NZD,SEK,SGD,TRY,USD,RUB,ZAR";
-
-    expect<lws::rates> crypto_compare_::operator()(std::string&& body) const
+    static std::uint64_t size(const value_type& source) noexcept
     {
-      lws::rates out{};
-      const std::error_code error = wire::json::from_bytes(std::move(body), out);
-      if (error)
-        return error;
-      return {std::move(out)};
+      static_assert(!std::numeric_limits<std::size_t>::is_signed, "expected unsigned");
+      static_assert(
+        std::numeric_limits<std::size_t>::max() <= std::numeric_limits<std::uint64_t>::max(),
+        "unexpected size_t max value"
+      );
+      return source.size();
     }
-  } // rpc
-} // lws
+
+    struct writer
+    {
+      epee::byte_slice body_;
+
+      using const_buffers_type = boost::asio::const_buffer;
+
+      template<bool is_request, typename Fields>
+      explicit writer(boost::beast::http::header<is_request, Fields> const&, value_type const& body)
+        : body_(body.clone())
+      {}
+
+      void init(boost::beast::error_code& ec)
+      {
+        ec = {};
+      }
+
+      boost::optional<std::pair<const_buffers_type, bool>> get(boost::beast::error_code& ec)
+      {
+        ec = {};
+        return {{const_buffers_type{body_.data(), body_.size()}, false}};
+      }
+    };
+  };
+}} // net // http

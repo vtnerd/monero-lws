@@ -458,7 +458,7 @@ namespace lws { namespace rpc { namespace scanner
     };
   }
 
-  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify)
+  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl)
     : strand_(io),
       check_timer_(io),
       acceptor_(io),
@@ -467,11 +467,11 @@ namespace lws { namespace rpc { namespace scanner
       active_(std::move(active)),
       disk_(std::move(disk)),
       zclient_(std::move(zclient)),
+      webhook_(std::move(ssl)),
       accounts_cur_{},
       next_thread_(0),
       pass_hashed_(),
       pass_salt_(),
-      webhook_verify_(webhook_verify),
       stop_(false)
   {
     std::sort(active_.begin(), active_.end());
@@ -563,8 +563,7 @@ namespace lws { namespace rpc { namespace scanner
       self->strand_,
       [self, users = std::move(users), blocks = std::move(blocks)] ()
       {
-        const lws::scanner_options opts{self->webhook_verify_, false, false};
-        if (!lws::user_data::store(self->disk_, self->zclient_, epee::to_span(blocks), epee::to_span(users), nullptr, opts))
+        if (!lws::user_data::store(self->strand_.context(), self->disk_, self->zclient_, self->webhook_, epee::to_span(blocks), epee::to_span(users), nullptr))
         {
           self->do_stop();
           self->strand_.context().stop();
