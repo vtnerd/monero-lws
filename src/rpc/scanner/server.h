@@ -38,6 +38,7 @@
 
 #include "db/fwd.h"
 #include "db/storage.h"
+#include "net/http/client.h"
 #include "net/net_ssl.h" // monero/contrib/epee/include
 #include "rpc/client.h"
 #include "rpc/scanner/queue.h"
@@ -65,11 +66,11 @@ namespace lws { namespace rpc { namespace scanner
     std::vector<db::account_id> active_;
     db::storage disk_;
     rpc::client zclient_;
+    net::http::client webhook_;
     db::cursor::accounts accounts_cur_;
     std::size_t next_thread_;
     std::array<unsigned char, 32> pass_hashed_;
     std::array<unsigned char, crypto_pwhash_SALTBYTES> pass_salt_;
-    const ssl_verification_t webhook_verify_;
     bool stop_;
 
     //! Async acceptor routine
@@ -85,7 +86,7 @@ namespace lws { namespace rpc { namespace scanner
   public:
     static boost::asio::ip::tcp::endpoint get_endpoint(const std::string& address);
 
-    explicit server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, ssl_verification_t webhook_verify);
+    explicit server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl);
 
     server(const server&) = delete;
     server(server&&) = delete;

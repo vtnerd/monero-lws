@@ -55,6 +55,7 @@
 #include <boost/thread/tss.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 #include <utility>
@@ -69,8 +70,11 @@
 #include "db/string.h"
 #include "error.h"
 #include "lmdb/util.h"             // monero/src
+#include "net/http/client.h"
+#include "net/http/slice_body.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "net/net_ssl.h"           // monero/contrib/epee/include
+#include "net/net_utils_base.h"    // monero/contrib/epee/include
 #include "net/zmq.h"               // monero/src
 #include "net/zmq_async.h"
 #include "rpc/admin.h"
@@ -102,6 +106,7 @@ namespace lws
     const rpc::client client;
     const runtime_options options;
     std::vector<net::zmq::async_client> clients;
+    net::http::client webhook_client;
     boost::mutex sync;
 
     rest_server_data(db::storage disk, rpc::client client, runtime_options options)
@@ -109,6 +114,7 @@ namespace lws
         disk(std::move(disk)),
         client(std::move(client)),
         options(std::move(options)),
+        webhook_client(options.webhook_verify),
         clients(),
         sync()
     {}
@@ -1303,7 +1309,7 @@ namespace lws
       using request = rpc::login_request;
       using response = rpc::login_response;
 
-      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&&)
       {
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
@@ -1346,8 +1352,8 @@ namespace lws
           // webhooks are not needed for response, so just queue i/o and
           // log errors when it fails
 
-          rpc::send_webhook(
-            data.client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:", std::chrono::seconds{5}, data.options.webhook_verify
+          rpc::send_webhook_async(
+            data.io, data.client, data.webhook_client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:"
           );
         }
 
@@ -1892,7 +1898,7 @@ namespace lws
     Sock sock_;
     boost::beast::flat_static_buffer<http_parser_buffer_size> buffer_;
     boost::optional<boost::beast::http::parser<true, boost::beast::http::string_body>> parser_;
-    boost::beast::http::response<slice_body> response_;
+    boost::beast::http::response<net::http::slice_body> response_;
     boost::asio::steady_timer timer_;
     boost::asio::io_context::strand strand_;
     bool keep_alive_;

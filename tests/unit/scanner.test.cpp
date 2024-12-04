@@ -350,7 +350,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       std::vector<epee::byte_slice> messages{};
       messages.push_back(to_json_rpc(1));
 
-      lws::scanner scanner{db.clone()};
+      lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
 
       boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
       const join on_scope_exit{server_thread};
@@ -384,7 +384,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, {hashes.data(), 1});
       {
-        lws::scanner scanner{db.clone()};
+        lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
@@ -408,7 +408,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         message.hashes.resize(1);
         messages.push_back(daemon_response(message));
 
-        lws::scanner scanner{db.clone()};
+        lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
@@ -516,7 +516,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         messages.push_back(daemon_response(hmessage));
 
         {
-          lws::scanner scanner{db.clone()};
+          lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
           boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
           const join on_scope_exit{server_thread};
           EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
@@ -534,10 +534,8 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
-        static constexpr const lws::scanner_options opts{
-          epee::net_utils::ssl_verification_t::none, true, false
-        };
-        lws::scanner scanner{db.clone()};
+        static constexpr const lws::scanner_options opts{true, false};
+        lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
         scanner.run(std::move(rpc), 1, {}, {}, opts);

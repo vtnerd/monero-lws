@@ -35,6 +35,7 @@
 
 #include "db/fwd.h"
 #include "db/storage.h"
+#include "net/http/client.h"
 #include "net/net_ssl.h" // monero/contrib/epee/include
 #include "rpc/client.h"
 #include "rpc/scanner/fwd.h"
@@ -44,7 +45,6 @@ namespace lws
 {
   struct scanner_options
   {
-    epee::net_utils::ssl_verification_t webhook_verify;
     bool enable_subaddresses;
     bool untrusted_daemon;
   };
@@ -69,20 +69,21 @@ namespace lws
 
     /*! Store updated accounts locally (`disk`), and send ZMQ/RMQ/webhook
       events. `users` must be sorted by height (lowest first). */
-    static bool store(db::storage& disk, rpc::client& zclient, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const db::pow_sync> pow, const scanner_options&);
+    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const db::pow_sync> pow);
 
     //! `users` must be sorted by height (lowest first)
-    bool operator()(rpc::client& zclient, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const db::pow_sync> pow, const scanner_options&);
+    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const db::pow_sync> pow);
   };
 
   struct scanner_sync
   {
     boost::asio::io_context io_;
+    net::http::client webhooks_;
     std::atomic<bool> stop_;     //!< Stop scanning but do not shutdown
     std::atomic<bool> shutdown_; //!< Exit scanner::run
 
-    explicit scanner_sync()
-      : io_(), stop_(false), shutdown_(false)
+    explicit scanner_sync(epee::net_utils::ssl_verification_t webhook_verify)
+      : io_(), webhooks_(webhook_verify), stop_(false), shutdown_(false)
     {}
 
     bool is_running() const noexcept { return !stop_ && !shutdown_; }
@@ -104,18 +105,18 @@ namespace lws
   public:
 
     //! Register `SIGINT` handler and keep a copy of `disk`
-    explicit scanner(db::storage disk);
+    explicit scanner(db::storage disk, epee::net_utils::ssl_verification_t webhook_verify);
     ~scanner();
 
     //! Callback for storing user account (typically local lmdb, but perhaps remote rpc)
-    using store_func = std::function<bool(rpc::client&, epee::span<const crypto::hash>, epee::span<const lws::account>, epee::span<const db::pow_sync>, const scanner_options&)>;
+    using store_func = std::function<bool(boost::asio::io_context&, rpc::client&, net::http::client&, epee::span<const crypto::hash>, epee::span<const lws::account>, epee::span<const db::pow_sync>)>;
 
     /*! Run _just_ the inner scanner loop while `self.is_running() == true`.
      *
       \throw std::exception on hard errors (shutdown) conditions
       \return True iff `queue` indicates thread now has zero accounts. False
         indicates a soft, typically recoverable error. */
-    static bool loop(const std::atomic<bool>& stop, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, bool leader_thread); 
+    static bool loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, bool leader_thread);
     
     //! Use `client` to sync blockchain data, and \return client if successful.
     expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false);

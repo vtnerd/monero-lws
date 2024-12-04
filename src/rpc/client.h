@@ -148,10 +148,10 @@ namespace rpc
     */
     expect<void> send(epee::byte_slice message, std::chrono::seconds timeout) noexcept;
 
-    //! Publish `payload` to ZMQ external pub socket.
+    //! Publish `payload` to ZMQ external pub socket. Blocks iff RMQ.
     expect<void> publish(epee::byte_slice payload) const;
 
-    //! Publish `data` after `topic` to ZMQ external pub socket.
+    //! Publish `data` after `topic` to ZMQ external pub socket. Blocks iff RMQ.
     template<typename F, typename T>
     expect<void> publish(const boost::string_ref topic, const T& data) const
     {
@@ -250,14 +250,11 @@ namespace rpc
     expect<void> raise_abort_process() noexcept;
 
     /*!
-      Retrieve exchange rates, if enabled and past cache interval. Not
-      thread-safe (this can be invoked from one thread only, but this is
-      thread-safe with `client::get_rates()`). All clients will see new rates
-      immediately.
+      Retrieve exchange rates, if enabled. Thread-safe. All clients will see
+      new rates once completed.
 
-      \return Rates iff they were updated.
-    */
-    expect<boost::optional<lws::rates>> retrieve_rates();
+      \return `success()` if HTTP GET was queued. */
+    expect<void> retrieve_rates_async(boost::asio::io_context& io);
   };
 } // rpc
 } // lws

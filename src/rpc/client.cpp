@@ -42,7 +42,7 @@
 #include "net/zmq_async.h"
 #include "scanner.h"
 #include "serialization/json_object.h" // monero/src
-#include "wire/msgpack.h"
+#include "wire/json/write.h"
 #if MLWS_RMQ_ENABLED
   #include <amqp.h>
   #include <amqp_tcp_socket.h>
@@ -50,6 +50,15 @@
 
 namespace lws
 {
+  // Not in `rates.h` - defaulting to JSON output seems odd
+  std::ostream& operator<<(std::ostream& out, lws::rates const& src)
+  {
+    wire::json_stream_writer dest{out};
+    lws::write_bytes(dest, src);
+    dest.finish();
+    return out;
+  }
+
 namespace rpc
 {
   namespace http = epee::net_utils::http;
@@ -194,17 +203,16 @@ namespace rpc
         , rmq(std::move(rmq))
         , daemon_addr(std::move(daemon_addr))
         , sub_addr(std::move(sub_addr))
-        , rates_conn()
+        , rates_conn(epee::net_utils::ssl_verification_t::system_ca)
         , cache_time()
         , cache_interval(interval)
         , cached{}
-        , account_counter(0)
         , sync_pub()
         , sync_rates()
         , untrusted_daemon(untrusted_daemon)
+        , rates_running()
       {
-        if (std::chrono::minutes{0} < cache_interval)
-          rates_conn.set_server(crypto_compare.host, boost::none, epee::net_utils::ssl_support_t::e_ssl_support_enabled);
+        rates_running.clear();
       }
 
       zcontext comm;
@@ -213,14 +221,14 @@ namespace rpc
       rcontext rmq;
       const std::string daemon_addr;
       const std::string sub_addr;
-      http::http_simple_client rates_conn;
+      net::http::client rates_conn;
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
       rates cached;
-      std::atomic<unsigned> account_counter;
       boost::mutex sync_pub;
       boost::mutex sync_rates;
       const bool untrusted_daemon;
+      std::atomic_flag rates_running;
     };
   } // detail
 
@@ -597,37 +605,44 @@ namespace rpc
     return do_signal(ctx->signal_pub.get(), abort_process_signal);
   }
 
-  expect<boost::optional<lws::rates>> context::retrieve_rates()
+  expect<void> context::retrieve_rates_async(boost::asio::io_context& io)
   {
     MONERO_PRECOND(ctx != nullptr);
 
     if (ctx->cache_interval <= std::chrono::minutes{0})
-      return boost::make_optional(false, ctx->cached);
+      return success();
 
-    const auto now = std::chrono::steady_clock::now();
-    if (now - ctx->cache_time < ctx->cache_interval)
-      return boost::make_optional(false, ctx->cached);
+    if (ctx->rates_running.test_and_set())
+      return success();
 
-    expect<rates> fresh{lws::error::exchange_rates_fetch};
+    auto& self = ctx;
+    const expect<void> rc = ctx->rates_conn.get_async(
+      io, crypto_compare.url, [self] (boost::system::error_code error, std::string body)
+      {
+        expect<rates> fresh{lws::error::exchange_rates_fetch};
+        if (!error)
+        {
+          fresh = crypto_compare(std::move(body));
+          if (fresh)
+            MINFO("Updated exchange rates: " << *fresh);
+          else
+            MERROR("Failed to parse exchange rates: " << fresh.error());
+        }
+        else
+          MERROR("Failed to retrieve exchange rates: " << error.message());
 
-    const http::http_response_info* info = nullptr;
-    const bool retrieved =
-      ctx->rates_conn.invoke_get(crypto_compare.path, std::chrono::seconds{20}, std::string{}, std::addressof(info)) &&
-      info != nullptr &&
-      info->m_response_code == 200;
-
-    // \TODO Remove copy below
-    if (retrieved)
-      fresh = crypto_compare(std::string{info->m_body});
-
-    const boost::unique_lock<boost::mutex> lock{ctx->sync_rates};
-    ctx->cache_time = now;
-    if (fresh)
-    {
-      ctx->cached = *fresh;
-      return boost::make_optional(*fresh);
-    }
-    return fresh.error();
+        const auto now = std::chrono::steady_clock::now();
+        if (fresh)
+        {
+          const boost::lock_guard<boost::mutex> lock{self->sync_rates};
+          self->cache_time = now;
+          self->cached = std::move(*fresh);
+        }
+        self->rates_running.clear();
+      });
+    if (!rc)
+      ctx->rates_running.clear();
+    return rc;
   }
 } // rpc
 } // lws
