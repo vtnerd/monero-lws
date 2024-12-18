@@ -1337,7 +1337,7 @@ namespace lws
         const expect<void> status = ctx_.retrieve_rates_async(io_);
         if (!status)
           MERROR("Unable to retrieve exchange rates: " << status.error());
-        rate_timer_.expires_from_now(rate_interval_);
+        rate_timer_.expires_after(rate_interval_);
         rate_timer_.async_wait(*this);
       }
 
@@ -1382,7 +1382,7 @@ namespace lws
         MINFO("No active accounts");
 
         boost::asio::steady_timer poll{sync_.io_};
-        poll.expires_from_now(rpc::scanner::account_poll_interval);
+        poll.expires_after(rpc::scanner::account_poll_interval);
         const auto ready = poll.async_wait(boost::asio::use_future);
 
         /* The exchange rates timer could run while waiting, so ensure that
