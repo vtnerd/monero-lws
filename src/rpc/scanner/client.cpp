@@ -121,7 +121,7 @@ namespace lws { namespace rpc { namespace scanner
         for (;;)
         {
           MINFO("Attempting connection to " << self_->server_address_);
-          self_->connect_timer_.expires_from_now(connect_timeout);
+          self_->connect_timer_.expires_after(connect_timeout);
           self_->connect_timer_.async_wait(
             boost::asio::bind_executor(self_->strand_, close{self_})
           );
@@ -139,7 +139,7 @@ namespace lws { namespace rpc { namespace scanner
             break;
 
           MINFO("Retrying connection in " << std::chrono::seconds{reconnect_interval}.count() << " seconds"); 
-          self_->connect_timer_.expires_from_now(reconnect_interval);
+          self_->connect_timer_.expires_after(reconnect_interval);
           BOOST_ASIO_CORO_YIELD self_->connect_timer_.async_wait(
             boost::asio::bind_executor(self_->strand_, *this)
           );

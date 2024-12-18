@@ -203,7 +203,7 @@ namespace lws { namespace rpc { namespace scanner
         return;
 
       assert(self_->strand_.running_in_this_thread());
-      self_->check_timer_.expires_from_now(account_poll_interval);
+      self_->check_timer_.expires_after(account_poll_interval);
       self_->check_timer_.async_wait(boost::asio::bind_executor(self_->strand_, *this));
 
       std::size_t total_threads = self_->local_.size();
@@ -422,7 +422,7 @@ namespace lws { namespace rpc { namespace scanner
 
     MDEBUG("Stopping rpc::scanner::server async operations");
     boost::system::error_code error{};
-    check_timer_.cancel(error);
+    check_timer_.cancel();
     acceptor_.cancel(error);
     acceptor_.close(error);
 
@@ -454,7 +454,7 @@ namespace lws { namespace rpc { namespace scanner
       }
     }
     return boost::asio::ip::tcp::endpoint{
-      boost::asio::ip::address::from_string(host), boost::lexical_cast<unsigned short>(port)
+      boost::asio::ip::make_address(host), boost::lexical_cast<unsigned short>(port)
     };
   }
 

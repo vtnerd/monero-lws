@@ -19,6 +19,7 @@ jobs:
   build-tests:
     runs-on: ${{matrix.os}}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04, ubuntu-22.04, ubuntu-20.04, macos-latest, macos-14, macos-13]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]

@@ -118,7 +118,7 @@ namespace lws { namespace rpc { namespace scanner
       {
         while (!self_->write_bufs_.empty())
         {
-          self_->write_timeout_.expires_from_now(std::chrono::seconds{10});
+          self_->write_timeout_.expires_after(std::chrono::seconds{10});
           self_->write_timeout_.async_wait(boost::asio::bind_executor(self_->strand_, timeout<T>{self_}));
           BOOST_ASIO_CORO_YIELD boost::asio::async_write(
             self_->sock_, self_->write_buffer(), boost::asio::bind_executor(self_->strand_, *this)
@@ -189,6 +189,17 @@ namespace lws { namespace rpc { namespace scanner
       queue_slice(const queue_slice& rhs)
         : self_(rhs.self_), msg_(rhs.msg_.clone())
       {}
+
+      queue_slice& operator=(queue_slice&&) = default;
+      queue_slice& operator=(const queue_slice& rhs)
+      {
+        if (this != std::addressof(rhs))
+        {
+          self_ = rhs.self_;
+          msg_ = rhs.msg_.clone();
+        }
+        return *this;
+      }
 
       void operator()()
       {

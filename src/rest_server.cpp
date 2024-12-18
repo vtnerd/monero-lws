@@ -377,7 +377,7 @@ namespace lws
             {
               std::shared_ptr<frame> self_;
 
-              void operator()(boost::system::error_code error) const
+              void operator()(const boost::system::error_code error) const
               {
                 if (!self_ || error == boost::asio::error::operation_aborted)
                   return;
@@ -385,7 +385,7 @@ namespace lws
                 assert(self_->strand.running_in_this_thread());
                 MWARNING("Timeout on /daemon_status ZMQ call");
                 self_->client.close = true;
-                self_->client.asock->cancel(error);
+                self_->client.asock->cancel();
               }
             };
 
@@ -420,7 +420,7 @@ namespace lws
                 self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
-              if (!self.timer.cancel(error))
+              if (!self.timer.cancel())
                 return send_response(boost::asio::error::operation_aborted, json_response(async_response{}));
 
               {
@@ -838,7 +838,7 @@ namespace lws
                 net::zmq::async_read(self_->client, in, yield[error]);
                 if (error)
                   return send_response(error, async_ready());
-                if (!self_->timer.cancel(error))
+                if (!self_->timer.cancel())
                   return send_response(boost::asio::error::operation_aborted, async_ready());
 
                 histogram_rpc::Response histogram_resp{};
@@ -884,7 +884,7 @@ namespace lws
                 net::zmq::async_read(self_->client, in, yield[error]);
                 if (error)
                   return send_response(error, async_ready());
-                if (!self_->timer.cancel(error))
+                if (!self_->timer.cancel())
                   return send_response(boost::asio::error::operation_aborted, async_ready());
 
                 distribution_rpc::Response distribution_resp{};
@@ -952,7 +952,7 @@ namespace lws
                     MERROR("Internal ZMQ error in /get_random_outs: " << error.message());
                     return {error::daemon_timeout};
                   }
-                  if (!self_.self_->timer.cancel(error))
+                  if (!self_.self_->timer.cancel())
                     return {error::daemon_timeout};
 
                   get_keys_rpc::Response keys_resp{};
@@ -1233,7 +1233,7 @@ namespace lws
                 self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
               );
 
-              if (!self.timer.cancel(error))
+              if (!self.timer.cancel())
                 return send_response(boost::asio::error::operation_aborted, default_response{});
 
               {
@@ -1579,7 +1579,7 @@ namespace lws
                   self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
                 );
 
-                if (!self.timer.cancel(error))
+                if (!self.timer.cancel())
                   return send_response(boost::asio::error::operation_aborted, async_ready());
 
                 {
@@ -2021,7 +2021,7 @@ namespace lws
       boost::system::error_code ec{};
       MDEBUG("Shutting down REST socket to " << this);
       sock().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
-      timer_.cancel(ec);
+      timer_.cancel();
     }
   };
 
@@ -2150,7 +2150,7 @@ namespace lws
           );
 
           // async_response will have its own timeouts set in handlers if async
-          if (!self.timer_.cancel(error))
+          if (!self.timer_.cancel())
             return self.shutdown();
 
           /* async_response flow has MDEBUG statements for outgoing messages.
@@ -2249,8 +2249,7 @@ namespace lws
       if (!https)
       {
         boost::system::error_code error{};
-        const boost::asio::ip::address ip_host =
-          ip_host.from_string(url.host, error);
+        const auto ip_host = boost::asio::ip::make_address(url.host, error);
         if (error)
           MONERO_THROW(lws::error::configuration, "Invalid IP address for REST server");
         if (!ip_host.is_loopback() && !config.allow_external)
@@ -2310,7 +2309,7 @@ namespace lws
       ssl_options.auth = std::move(config.auth);
 
       boost::asio::ip::tcp::endpoint endpoint{
-        boost::asio::ip::address::from_string(url.host),
+        boost::asio::ip::make_address(url.host),
         boost::lexical_cast<unsigned short>(url.port)
       };
 
