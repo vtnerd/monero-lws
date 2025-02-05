@@ -61,6 +61,7 @@ namespace lws
     json_rpc,                   //!< Error returned by JSON-RPC server
     max_subaddresses,           //!< Max subaddresses exceeded
     not_enough_mixin,           //!< Not enough outputs to meet mixin count
+    not_enough_amount,          //!< Not enough outputs to meet amount
     signal_abort_process,       //!< In process ZMQ PUB to abort the process was received
     signal_abort_scan,          //!< In process ZMQ PUB to abort the scan was received
     signal_unknown,             //!< An unknown in process ZMQ PUB was received

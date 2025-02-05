@@ -1057,7 +1057,7 @@ namespace lws
         }
 
         if (received < std::uint64_t(req.amount))
-          return {lws::error::account_not_found};
+          return {lws::error::not_enough_amount};
 
         if (rpc->size_scale == 0 || 1024 < rpc->size_scale || rpc->fee_mask == 0)
           return {lws::error::bad_daemon_response};
@@ -1958,7 +1958,7 @@ namespace lws
       MINFO("REST error: " << error.message() << " from " << sock().remote_endpoint(ec) << " / " << this);
 
       assert(strand_.running_in_this_thread());
-      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range)
+      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount)
         return bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
       else if (error == lws::error::account_not_found || error == lws::error::duplicate_request)
         return bad_request(boost::beast::http::status::forbidden, std::forward<F>(resume));
