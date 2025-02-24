@@ -195,7 +195,7 @@ namespace
     EXPECT(
       cryptonote::construct_tx_and_get_tx_key(
         keys, subaddresses, sources, destinations, keys.m_account_address, {}, out.tx, /* 0, */ unused_key,
-        out.additional_keys, true, {rct::RangeProofType::RangeProofBulletproof, 2}, use_view_tag
+        out.additional_keys, true, {rct::RangeProofType::RangeProofPaddedBulletproof, 2}, use_view_tag
       )
     );
 

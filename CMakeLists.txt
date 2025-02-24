@@ -115,16 +115,16 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   usb_LIBRARY
   HIDAPI_INCLUDE_DIR
   HIDAPI_LIBRARY
+  libzmq_INCLUDE_DIRS
   LMDB_INCLUDE
   monero_SOURCE_DIR
   OPENSSL_INCLUDE_DIR
   OPENSSL_CRYPTO_LIBRARY
   OPENSSL_SSL_LIBRARY
+  pkgcfg_lib_libzmq_zmq
   sodium_LIBRARY_RELEASE
   SODIUM_LIBRARY
   UNBOUND_LIBRARIES
-  ZMQ_INCLUDE_PATH
-  ZMQ_LIB
   PGM_LIBRARY
   NORM_LIBRARY
   GSSAPI_LIBRARY
@@ -179,7 +179,8 @@ endif()
 
 set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
 set(LMDB_LIB_PATH "monero::lmdb")
-set(ZMQ_LIB "${monero_ZMQ_LIB}")
+set(ZMQ_INCLUDE_PATH "${libzmq_INCLUDE_DIRS}")
+set(ZMQ_LIB "${monero_pkgcfg_lib_libzmq_zmq}")
 if (monero_SODIUM_LIBRARY)
   set(SODIUM_LIBRARY "${monero_SODIUM_LIBRARY}")
 else ()
