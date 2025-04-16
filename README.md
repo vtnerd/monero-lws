@@ -102,9 +102,13 @@ invokes cmake commands as needed.
     cd monero-lws
     git checkout develop
     mkdir build && cd build
-    cmake -DMONERO_SOURCE_DIR=~/monero -DMONERO_BUILD_DIR=~/monero/build ..
+    cmake -DMONERO_SOURCE_DIR=$HOME/monero -DMONERO_BUILD_DIR=$HOME/monero/build/release ..
     make
     ```
+
+    The `-DMONERO_BUILD_DIR` flag assumes that Monero was built with the environment
+    variable `USE_SINGLE_BUILDDIR=1` set. If this is not the case, adjust the path
+    as necessary.
 
     *Optional*: If your machine has several cores and enough memory, enable
     parallel build by running `make -j<number of threads>` instead of `make`. For
