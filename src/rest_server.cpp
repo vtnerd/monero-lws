@@ -27,6 +27,7 @@
 #include "rest_server.h"
 
 #include <algorithm>
+#include <boost/asio/ip/address.hpp>
 #include <boost/range/counting_range.hpp>
 #include <boost/thread/tss.hpp>
 #include <boost/utility/string_ref.hpp>
@@ -1017,7 +1018,7 @@ namespace lws
     boost::optional<std::string> admin_prefix;
     runtime_options options;
 
-    explicit internal(boost::asio::io_service& io_service, lws::db::storage disk, rpc::client client, runtime_options options)
+    explicit internal(boost::asio::io_context& io_service, lws::db::storage disk, rpc::client client, runtime_options options)
       : lws::http_server_impl_base<rest_server::internal, context>(io_service)
       , disk(std::move(disk))
       , client(std::move(client))
@@ -1158,7 +1159,7 @@ namespace lws
       {
         boost::system::error_code error{};
         const boost::asio::ip::address ip_host =
-          ip_host.from_string(url.host, error);
+          boost::asio::ip::make_address(url.host, error);
         if (error)
           MONERO_THROW(lws::error::configuration, "Invalid IP address for REST server");
         if (!ip_host.is_loopback() && !config.allow_external)

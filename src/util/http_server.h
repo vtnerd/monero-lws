@@ -49,7 +49,7 @@ namespace lws
         : m_net_server(epee::net_utils::e_connection_type_RPC)
     {}
 
-    explicit http_server_impl_base(boost::asio::io_service& external_io_service)
+    explicit http_server_impl_base(boost::asio::io_context& external_io_service)
       : m_net_server(external_io_service, epee::net_utils::e_connection_type_RPC)
     {}
 
