@@ -1,8 +1,8 @@
 # Initial base from https://github.com/sethforprivacy/monero-lws/blob/588c7f1965d3afbda8a65dc870645650e063e897/Dockerfile
 
 # Set monerod version to install from github
-ARG MONERO_BRANCH=v0.18.3.3
-ARG MONERO_COMMIT_HASH=81d4db08eb75ce5392c65ca6571e7b08e41b7c95
+ARG MONERO_BRANCH=v0.18.3.4
+ARG MONERO_COMMIT_HASH=b089f9ee69924882c5d14dd1a6991deb05d9d1cd
 
 # Select ubuntu:20.04 for the build image base
 FROM ubuntu:20.04 as build
@@ -52,22 +52,22 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_4_8/expat-2.4.8.tar.bz2 && \
-    echo "a247a7f6bbb21cf2ca81ea4cbb916bfb9717ca523631675f99b3d4a5678dcd16  expat-2.4.8.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.4.8.tar.bz2 && \
-    rm expat-2.4.8.tar.bz2 && \
-    cd expat-2.4.8 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_6_3/expat-2.6.3.tar.bz2 && \
+    echo "b8baef92f328eebcf731f4d18103951c61fa8c8ec21d5ff4202fb6f2198aeb2d  expat-2.6.3.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.6.3.tar.bz2 && \
+    rm expat-2.6.3.tar.bz2 && \
+    cd expat-2.6.3 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.16.1.tar.gz && \
-    echo "2fe4762abccd564a0738d5d502f57ead273e681e92d50d7fba32d11103174e9a  unbound-1.16.1.tar.gz" | sha256sum -c && \
-    tar -xzf unbound-1.16.1.tar.gz && \
-    rm unbound-1.16.1.tar.gz && \
-    cd unbound-1.16.1 && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.22.0.tar.gz && \
+    echo "c5dd1bdef5d5685b2cedb749158dd152c52d44f65529a34ac15cd88d4b1b3d43  unbound-1.22.0.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.22.0.tar.gz && \
+    rm unbound-1.22.0.tar.gz && \
+    cd unbound-1.22.0 && \
     ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install

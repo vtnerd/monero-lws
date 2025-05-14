@@ -32,6 +32,7 @@ project(monero-lws)
 enable_language(CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_definitions(-DBOOST_UUID_DISABLE_ALIGNMENT) # This restores UUID's std::has_unique_object_representations property
 
 option(BUILD_TESTS "Build Tests" OFF)
 option(WITH_RMQ "Build with RMQ publish support" OFF)

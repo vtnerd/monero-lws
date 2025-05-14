@@ -29,6 +29,7 @@ namespace lmdb
         return {lmdb::error(MDB_BAD_VALSIZE)};
 
       key_type out;
+      static_assert(std::is_trivially_copyable<key_type>(), "key_type is not memcpyable");
       std::memcpy(std::addressof(out), static_cast<char*>(key.mv_data), sizeof(out));
       return out;
     }
@@ -66,7 +67,7 @@ namespace lmdb
     static expect<F> get_fixed_value(MDB_val value) noexcept
     {
       static_assert(std::is_same<U, V1>(), "bad MONERO_FIELD?");
-      static_assert(std::is_pod<F>(), "F must be POD");
+      static_assert(std::is_trivially_copyable<F>(), "F must be memcpyable");
       static_assert(sizeof(F) + offset <= sizeof(U), "bad field type and/or offset");
 
       if (value.mv_size < sizeof(U))
@@ -79,6 +80,11 @@ namespace lmdb
 
     static expect<value_type> get_value(MDB_val value) noexcept
     {
+      static_assert(
+        std::is_trivially_copyable<fixed_value_type>(),
+        "fixed_value_type must be memcpyable"
+      );
+
       if (value.mv_size < sizeof(fixed_value_type))
         return {lmdb::error(MDB_BAD_VALSIZE)};
       std::pair<fixed_value_type, msgpack_value_type> out;
@@ -134,4 +140,4 @@ namespace lmdb
       return out;
     }
   };
-} // lmdb
+} // lws_lmdb

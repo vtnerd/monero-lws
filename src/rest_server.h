@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <cstddef>
 #include <list>
 #include <string>
@@ -44,7 +44,7 @@ namespace lws
   {
     struct internal;
     
-    boost::asio::io_service io_service_;
+    boost::asio::io_context io_service_;
     std::list<internal> ports_;
     
   public:
