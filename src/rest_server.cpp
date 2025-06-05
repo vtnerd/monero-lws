@@ -993,7 +993,18 @@ namespace lws
         lock.unlock();
 
         MDEBUG("Starting new ZMQ coroutine in /get_random_outs");
+#if BOOST_VERSION >= 108000
+        {
+          auto token = [] (const std::exception_ptr& e)
+          {
+            if (e)
+              std::rethrow_exception(e);
+          };
+          boost::asio::spawn(active->strand, async_handler{active}, std::move(token));
+        }
+#else
         boost::asio::spawn(active->strand, async_handler{active});
+#endif
         return success();
       }
     };
