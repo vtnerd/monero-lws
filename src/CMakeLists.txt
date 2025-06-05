@@ -56,6 +56,7 @@ target_link_libraries(monero-lws-daemon-common
     monero-lws-wire-json
     monero-lws-util
     ${Boost_CHRONO_LIBRARY}
+    ${Boost_CONTEXT_LIBRARY}
     ${Boost_COROUTINE_LIBRARY}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
