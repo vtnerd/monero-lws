@@ -234,7 +234,7 @@ namespace rpc
   struct submit_raw_tx_response
   {
     submit_raw_tx_response() = delete;
-    const char* status;
+    std::string status;
   };
   void write_bytes(wire::json_writer&, submit_raw_tx_response);
 
