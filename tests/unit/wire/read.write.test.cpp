@@ -191,9 +191,9 @@ namespace
     SETUP("Testing round-trip with " + std::to_string(value))
     {
       epee::byte_slice bytes{};
-      EXPECT(!T::template to_bytes(bytes, big{value}));
+      EXPECT(!T::to_bytes(bytes, big{value}));
       const std::error_code error =
-        T::template from_bytes(U{std::string{bytes.begin(), bytes.end()}}, out);
+        T::from_bytes(U{std::string{bytes.begin(), bytes.end()}}, out);
       if (error)
         return error;
     }
