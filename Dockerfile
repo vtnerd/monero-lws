@@ -134,5 +134,4 @@ COPY --chown=monero-lws:monero-lws --from=build /monero-lws/build/src/* /usr/loc
 # Expose REST server port
 EXPOSE 8443
 
-ENTRYPOINT ["monero-lws-daemon", "--db-path=/home/monero-lws/.bitmonero/light_wallet_server"]
-CMD ["--daemon=tcp://monerod:18082", "--sub=tcp://monerod:18083", "--log-level=4"]
+ENTRYPOINT ["monero-lws-daemon"]
