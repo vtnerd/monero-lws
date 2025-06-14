@@ -317,7 +317,8 @@ namespace lws
       WIRE_FIELD_COPY(per_byte_fee),
       WIRE_FIELD_COPY(fee_mask),
       WIRE_FIELD_COPY(amount),
-      wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand)))
+      wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand))),
+      WIRE_FIELD(fees)
     );
   }
 
