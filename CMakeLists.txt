@@ -178,6 +178,13 @@ set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
 set(LMDB_LIB_PATH "monero::lmdb")
 set(ZMQ_LIB "${monero_ZMQ_LIB}")
 
+# Ubuntu 22.04 calls this protokit instead of protolib
+find_library(PROTOKIT_LIBRARY protokit)
+
+# Ubuntu 22.04 needs these for static builds
+find_library(BSD_LIBRARY bsd)
+find_library(MD_LIBRARY md)
+
 if(NOT ZMQ_LIB)
   message(FATAL_ERROR "Could not find required libzmq")
 endif()
@@ -195,6 +202,15 @@ if(monero_PROTOLIB_LIBRARY)
 endif()
 if(monero_SODIUM_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
+endif()
+if (PROTOKIT_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${PROTOKIT_LIBRARY}")
+endif()
+if (BSD_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${BSD_LIBRARY}")
+endif()
+if (MD_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${MD_LIBRARY}")
 endif()
 
 if(STATIC AND NOT IOS)
