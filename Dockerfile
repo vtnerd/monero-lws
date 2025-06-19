@@ -19,9 +19,7 @@ RUN apt-get install --no-install-recommends -y \
     cmake \
     git \
     libboost-all-dev \
-    libexpat1-dev \
     libldns-dev \
-    liblzma-dev \
     libnorm-dev \
     libpgm-dev \
     libsodium-dev \
@@ -110,7 +108,6 @@ RUN apt-get update \
 # Install necessary dependencies
 RUN apt-get install --no-install-recommends -y \
     ca-certificates \
-    jq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -122,7 +119,8 @@ USER monero-lws
 
 # Switch to home directory and install newly built monero-lws binary
 WORKDIR /home/monero-lws
-COPY --chown=monero-lws:monero-lws --from=build /monero-lws/build/src/* /usr/local/bin/
+COPY --chown=monero-lws:monero-lws --from=build /monero-lws/build/src/monero-lws-daemon /usr/local/bin/
+COPY --chown=monero-lws:monero-lws --from=build /monero-lws/build/src/monero-lws-admin /usr/local/bin/
 
 # Expose REST server port
 EXPOSE 8443
