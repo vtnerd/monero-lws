@@ -119,7 +119,7 @@ namespace lws
         sync()
     {}
 
-    expect<net::zmq::async_client> get_async_client(boost::asio::io_context& io)
+    expect<net::zmq::async_client> get_async_client()
     {
       boost::unique_lock<boost::mutex> lock{sync};
       if (!clients.empty())
@@ -146,11 +146,29 @@ namespace lws
     constexpr const std::size_t http_parser_buffer_size = 16 * 1024;
     constexpr const std::chrono::seconds zmq_reconnect_backoff{10};
     constexpr const std::chrono::seconds rest_handshake_timeout{5};
-    constexpr const std::chrono::seconds rest_request_timeout{5};
+    constexpr const std::chrono::seconds rest_request_timeout_initial{5};
+    constexpr const std::chrono::minutes rest_request_timeout_login{5};
     constexpr const std::chrono::seconds rest_response_timeout{15};
 
     //! `/daemon_status` and `get_unspent_outs` caches ZMQ result for this long
     constexpr const std::chrono::seconds daemon_cache_timeout{5};
+
+    struct connection_data
+    {
+      rest_server_data* const global; //!< Valid for lifetime of server
+      bool passed_login; //!< True iff a login via viewkey was successful
+
+      explicit connection_data(rest_server_data* global) noexcept
+        : global(global), passed_login(false)
+      {}
+
+      //! \return Next request timeout, based on login status
+      std::chrono::seconds get_request_timeout() const noexcept
+      {
+        return passed_login ?
+          rest_request_timeout_login : rest_request_timeout_initial;
+      }
+    };
 
     struct copyable_slice
     {
@@ -277,7 +295,7 @@ namespace lws
       using response = epee::byte_slice; // sometimes async
       using async_response = rpc::daemon_status_response;
 
-      static expect<response> handle(const request&, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(const request&, const connection_data& data, std::function<async_complete>&& resume)
       {
         using info_rpc = cryptonote::rpc::GetInfo;
 
@@ -450,11 +468,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(data.io);
+        expect<net::zmq::async_client> client = data.global->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, std::move(*client));
+        active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.result = nullptr;
         cache.status = active;
         active->resumers.push_back(std::move(resume));
@@ -471,12 +489,13 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_address_info_response;
 
-      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.disk.clone());
+        auto user = open_account(req, data.global->disk.clone());
         if (!user)
           return user.error();
 
+        data.passed_login = true;
         response resp{};
 
         auto outputs = user->second.get_outputs(user->first.id);
@@ -532,7 +551,7 @@ namespace lws
         }
 
         // `get_rates()` nevers does I/O, so handler can remain synchronous
-        resp.rates = data.client.get_rates();
+        resp.rates = data.global->client.get_rates();
         if (!resp.rates && !rates_error_once.test_and_set(std::memory_order_relaxed))
           MWARNING("Unable to retrieve exchange rates: " << resp.rates.error().message());
 
@@ -545,12 +564,13 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_address_txs_response;
 
-      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.disk.clone());
+        auto user = open_account(req, data.global->disk.clone());
         if (!user)
           return user.error();
 
+        data.passed_login = true;
         auto outputs = user->second.get_outputs(user->first.id);
         if (!outputs)
           return outputs.error();
@@ -669,7 +689,7 @@ namespace lws
       using response = void; // always asynchronous response
       using async_response = rpc::get_random_outs_response;
 
-      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request req, const connection_data& data,  std::function<async_complete>&& resume)
       {
         using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
         using histogram_rpc = cryptonote::rpc::GetOutputHistogram;
@@ -982,11 +1002,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(data.io);
+        expect<net::zmq::async_client> client = data.global->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, std::move(*client));
+        active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.status = active;
 
         active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1014,11 +1034,13 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::get_subaddrs_response;
 
-      static expect<response> handle(request const& req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request const& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.disk.clone());
+        auto user = open_account(req, data.global->disk.clone());
         if (!user)
           return user.error();
+
+        data.passed_login = true;
         auto subaddrs = user->second.get_subaddresses(user->first.id);
         if (!subaddrs)
           return subaddrs.error();
@@ -1093,7 +1115,7 @@ namespace lws
         );
       }
 
-      static expect<response> handle(request&& req, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request&& req, connection_data& data, std::function<async_complete>&& resume)
       {
         struct frame
         {
@@ -1139,7 +1161,7 @@ namespace lws
         {
           rpc_command::Response result = cache.result;
           lock.unlock();
-          return generate_response(std::move(req), std::move(result), data.disk.clone());
+          return generate_response(std::move(req), std::move(result), data.global->disk.clone());
         }
 
         auto active = cache.status.lock();
@@ -1259,11 +1281,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(data.io);
+        expect<net::zmq::async_client> client = data.global->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, std::move(*client));
+        active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.result = rpc_command::Response{};
         cache.status = active;
         active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1280,15 +1302,16 @@ namespace lws
       using request = rpc::account_credentials;
       using response = rpc::import_response;
 
-      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
         bool new_request = false;
         bool fulfilled = false;
         {
-          auto user = open_account(req, data.disk.clone());
+          auto user = open_account(req, data.global->disk.clone());
           if (!user)
             return user.error();
 
+          data.passed_login = true;
           if (user->first.start_height == db::block_id(0))
             fulfilled = true;
           else
@@ -1307,7 +1330,7 @@ namespace lws
         } // close reader
 
         if (new_request)
-          MONERO_CHECK(data.disk.clone().import_request(req.address, db::block_id(0)));
+          MONERO_CHECK(data.global->disk.clone().import_request(req.address, db::block_id(0)));
 
         const char* status = new_request ?
           "Accepted, waiting for approval" : (fulfilled ? "Approved" : "Waiting for Approval");
@@ -1320,12 +1343,12 @@ namespace lws
       using request = rpc::login_request;
       using response = rpc::login_response;
 
-      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
 
-        auto disk = data.disk.clone();
+        auto disk = data.global->disk.clone();
         {
           auto reader = disk.start_read();
           if (!reader)
@@ -1340,6 +1363,7 @@ namespace lws
               return {lws::error::account_not_found};
 
             // Do not count a request for account creation as login
+            data.passed_login = true;
             return response{false, bool(account->second.flags & db::account_generated_locally)};
           }
           else if (!req.create_account || account != lws::error::account_not_found)
@@ -1351,8 +1375,9 @@ namespace lws
         if (!hooks)
           return hooks.error();
 
-        if (data.options.auto_accept_creation)
+        if (data.global->options.auto_accept_creation)
         {
+          data.passed_login = true;
           const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1});
           if (!accepted)
             MERROR("Failed to move account " << db::address_string(req.creds.address) << " to available state: " << accepted.error());
@@ -1364,7 +1389,7 @@ namespace lws
           // log errors when it fails
 
           rpc::send_webhook_async(
-            data.io, data.client, data.webhook_client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:"
+            data.global->io, data.global->client, data.global->webhook_client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:"
           );
         }
 
@@ -1377,19 +1402,20 @@ namespace lws
       using request = rpc::provision_subaddrs_request;
       using response = rpc::new_subaddrs_response;
 
-      static expect<response> handle(const request& req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
         if (!req.maj_i && !req.min_i && !req.n_min && !req.n_maj)
           return {lws::error::invalid_range};
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.disk.clone());
+          auto user = open_account(req.creds, data.global->disk.clone());
           if (!user)
             return user.error();
           id = user->first.id;
         }
 
+        data.passed_login = true;
         const std::uint32_t major_i = req.maj_i.value_or(0);
         const std::uint32_t minor_i = req.min_i.value_or(0);
         const std::uint32_t n_major = req.n_maj.value_or(50);
@@ -1402,7 +1428,7 @@ namespace lws
         {
           if (std::numeric_limits<std::uint32_t>::max() / n_major < n_minor)
             return {lws::error::max_subaddresses};
-          if (data.options.max_subaddresses < n_major * n_minor)
+          if (data.global->options.max_subaddresses < n_major * n_minor)
             return {lws::error::max_subaddresses};
 
           std::vector<db::subaddress_dict> ranges;
@@ -1413,7 +1439,7 @@ namespace lws
               db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
-          auto upserted = data.disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.options.max_subaddresses);
+          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global->options.max_subaddresses);
           if (!upserted)
             return upserted.error();
           new_ranges = std::move(*upserted);
@@ -1422,7 +1448,7 @@ namespace lws
         if (get_all)
         {
           // must start a new read after the last write
-          auto disk = data.disk.clone();
+          auto disk = data.global->disk.clone();
           auto reader = disk.start_read();
           if (!reader)
             return reader.error();
@@ -1441,7 +1467,7 @@ namespace lws
       using response = void; // always async
       using async_response = rpc::submit_raw_tx_response;
 
-      static expect<response> handle(request req, rest_server_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request req, const connection_data& data, std::function<async_complete>&& resume)
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
@@ -1610,11 +1636,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.get_async_client(data.io);
+        expect<net::zmq::async_client> client = data.global->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(data, std::move(*client));
+        active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.status = active;
 
         active->resumers.emplace_back(std::move(msg), std::move(resume));
@@ -1631,31 +1657,32 @@ namespace lws
       using request = rpc::upsert_subaddrs_request;
       using response = rpc::new_subaddrs_response;
 
-      static expect<response> handle(request req, const rest_server_data& data, std::function<async_complete>&&)
+      static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!data.options.max_subaddresses)
+        if (!data.global->options.max_subaddresses)
           return {lws::error::max_subaddresses};
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.disk.clone());
+          auto user = open_account(req.creds, data.global->disk.clone());
           if (!user)
             return user.error();
           id = user->first.id;
         }
 
+        data.passed_login = true;
         const bool get_all = req.get_all.value_or(true);
 
         std::vector<db::subaddress_dict> all_ranges;
-        auto disk = data.disk.clone();
+        auto disk = data.global->disk.clone();
         auto new_ranges =
-          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.options.max_subaddresses);
+          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global->options.max_subaddresses);
         if (!new_ranges)
           return new_ranges.error();
 
         if (get_all)
         {
-          auto reader = disk.start_read();
+          auto reader = data.global->disk.start_read();
           if (!reader)
             return reader.error();
           auto rc = reader->get_subaddresses(id);
@@ -1668,7 +1695,7 @@ namespace lws
     };
 
     template<typename E>
-    expect<epee::byte_slice> call(std::string&& root, rest_server_data& data, std::function<async_complete>&& resume)
+    expect<epee::byte_slice> call(std::string&& root, connection_data& data, std::function<async_complete>&& resume)
     {
       using request = typename E::request;
       using response = typename E::response;
@@ -1708,7 +1735,7 @@ namespace lws
     }
 
     template<typename E>
-    expect<epee::byte_slice> call_admin(std::string&& root, rest_server_data& data, std::function<async_complete>&&)
+    expect<epee::byte_slice> call_admin(std::string&& root, connection_data& data, std::function<async_complete>&&)
     {
       using request = typename E::request;
       
@@ -1719,8 +1746,8 @@ namespace lws
           return error;
       }
 
-      db::storage disk = data.disk.clone();
-      if (!data.options.disable_admin_auth)
+      db::storage disk = data.global->disk.clone();
+      if (!data.global->options.disable_admin_auth)
       {
         if (!req.auth)
           return {error::account_not_found};
@@ -1749,7 +1776,7 @@ namespace lws
     struct endpoint
     {
       char const* const name;
-      expect<epee::byte_slice> (*const run)(std::string&&, rest_server_data&, std::function<async_complete>&&);
+      expect<epee::byte_slice> (*const run)(std::string&&, connection_data&, std::function<async_complete>&&);
       const unsigned max_size;
       const bool is_async;
     };
@@ -1904,8 +1931,8 @@ namespace lws
   template<typename Sock>
   struct rest_server::connection
   {
-    rest_server_data* global_;
     internal* parent_;
+    connection_data data_;
     Sock sock_;
     boost::beast::flat_static_buffer<http_parser_buffer_size> buffer_;
     boost::optional<boost::beast::http::parser<true, boost::beast::http::string_body>> parser_;
@@ -1939,8 +1966,8 @@ namespace lws
     boost::asio::ip::tcp::socket& sock() { return get_tcp(sock_); }
 
     explicit connection(rest_server_data* global, internal* parent) noexcept
-      : global_(global),
-        parent_(parent),
+      : parent_(parent),
+        data_(global),
         sock_(make_socket(std::is_same<Sock, boost::asio::ip::tcp::socket>(), global, parent)),
         buffer_{},
         parser_{},
@@ -2110,7 +2137,7 @@ namespace lws
       }
 
       MDEBUG("Running REST handler " << handler->name << " on " << self_.get());
-      auto body = handler->run(std::move(self_->parser_->get()).body(), *self_->global_, std::move(resumer));
+      auto body = handler->run(std::move(self_->parser_->get()).body(), self_->data_, std::move(resumer));
       if (!body)
         return self_->bad_request(body.error(), std::forward<F>(resume));
       else if (!handler->is_async || !body->empty())
@@ -2152,7 +2179,7 @@ namespace lws
           self.parser_.emplace();
           self.parser_->body_limit(max_endpoint_size);
 
-          if (!connection<Sock>::set_timeout(self_, rest_request_timeout, not_first))
+          if (!connection<Sock>::set_timeout(self_, self_->data_.get_request_timeout(), not_first))
             return self.shutdown();
 
           MDEBUG("Reading new REST request from " << self_.get());
