@@ -1,0 +1,3 @@
+[submodule "external/monero"]
+	path = external/monero
+	url = https://github.com/monero-project/monero.git

@@ -14,8 +14,40 @@ env:
         echo "Acquire::Retries \"3\";"         | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
+  BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf unbound'
 
 jobs:
+  build-beginner:
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: set apt conf (Debian base Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: ${{env.APT_SET_CONF}}
+      - name: update apt (Debian based Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt update
+      - name: Install dependencies (Debian based Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: ${{env.APT_INSTALL_LINUX}}
+      - name: Install dependencies (MacOS)
+        if: matrix.os == 'macos-latest'
+        run: ${{env.BREW_INSTALL_MAC}}
+      - name: Checkout LWS Source
+        uses: actions/checkout@v4
+        with:
+          path: ${{github.workspace}}/lws
+          submodules: recursive
+      - name: Configure LWS
+        # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+        # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+        run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/lws
+      - name: Build LWS
+        # Build your program with the given configuration
+        run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
   build-tests:
     runs-on: ${{matrix.os}}
     strategy:
@@ -39,7 +71,7 @@ jobs:
 
     - name: Install dependencies (MacOS)
       if: matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14'
-      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf
+      run: ${{env.BREW_INSTALL_MAC}}
     - name: Install RabbitMQ iff WITH_RMQ (MacOS)
       if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14')
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
