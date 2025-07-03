@@ -41,6 +41,14 @@ if (WITH_RMQ)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMLWS_RMQ_ENABLED")
 endif()
 
+if(STATIC)
+  if(MSVC)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .dll.a .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  else()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  endif()
+endif()
+
 set(MONERO_LIBRARIES
   daemon_messages
   serialization
@@ -64,88 +72,119 @@ set(MONERO_LIBRARIES
   easylogging
   version
   wallet-crypto
-  unbound
 )
 
-set(MONERO_OPTIONAL unbound wallet-crypto)
+set(MONERO_OPTIONAL wallet-crypto)
 
-set(MONERO_SEARCH_PATHS
-  "/contrib/epee/src"
-  "/external/db_drivers/liblmdb"
-  "/external/easylogging++"
-  "/src"
-  "/src/crypto"
-  "/src/crypto/wallet"
-  "/src/cryptonote_basic"
-  "/src/lmdb"
-  "/src/ringct"
-  "/src/rpc"
-)
+if (MONERO_BUILD_DIR)
+
+  set(MONERO_SEARCH_PATHS
+    "/contrib/epee/src"
+    "/external/db_drivers/liblmdb"
+    "/external/easylogging++"
+    "/src"
+    "/src/crypto"
+    "/src/crypto/wallet"
+    "/src/cryptonote_basic"
+    "/src/lmdb"
+    "/src/ringct"
+    "/src/rpc"
+  )
 
 
-#
-# Pull some information from monero build
-#
+  #
+  # Pull some information from monero build
+  #
 
-# Needed due to "bug" in monero CMake - the `project` function is used twice!
-if (NOT MONERO_SOURCE_DIR)
-  message(FATAL_ERROR "The argument -DMONERO_SOURCE_DIR must specify a location of a monero source tree")
-endif()
-
-if (NOT MONERO_BUILD_DIR)
-  message(FATAL_ERROR "The argument -DMONERO_BUILD_DIR must specify a location of an existing monero build")
-endif()
-
-if(STATIC)
-  if(MSVC)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .dll.a .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  else()
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  # Needed due to "bug" in monero CMake - the `project` function is used twice!
+  if (NOT MONERO_SOURCE_DIR)
+    message(FATAL_ERROR "The argument -DMONERO_SOURCE_DIR must specify a location of a monero source tree")
   endif()
-endif()
 
-# monero `master` and `release-v0.18` branches use different LIBSODIUM
-# find routines. So the upstream cmake names differ
+  # monero `master` and `release-v0.18` branches use different LIBSODIUM
+  # find routines. So the upstream cmake names differ
 
-load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
-  Boost_THREAD_LIBRARY_RELEASE
-  CMAKE_CXX_COMPILER
-  EXTRA_LIBRARIES
-  LIBUDEV_LIBRARY
-  usb_LIBRARY
-  HIDAPI_INCLUDE_DIR
-  HIDAPI_LIBRARY
-  libzmq_INCLUDE_DIRS
-  LMDB_INCLUDE
-  monero_SOURCE_DIR
-  OPENSSL_INCLUDE_DIR
-  OPENSSL_CRYPTO_LIBRARY
-  OPENSSL_SSL_LIBRARY
-  pkgcfg_lib_libzmq_zmq
-  sodium_LIBRARY_RELEASE
-  SODIUM_LIBRARY
-  UNBOUND_LIBRARIES
-  PGM_LIBRARY
-  NORM_LIBRARY
-  GSSAPI_LIBRARY
-  PROTOLIB_LIBRARY
-)
+  load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
+    Boost_THREAD_LIBRARY_RELEASE
+    CMAKE_CXX_COMPILER
+    EXTRA_LIBRARIES
+    LIBUDEV_LIBRARY
+    usb_LIBRARY
+    HIDAPI_INCLUDE_DIR
+    HIDAPI_LIBRARY
+    libzmq_INCLUDE_DIRS
+    LMDB_INCLUDE
+    monero_SOURCE_DIR
+    OPENSSL_INCLUDE_DIR
+    OPENSSL_CRYPTO_LIBRARY
+    OPENSSL_SSL_LIBRARY
+    pkgcfg_lib_libzmq_zmq
+    sodium_LIBRARY_RELEASE
+    SODIUM_LIBRARY
+    UNBOUND_LIBRARIES
+    PGM_LIBRARY
+    NORM_LIBRARY
+    GSSAPI_LIBRARY
+    PROTOLIB_LIBRARY
+  )
 
-if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
-  message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
-endif()
+  if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
+    message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
+  endif()
 
-if (NOT (CMAKE_CXX_COMPILER STREQUAL monero_CMAKE_CXX_COMPILER))
-  message(FATAL_ERROR "Compiler for monero build differs from this project")
-endif()
+  if (NOT (CMAKE_CXX_COMPILER STREQUAL monero_CMAKE_CXX_COMPILER))
+    message(FATAL_ERROR "Compiler for monero build differs from this project")
+  endif()
 
-if ("${monero_UNBOUND_LIBRARIES}" STREQUAL "UNBOUND_LIBRARIES-NOTFOUND")
-  unset(monero_UNBOUND_LIBRARIES)
-endif()
+  if ("${monero_UNBOUND_LIBRARIES}" STREQUAL "UNBOUND_LIBRARIES-NOTFOUND")
+    unset(monero_UNBOUND_LIBRARIES)
+  endif()
 
-if ("${monero_HIDAPI_LIBRARY}" STREQUAL "HIDAPI_LIBRARY-NOTFOUND")
-  unset(monero_HIDAPI_INCLUDE_DIR)
-  unset(monero_HIDAPI_LIBRARY)
+  if ("${monero_HIDAPI_LIBRARY}" STREQUAL "HIDAPI_LIBRARY-NOTFOUND")
+    unset(monero_HIDAPI_INCLUDE_DIR)
+    unset(monero_HIDAPI_LIBRARY)
+  endif()
+
+  foreach (LIB ${MONERO_LIBRARIES})
+    find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
+
+    list(FIND MONERO_OPTIONAL "${LIB}" LIB_OPTIONAL)
+    if (NOT LIB_PATH)
+      if (LIB_OPTIONAL EQUAL -1)
+        message(FATAL_ERROR "Unable to find required Monero library ${LIB}")
+      endif()
+    else ()
+      set(LIB_NAME "monero::${LIB}")
+      add_library(${LIB_NAME} STATIC IMPORTED)
+      set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
+      list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
+    endif()
+    unset(LIB_PATH CACHE)
+  endforeach()
+
+  set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
+  set(LMDB_LIB_PATH "monero::lmdb")
+else () # NOT MONERO_BUILD_DIR
+  if (NOT MONERO_SOURCE_DIR)
+    set (MONERO_SOURCE_DIR "${monero-lws_SOURCE_DIR}/external/monero")
+  endif ()
+
+  include(FetchContent)
+  FetchContent_Declare(monero SOURCE_DIR "${MONERO_SOURCE_DIR}")
+
+  if (NOT monero_POPULATED)
+    FetchContent_MakeAvailable(monero)
+  endif ()
+
+  set(MONERO_BUILD_DIR "${monero_BINARY_DIR}")
+  set(IMPORTED_MONERO_LIBRARIES "${MONERO_LIBRARIES}")
+  set(monero_Boost_THREAD_LIBRARY_RELEASE "${Boost_THREAD_LIBRARY_RELEASE}")
+  set(monero_pkgcfg_lib_libzmq_zmq "${pkgcfg_lib_libzmq_zmq}")
+  if (SODIUM_LIBRARY)
+    set(monero_SODIUM_LIBRARY "${SODIUM_LIBRARY}")
+  else()
+    set(monero_SODIUM_LIBRARY "${monero_sodium_LIBRARY_RELEASE}")
+  endif()
 endif()
 
 #
@@ -177,8 +216,6 @@ else()
   set(RMQ_LIBRARY "")
 endif()
 
-set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
-set(LMDB_LIB_PATH "monero::lmdb")
 set(ZMQ_INCLUDE_PATH "${libzmq_INCLUDE_DIRS}")
 set(ZMQ_LIB "${monero_pkgcfg_lib_libzmq_zmq}")
 if (monero_SODIUM_LIBRARY)
@@ -211,23 +248,6 @@ if(STATIC AND NOT IOS)
     set(monero_OPENSSL_LIBRARIES "${monero_OPENSSL_LIBRARIES};${CMAKE_DL_LIBS};${CMAKE_THREAD_LIBS_INIT}")
   endif()
 endif()
-
-foreach (LIB ${MONERO_LIBRARIES})
-  find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
-
-  list(FIND MONERO_OPTIONAL "${LIB}" LIB_OPTIONAL)
-  if (NOT LIB_PATH)
-    if (LIB_OPTIONAL EQUAL -1)
-      message(FATAL_ERROR "Unable to find required Monero library ${LIB}")
-    endif()
-  else ()
-    set(LIB_NAME "monero::${LIB}")
-    add_library(${LIB_NAME} STATIC IMPORTED)
-    set_target_properties(${LIB_NAME} PROPERTIES IMPORTED_LOCATION ${LIB_PATH})
-    list(APPEND IMPORTED_MONERO_LIBRARIES "${LIB_NAME}")
-  endif()
-  unset(LIB_PATH CACHE)
-endforeach()
 
 if(APPLE)
   find_library(IOKIT_LIBRARY IOKit)
