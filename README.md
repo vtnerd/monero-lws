@@ -11,7 +11,6 @@
   - [About this project](#about-this-project)
   - [License](#license)
   - [Compiling Monero-lws from source](#compiling-monero-lws-from-source)
-    - [Dependencies](#dependencies)
 
 
 ## Introduction
@@ -38,99 +37,79 @@ Differences from [OpenMonero](https://github.com/moneroexamples/openmonero):
   - View keys stored in database - scanning occurs continuously in background
   - Uses ZeroMQ interface to `monerod` with chain subscription ("push") support
   - Uses amd64 ASM acceleration from Monero project, if available
-
+  - Supports webhook notifications, including "0-conf" notification
 
 ## License
 
 See [LICENSE](LICENSE).
 
-
 ## Compiling Monero-lws from source
 
 ### Dependencies
 
-The following table summarizes the tools and libraries required to build. A
-few of the libraries are also included in this repository (marked as
-"Vendored"). By default, the build uses the library installed on the system,
-and ignores the vendored sources. However, if no library is found installed on
-the system, then the vendored source will be built and used. The vendored
-sources are also used for statically-linked builds because distribution
-packages often include only shared library binaries (`.so`) but not static
-library archives (`.a`).
+The first step, when buiding from source, is installing the [dependencies of the
+monero project](https://github.com/monero-project/monero?tab=readme-ov-file#dependencies).
+`monero-lws` depends on the monero project for building, so the dependencies of
+that project become the dependencies of this project transitively. Only the
+"non-vendored" dependencies need to be installed. There are no additional
+dependencies that need installing.
 
-| Dep          | Min. version  | Vendored | Debian/Ubuntu pkg    | Arch pkg     | Void pkg           | Fedora pkg          | Optional | Purpose         |
-| ------------ | ------------- | -------- | -------------------- | ------------ | ------------------ | ------------------- | -------- | --------------- |
-| GCC          | 4.7.3         | NO       | `build-essential`    | `base-devel` | `base-devel`       | `gcc`               | NO       |                 |
-| CMake        | 3.1           | NO       | `cmake`              | `cmake`      | `cmake`            | `cmake`             | NO       |                 |
-| Boost        | 1.70          | NO       | `libboost-all-dev`   | `boost`      | `boost-devel`      | `boost-devel`       | NO       | C++ libraries   |
-| monero       | 0.15          | NO       |                      |              |                    |                     | NO       | Monero libraries|
-| OpenSSL      | basically any | NO       | `libssl-dev`         | `openssl`    | `libressl-devel`   | `openssl-devel`     | NO       | sha256 sum      |
-| libzmq       | 3.0.0         | NO       | `libzmq3-dev`        | `zeromq`     | `zeromq-devel`     | `zeromq-devel`      | NO       | ZeroMQ library  |
-| Doxygen      | any           | NO       | `doxygen`            | `doxygen`    | `doxygen`          | `doxygen`           | YES      | Documentation   |
-| Graphviz     | any           | NO       | `graphviz`           | `graphviz`   | `graphviz`         | `graphviz`          | YES      | Documentation   |
+### Beginner Build
 
-Install all dependencies (except `monero-project/monero`) at once on Debian/Ubuntu:
+The easiest method for building is to use git submodules to pull in the correct
+Monero project dependency:
 
-``` sudo apt update && sudo apt install build-essential cmake libboost-all-dev libssl-dev libzmq3-dev doxygen graphviz```
+```bash
+git clone https://github.com/vtnerd/monero-lws.git
+mkdir monero-lws/build && cd monero-lws/build
+git submodule update --init --recursive
+cmake -DCMAKE_BUILD_TYPE=Release ../
+make -j$(nproc)
+```
 
-FreeBSD 12.1 one-liner required to build dependencies:
-```pkg install git gmake cmake pkgconf boost-libs libzmq4```
+  * On macOS replace `-j$(nproc)` with `-j8` or the number of cores on your
+    system.
+  * Each branch (`master`, and `develop`) should have the correct submodule for
+    building that particular branch.
+  * The `submodule` step is being run inside of the `monero-lws` directory, such
+    that all of vendored dependencies are automatically fetched.
+  * The instructions above will compile the `master` (beta) release of
+    `monero-lws`
+  * The resulting executables can be found in `monero-lws/build/src`
 
-### Cloning the repository
+### Advanced Build
 
-Clone recursively to pull-in needed submodule(s):
+The monero source and build directories can be manually specified, which cuts
+the build time in half and potentially re-uses the same source tree for multiple
+builds. The process for advanced building is:
 
-`$ git clone --recursive https://github.com/vtnerd/monero-lws.git`
+```bash
+git clone https://github.com/monero-project/monero.git
+git clone https://github.com/vtnerd/monero-lws.git
+mkdir monero-lws/build
+mkdir monero/build && cd monero/build
+git submodule update --init --recursive
+cmake -DCMAKE_BUILD_TYPE=Release ../
+make -j$(nproc) daemon multisig lmdb_lib
+cd ../../monero-lws/build
+cmake -DCMAKE_BUILD_TYPE=Relase -DMONERO_SOURCE_DIR=../../monero -DMONERO_BUILD_DIR=../../monero/build ../
+make -j$(nproc)
+```
 
-If you already have a repo cloned, initialize and update:
+The `master`/`develop` branches of lws should compile against the `master`
+branch of monero. The release branches specify which monero branch to compile
+against - `release-v0.3_0.18` indicates that monero `0.18` should be used as
+the source directory. The [beginner build process](#beginner-build) handles all
+of this with git submodules.
 
-`$ cd monero-lws && git submodule init && git submodule update`
-
-### Build instructions
-
-Monero uses the CMake build system and a top-level [Makefile](Makefile) that
-invokes cmake commands as needed.
-
-#### On Linux and macOS
-
-* Install the dependencies. The [`monero`](https://github.com/monero-project/monero)
-  dependency should be cloned and built according to the `README.md` of that
-  project.
-* Change to the root of the source code directory, change to the most recent develop branch, and build:
-
-    ```bash
-    cd monero-lws
-    git checkout develop
-    mkdir build && cd build
-    cmake -DMONERO_SOURCE_DIR=$HOME/monero -DMONERO_BUILD_DIR=$HOME/monero/build/release ..
-    make
-    ```
-
-    The `-DMONERO_BUILD_DIR` flag assumes that Monero was built with the environment
-    variable `USE_SINGLE_BUILDDIR=1` set. If this is not the case, adjust the path
-    as necessary.
-
-    *Optional*: If your machine has several cores and enough memory, enable
-    parallel build by running `make -j<number of threads>` instead of `make`. For
-    this to be worthwhile, the machine should have one core and about 2GB of RAM
-    available per thread.
-
-    *Note*: The instructions above will compile the development release of the
-    Monero-lws software.
-
-* The resulting executables can be found in `build/src`
-
-* Add `PATH="$PATH:$HOME/monero-lws/build/src"` to `.profile`
-
-* Run Monero-lws with `monero-lws-daemon`
-
-Dependencies need to be built with -fPIC. Static libraries usually aren't, so you may have to build them yourself with -fPIC. Refer to their documentation for how to build them.
-
-* **Optional**: build documentation in `doc/html` (omit `HAVE_DOT=YES` if `graphviz` is not installed):
-
-    ```bash
-    HAVE_DOT=YES doxygen Doxyfile
-    ```
+  * On macOS replace `-j$(nproc)` with `-j8` or the numebr of cores on your
+    system.
+  * Notice that the `submodule` step is only being run in the `monero` project;
+    `monero-lws` intentionally does not initialize submodules in the advanced
+    mode of building.
+  * The instructions above will compile the `master` (beta) release of
+    `monero-lws`.
+  * The resulting executables can be found in `build/src`
 
 ## Running monero-lws-daemon
 
