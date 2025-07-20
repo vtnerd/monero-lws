@@ -73,7 +73,7 @@ namespace
     return epee::byte_slice{
       std::string{
         "{\"jsonrpc\":2.0,\"id\":0,\"result\":{"
-          "\"estimated_base_fee\":10000,\"fee_mask\":1000,\"size_scale\":256,\"hard_fork_version\":16"
+          "\"estimated_base_fee\":10000,\"fee_mask\":1000,\"size_scale\":256,\"hard_fork_version\":16,\"fees\":[40,41]"
         "}}"
       }
     };
@@ -184,7 +184,7 @@ LWS_CASE("rest_server")
 
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
-      EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\"}");
+      EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\",\"fees\":[40,41]}");
     }
 
     SECTION("One Receive, Zero Spends")
@@ -309,7 +309,7 @@ LWS_CASE("rest_server")
           "\"height\":4000,"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
-        "]}"
+        "],\"fees\":[40,41]}"
       );
     }
 
@@ -467,7 +467,7 @@ LWS_CASE("rest_server")
           "\"spend_key_images\":[\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\"],"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
-        "]}"
+        "],\"fees\":[40,41]}"
       );
     }
 
