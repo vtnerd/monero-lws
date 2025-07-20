@@ -128,7 +128,7 @@ if (MONERO_BUILD_DIR)
     PROTOLIB_LIBRARY
   )
 
-  if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
+  if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}"))
     message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
   endif()
 

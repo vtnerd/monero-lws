@@ -1110,6 +1110,7 @@ namespace lws
             rpc->fee_mask,
             rpc::safe_uint64(received),
             std::move(unspent),
+            rpc->fees,
             std::move(req.creds.key)
           }
         );
