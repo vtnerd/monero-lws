@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master", "develop", "release-*" ]
   pull_request:
-    branches: [ "master", "develop", release-* ]
+    branches: [ "master", "develop", "release-*" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04, ubuntu-22.04, macos-latest, macos-14, macos-13]
+        os: [ubuntu-24.04, ubuntu-22.04, macos-14, macos-13]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
     - name: set apt conf (Debian based Linux)
