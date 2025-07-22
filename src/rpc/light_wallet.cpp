@@ -326,7 +326,7 @@ namespace lws
   {
     wire::object(dest,
       WIRE_FIELD_COPY(import_fee),
-      WIRE_FIELD_COPY(status),
+      WIRE_FIELD(status),
       WIRE_FIELD_COPY(new_request),
       WIRE_FIELD_COPY(request_fulfilled)
     );
