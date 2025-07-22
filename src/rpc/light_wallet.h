@@ -228,7 +228,7 @@ namespace rpc
   {
     import_response() = delete;
     safe_uint64 import_fee;
-    const char* status;
+    std::string status;
     bool new_request;
     bool request_fulfilled;
   };
