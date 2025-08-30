@@ -41,6 +41,10 @@ if (WITH_RMQ)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMLWS_RMQ_ENABLED")
 endif()
 
+# If `MONERO_BUILD_DIR` is not specified, monero unit tests will be built with this hack
+set (LWS_BUILD_TESTS "${BUILD_TESTS}")
+set (BUILD_TESTS "Off")
+
 if(STATIC)
   if(MSVC)
     set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .dll.a .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -200,7 +204,7 @@ if(STATIC)
   set(Boost_USE_STATIC_LIBS ON)
   set(Boost_USE_STATIC_RUNTIME ON)
 endif()
-find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization system thread)
+find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization thread)
 
 if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
   message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
@@ -294,7 +298,7 @@ set_property(TARGET monero::libraries PROPERTY
 
 add_subdirectory(src)
 
-if (BUILD_TESTS)
+if (LWS_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()
