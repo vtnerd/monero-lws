@@ -107,21 +107,27 @@ namespace
 
     rct_bytes rct{};
     rct_bytes const* optional_rct = nullptr;
-    if (unpack(self.data.first.extra).first & lws::db::ringct_output)
+    const auto flags = unpack(self.data.first.extra).first;
+    if (flags & lws::db::ringct_output)
     {
-      crypto::key_derivation derived;
-      if (!crypto::generate_key_derivation(self.data.first.spend_meta.tx_public, self.user_key, derived))
-        MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
+      if (!(flags & lws::db::coinbase_output))
+      {
+        crypto::key_derivation derived;
+        if (!crypto::generate_key_derivation(self.data.first.spend_meta.tx_public, self.user_key, derived))
+          MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
 
-      crypto::secret_key scalar;
-      rct::ecdhTuple encrypted{self.data.first.ringct_mask, rct::d2h(self.data.first.spend_meta.amount)};
+        crypto::secret_key scalar;
+        rct::ecdhTuple encrypted{self.data.first.ringct_mask, rct::d2h(self.data.first.spend_meta.amount)};
 
-      crypto::derivation_to_scalar(derived, self.data.first.spend_meta.index, scalar);
-      rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
+        crypto::derivation_to_scalar(derived, self.data.first.spend_meta.index, scalar);
+        rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
 
-      rct.commitment = rct::commit(self.data.first.spend_meta.amount, self.data.first.ringct_mask);
-      rct.mask = encrypted.mask;
-      rct.amount = encrypted.amount;
+        rct.commitment = rct::commit(self.data.first.spend_meta.amount, self.data.first.ringct_mask);
+        rct.mask = encrypted.mask;
+        rct.amount = encrypted.amount;
+      }
+      else
+        rct.mask = rct::identity();
 
       optional_rct = std::addressof(rct);
     }
