@@ -507,6 +507,8 @@ namespace lws
             mask = decrypted->second;
             ext = db::extra(ext | db::ringct_output);
           }
+          else if (1 < tx.version)
+            ext = db::extra(ext | db::ringct_output);
 
           if (extra_nonce)
           {

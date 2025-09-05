@@ -560,7 +560,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
               tx.spend_publics.at(0),
               rct::commit(35184372088830, rct::identity()),
               {},
-              lws::db::pack(lws::db::extra::coinbase_output, 0),
+              lws::db::pack(lws::db::extra(lws::db::extra::coinbase_output | lws::db::extra::ringct_output), 0),
               {},
               0, // fee
               lws::db::address_index{}
