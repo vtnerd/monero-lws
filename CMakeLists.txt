@@ -69,6 +69,7 @@ set(MONERO_LIBRARIES
   serialization
   lmdb_lib
   net
+  carrot_core
   cryptonote_core
   cryptonote_basic
   cryptonote_format_utils_basic
@@ -87,6 +88,7 @@ set(MONERO_LIBRARIES
   easylogging
   version
   wallet-crypto
+  mx25519
 )
 
 set(MONERO_OPTIONAL wallet-crypto)
@@ -280,6 +282,7 @@ set_property(TARGET monero::libraries PROPERTY
     "${MONERO_SOURCE_DIR}/external/easylogging++"
     "${MONERO_SOURCE_DIR}/external/rapidjson/include"
     "${MONERO_SOURCE_DIR}/external/supercop/include"
+    "${MONERO_SOURCE_DIR}/external/mx25519/include"
     "${MONERO_SOURCE_DIR}/src"
 )
 

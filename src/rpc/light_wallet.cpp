@@ -31,6 +31,7 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <ctime>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 
@@ -386,13 +387,27 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, login_request& self)
   {
     std::string address;
+    std::optional<db::view_key> view_key;
+    std::optional<db::view_key> balance_key;
     wire::object(source,
       wire::field("address", std::ref(address)),
-      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("view_key", std::ref(view_key)),
+      wire::optional_field("balance_key", std::ref(balance_key)),
       WIRE_FIELD(create_account),
       WIRE_FIELD(generated_locally)
     );
+
+    const unsigned count =
+      unsigned(bool(view_key)) + unsigned(bool(balance_key));
+    if (count != 1)
+      WIRE_DLOG_THROW(wire::error::schema::fixed_binary, "one of: view_key, balance_key");
+
+    self.balance_key = bool(balance_key);
     convert_address(address, self.creds.address);
+    if (view_key)
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*view_key), sizeof(view_key));
+    else
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*balance_key), sizeof(balance_key));
   }
   void rpc::write_bytes(wire::json_writer& dest, const login_response self)
   {

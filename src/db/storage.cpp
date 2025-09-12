@@ -170,6 +170,41 @@ namespace db
     );
   }
 
+  namespace v2
+  {
+    //! Third DB value, with no carrot/fcmp++ data
+    struct output
+    {
+      transaction_link link;        //! Orders and links `output` to `spend`s.
+
+      //! Data that a linked `spend` needs in some REST endpoints.
+      struct spend_meta_
+      {
+        output_id id;             //!< Unique id for output within monero
+        // `link` and `id` must be in this order for LMDB optimizations
+        std::uint64_t amount;
+        std::uint32_t mixin_count;//!< Ring-size of TX
+        std::uint32_t index;      //!< Offset within a tx
+        crypto::public_key tx_public;
+      } spend_meta;
+
+      std::uint64_t timestamp;
+      std::uint64_t unlock_time; //!< Not always a timestamp; mirrors chain value.
+      crypto::hash tx_prefix_hash;
+      crypto::public_key pub;    //!< One-time spendable public key.
+      rct::key ringct_mask;      //!< Unencrypted CT mask
+      char reserved[7];
+      extra_and_length extra;    //!< Extra info + length of payment id
+      union payment_id_
+      {
+        crypto::hash8 short_;  //!< Decrypted short payment id
+        crypto::hash long_;    //!< Long version of payment id (always decrypted)
+      } payment_id;
+      std::uint64_t fee;       //!< Total fee for transaction
+      address_index recipient;
+    };
+  }
+
 
   namespace
   {
@@ -317,8 +352,11 @@ namespace db
     constexpr const lmdb::basic_table<account_id, v1::output> outputs_v1{
       "outputs_v1_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
     };
-    constexpr const lmdb::basic_table<account_id, output> outputs{
+    constexpr const lmdb::basic_table<account_id, v2::output> outputs_v2{
       "outputs_v2_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
+    };
+    constexpr const lmdb::basic_table<account_id, output> outputs{
+      "outputs_v3_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
     };
     constexpr const lmdb::basic_table<account_id, v0::spend> spends_v0{
       "spends_by_account_id,block_id,tx_hash,image", MDB_DUPSORT, &spend_compare
@@ -708,6 +746,12 @@ namespace db
       else if (v1_outputs != lmdb::error(MDB_NOTFOUND))
         MONERO_THROW(v1_outputs.error(), "Error opening old outputs table");
 
+      const auto v2_outputs = outputs_v2.open(*txn);
+      if (v2_outputs)
+        MONERO_UNWRAP(convert_table<v2::output, output>(*txn, *v2_outputs, tables.outputs));
+      else if (v2_outputs != lmdb::error(MDB_NOTFOUND))
+        MONERO_THROW(v2_outputs.error(), "Error opening old outputs table");
+
       const auto v0_spends = spends_v0.open(*txn);
       if (v0_spends)
         MONERO_UNWRAP(convert_table<v0::spend, spend>(*txn, *v0_spends, tables.spends));
@@ -939,6 +983,7 @@ namespace db
   expect<lws::account> storage_reader::get_full_account(const account& user)
   {
     std::vector<std::pair<db::output_id, db::address_index>> receives{};
+    std::vector<std::tuple<crypto::key_image, std::uint64_t, db::address_index>> balance{};
     std::vector<crypto::public_key> pubs{};
     auto receive_list = get_outputs(user.id);
     if (!receive_list)
@@ -947,7 +992,16 @@ namespace db
     const std::size_t elems = receive_list->count();
     receives.reserve(elems);
     pubs.reserve(elems);
-
+/*
+    crypto::secret_key image_key{};
+    {
+      crypto::secret_key balance_key{};
+      std::memcmpy(std::addressof(unwrap(unwrap(balance_key))), std::addressof(user.key), sizeof(user.key));
+      carrot::make_carrot_generateimage_key(balance_key, image_key);
+    }
+    carrot::generate_image_key_ram_borrowed_device imager{image_key};
+*/
+    const bool do_balance = user.flags & account_flags::view_balance_key; 
     for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
     {
       auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
@@ -956,7 +1010,7 @@ namespace db
       pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
     }
 
-    return lws::account{user, std::move(receives), std::move(pubs)};
+    return lws::account{user, std::move(receives), std::move(balance), std::move(pubs)};
   }
 
   expect<std::pair<account_status, account>>

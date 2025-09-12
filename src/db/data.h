@@ -47,6 +47,8 @@
 #include "wire/traits.h"
 #include "wire/wrapper/array.h"
 
+namespace carrot { class key_image_device; }
+
 namespace lws
 {
 namespace db
@@ -85,6 +87,10 @@ namespace db
     static constexpr output_id txpool() noexcept
     { return {0, std::numeric_limits<std::uint64_t>::max()}; }
 
+    //! \return Special ID for unknown spent output
+    static constexpr output_id unknown_spend() noexcept
+    { return {0, std::numeric_limits<std::uint64_t>::max() - 1}; }
+
     std::uint64_t high; //!< Amount on public chain; rct outputs are `0`
     std::uint64_t low;  //!< Offset within `amount` on the public chain
   };
@@ -102,7 +108,8 @@ namespace db
   {
     default_account = 0,
     admin_account   = 1,          //!< Indicates `key` can be used for admin requests
-    account_generated_locally = 2 //!< Flag sent by client on initial login request
+    account_generated_locally = 2,//!< Flag sent by client on initial login request
+    view_balance_key = 4,         //!< Indicates `key` is carrot v1 view-balance
   };
 
   enum class request : std::uint8_t
@@ -160,7 +167,11 @@ namespace db
     constexpr bool is_zero() const noexcept
     {
       return maj_i == major_index::primary && min_i == minor_index::primary;
-    } 
+    }
+    static constexpr address_index primary() noexcept
+    {
+      return {major_index::primary, minor_index::primary};
+    }
   };
   static_assert(sizeof(address_index) == 4 * 2, "padding in address_index");
   WIRE_DECLARE_OBJECT(address_index);
@@ -273,6 +284,14 @@ namespace db
       std::uint32_t mixin_count;//!< Ring-size of TX
       std::uint32_t index;      //!< Offset within a tx
       crypto::public_key tx_public;
+
+      static constexpr spend_meta_ unknown() noexcept
+      {
+        return spend_meta_{
+          .id = output_id::unknown_spend(),
+          .mixin_count = std::numeric_limits<std::uint32_t>::max()
+        }; 
+      }
     } spend_meta;
 
     std::uint64_t timestamp;
@@ -289,9 +308,10 @@ namespace db
     } payment_id;
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
+    crypto::key_image first_image; //!< Required for carrot/fmcp++ spending
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
+    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32,
     "padding in output"
   );
   WIRE_DECLARE_OBJECT(output);

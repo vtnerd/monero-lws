@@ -249,6 +249,7 @@ namespace rpc
     account_credentials creds;
     bool create_account;
     bool generated_locally;
+    bool balance_key;
   };
   void read_bytes(wire::json_reader&, login_request&);
 

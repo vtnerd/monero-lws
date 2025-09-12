@@ -27,10 +27,13 @@
 
 #include "transactions.h"
 
-#include "cryptonote_config.h"
-#include "crypto/crypto.h"
-#include "crypto/hash.h"
-#include "ringct/rctOps.h"
+#include "carrot_core/device.h"           // monero/src
+#include "carrot_impl/key_image_device.h" // monero/src
+#include "cryptonote_config.h"            // monero/src
+#include "crypto/crypto.h"                // monero/src
+#include "crypto/hash.h"                  // monero/src
+#include "misc_log_ex.h"                  // monero/contrib/include
+#include "ringct/rctOps.h"                // monero/src
 
 void lws::decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& key)
 {
@@ -45,7 +48,7 @@ void lws::decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& k
     out.data[b] ^= hash.data[b];
 }
 
-boost::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2)
+std::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2)
 {
   crypto::secret_key scalar{};
   crypto::derivation_to_scalar(sk, index, scalar);
@@ -57,5 +60,48 @@ boost::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct
   rct::addKeys2(Ctmp, copy.mask, copy.amount, rct::H);
   if (rct::equalKeys(commitment, Ctmp))
     return {{rct::h2d(copy.amount), copy.mask}};
-  return boost::none;
+  return std::nullopt;
+}
+
+std::optional<crypto::key_image> lws::get_image(const db::output& source, const carrot::key_image_device& imager)
+{
+  try
+  {
+/*
+struct CarrotOutputOpeningHintV2
+{
+    /// K_o
+    crypto::public_key onetime_address;
+    /// C_a
+    rct::key amount_commitment;
+    /// anchor_enc
+    encrypted_janus_anchor_t anchor_enc;
+    /// view_tag
+    view_tag_t view_tag;
+    /// D_e
+    mx25519_pubkey enote_ephemeral_pubkey;
+    /// L_0
+    crypto::key_image tx_first_key_image;
+
+    /// a
+    rct::xmr_amount amount;
+
+    // pid_enc
+    std::optional<encrypted_payment_id_t> encrypted_payment_id;
+
+    // j, derive type
+    subaddress_index_extended subaddr_index;
+};
+
+    return imager.derive_key_image(
+      carrot::CarrotOutputOpeningHintV2{
+       source.pub,
+      }
+    ); */
+  }
+  catch (const carrot::device_error& e)
+  {
+    MWARNING("Failed to compute key image: " << e.what());
+  }
+  return std::nullopt;
 }

@@ -31,6 +31,7 @@
 #include "cryptonote_config.h"        // monero/src
 #include "crypto/crypto.h"            // monero/src
 #include "rpc/message_data_structs.h" // monero/src
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/json.h"
 #include "wire/wrapper/array.h"
@@ -56,7 +57,7 @@ namespace
   using max_inputs_per_tx = wire::max_element_count<3000>;
   using max_outputs_per_tx = wire::max_element_count<2000>;
   using max_ring_size = wire::max_element_count<4600>;
-  using max_txpool_size = wire::max_element_count<775>;
+  using max_txpool_size = wire::max_element_count<700>;
 }
 
 namespace rct
@@ -225,9 +226,9 @@ namespace rct
 
 namespace cryptonote
 {
-  static void read_bytes(wire::json_reader& source, txout_to_script& self)
+  static void read_bytes(wire::json_reader& source, txout_to_carrot_v1& self)
   {
-    wire::object(source, WIRE_FIELD(keys), WIRE_FIELD(script));
+    wire::object(source, WIRE_FIELD(key), WIRE_FIELD(view_tag), WIRE_FIELD(encrypted_janus_anchor));
   }
   static void read_bytes(wire::json_reader& source, txout_to_scripthash& self)
   {
@@ -248,7 +249,7 @@ namespace cryptonote
       WIRE_FIELD(amount),
       WIRE_OPTION("to_key", txout_to_key, variant),
       WIRE_OPTION("to_tagged_key", txout_to_tagged_key, variant),
-      WIRE_OPTION("to_script", txout_to_script, variant),
+      WIRE_OPTION("to_carrot_v1", txout_to_carrot_v1, variant),
       WIRE_OPTION("to_scripthash", txout_to_scripthash, variant)
     );
   }
@@ -263,7 +264,7 @@ namespace cryptonote
   }
   static void read_bytes(wire::json_reader& source, txin_to_scripthash& self)
   {
-    wire::object(source, WIRE_FIELD(prev), WIRE_FIELD(prevout), WIRE_FIELD(script), WIRE_FIELD(sigset));
+    wire::object(source);
   }
   static void read_bytes(wire::json_reader& source, txin_to_key& self)
   {

@@ -65,6 +65,6 @@ namespace lws { namespace db { namespace test
 
   lws::account make_account(const account_address& pubs, const crypto::secret_key& key)
   {
-    return lws::account{make_db_account(pubs, key), {}, {}};
+    return lws::account{make_db_account(pubs, key), {}, {}, {}};
   }
 }}} // lws // db // test

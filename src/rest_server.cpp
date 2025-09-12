@@ -63,6 +63,7 @@
 #include "common/error.h"          // monero/src
 #include "common/expect.h"         // monero/src
 #include "config.h"
+#include "carrot_core/account_secrets.h" // monero/src
 #include "crypto/crypto.h"         // monero/src
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
@@ -236,14 +237,27 @@ namespace lws
       return true;
     }
 
-    bool key_check(const rpc::account_credentials& creds)
+    bool key_check(const crypto::public_key& view_public, const crypto::secret_key& key)
     {
       crypto::public_key verify{};
-      if (!crypto::secret_key_to_public_key(creds.key, verify))
+      if (!crypto::secret_key_to_public_key(key, verify))
         return false;
-      if (verify != creds.address.view_public)
-        return false;
-      return true;
+      return verify == view_public;
+    }
+
+    bool key_check(const rpc::account_credentials& creds)
+    {
+      return key_check(creds.address.view_public, creds.key);
+    }
+
+    bool key_check(const rpc::account_credentials& creds, const bool balance_key)
+    {
+      if (!balance_key)
+        return key_check(creds);
+
+      crypto::secret_key view_key{};
+      carrot::make_carrot_viewincoming_key(creds.key, view_key);
+      return key_check(creds.address.view_public, view_key);
     }
 
     //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
@@ -543,16 +557,20 @@ namespace lws
         resp.spent_outputs.reserve(spends->count());
         for (auto const& spend : spends->make_range())
         {
-          const auto meta = find_metadata(metas, spend.source);
-          if (meta == metas.end() || meta->id != spend.source)
+          if (spend.source != db::output_id::unknown_spend())
           {
-            throw std::logic_error{
-              "Serious database error, no receive for spend"
-            };
+            const auto meta = find_metadata(metas, spend.source);
+            if (meta == metas.end() || meta->id != spend.source)
+            {
+              throw std::logic_error{
+                "Serious database error, no receive for spend"
+              };
+            }
+            resp.spent_outputs.push_back({*meta, spend});
+            resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
           }
-
-          resp.spent_outputs.push_back({*meta, spend});
-          resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
+          else // carrot output with legacy or view-incoming key
+            resp.spent_outputs.push_back({db::output::spend_meta_::unknown(), spend}); 
         }
 
         // `get_rates()` nevers does I/O, so handler can remain synchronous
@@ -654,18 +672,23 @@ namespace lws
           else if (output.is_end() || (next_spend < next_output))
           {
             const db::output_id source_id = spend.get_value<MONERO_FIELD(db::spend, source)>();
-            const auto meta = find_metadata(metas, source_id);
-            if (meta == metas.end() || meta->id != source_id)
+            auto meta = db::output::spend_meta_::unknown();
+            if (source_id != db::output_id::unknown_spend())
             {
-              throw std::logic_error{
-                "Serious database error, no receive for spend"
-              };
+              const auto spend_meta = find_metadata(metas, source_id);
+              if (spend_meta == metas.end() || spend_meta->id != source_id)
+              {
+                throw std::logic_error{
+                  "Serious database error, no receive for spend"
+                };
+              }
+              meta = *spend_meta;
             }
 
             if (resp.transactions.empty() || resp.transactions.back().info.link.tx_hash != next_spend.tx_hash)
             {
               resp.transactions.push_back({});
-              resp.transactions.back().spends.push_back({*meta, *spend});
+              resp.transactions.back().spends.push_back({meta, *spend});
               resp.transactions.back().info.link.height = resp.transactions.back().spends.back().possible_spend.link.height;
               resp.transactions.back().info.link.tx_hash = resp.transactions.back().spends.back().possible_spend.link.tx_hash;
               resp.transactions.back().info.spend_meta.mixin_count =
@@ -674,9 +697,9 @@ namespace lws
               resp.transactions.back().info.unlock_time = resp.transactions.back().spends.back().possible_spend.unlock_time;
             }
             else
-              resp.transactions.back().spends.push_back({*meta, *spend});
+              resp.transactions.back().spends.push_back({meta, *spend});
 
-            resp.transactions.back().spent += meta->amount;
+            resp.transactions.back().spent += meta.amount;
 
             ++spend;
             if (!spend.is_end())
@@ -1351,7 +1374,7 @@ namespace lws
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!key_check(req.creds))
+        if (!key_check(req.creds, req.balance_key))
           return {lws::error::bad_view_key};
 
         auto disk = data.global->disk.clone();
@@ -1376,7 +1399,10 @@ namespace lws
             return account.error();
         }
 
-        const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
+        db::account_flags flags = req.generated_locally ? db::account_generated_locally : db::default_account;
+        if (req.balance_key)
+          flags = db::account_flags(flags | db::view_balance_key);
+
         const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags);
         if (!hooks)
           return hooks.error();
