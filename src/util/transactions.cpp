@@ -27,11 +27,17 @@
 
 #include "transactions.h"
 
-#include "carrot_core/device.h"           // monero/src
-#include "carrot_impl/key_image_device.h" // monero/src
+#include "carrot_core/account_secrets.h"     // monero/src
+#include "carrot_core/address_utils.h"       // monero/src
+#include "carrot_core/device.h"              // monero/src
+#include "carrot_core/device_ram_borrowed.h" // monero/src
+#include "carrot_impl/address_device_ram_borrowed.h" // monero/src
+#include "carrot_impl/format_utils.h"     // monero/src
+#include "carrot_impl/key_image_device_composed.h"   // monero/src
 #include "cryptonote_config.h"            // monero/src
 #include "crypto/crypto.h"                // monero/src
 #include "crypto/hash.h"                  // monero/src
+#include "db/data.h"
 #include "misc_log_ex.h"                  // monero/contrib/include
 #include "ringct/rctOps.h"                // monero/src
 
@@ -67,41 +73,93 @@ std::optional<crypto::key_image> lws::get_image(const db::output& source, const 
 {
   try
   {
-/*
-struct CarrotOutputOpeningHintV2
-{
-    /// K_o
-    crypto::public_key onetime_address;
-    /// C_a
-    rct::key amount_commitment;
-    /// anchor_enc
-    encrypted_janus_anchor_t anchor_enc;
-    /// view_tag
-    view_tag_t view_tag;
-    /// D_e
-    mx25519_pubkey enote_ephemeral_pubkey;
-    /// L_0
-    crypto::key_image tx_first_key_image;
+    if (db::unpack(source.extra).first & db::coinbase_output)
+    {
+      return imager.derive_key_image(
+        carrot::CarrotCoinbaseOutputOpeningHintV1{
+          carrot::CarrotCoinbaseEnoteV1{
+            source.pub,
+            {},
+            {},
+            {},
+            carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public),
+            std::uint64_t(source.link.height)
+          },
+          carrot::AddressDeriveType::Carrot
+        }
+      );
+    }
 
-    /// a
-    rct::xmr_amount amount;
-
-    // pid_enc
-    std::optional<encrypted_payment_id_t> encrypted_payment_id;
-
-    // j, derive type
-    subaddress_index_extended subaddr_index;
-};
-
+    // else !coinbase
     return imager.derive_key_image(
-      carrot::CarrotOutputOpeningHintV2{
-       source.pub,
+      carrot::CarrotOutputOpeningHintV1{
+        carrot::CarrotEnoteV1{
+          source.pub,
+          {},
+          {},
+          {},
+          {},
+          carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public),
+          source.first
+        },
+        std::nullopt,
+        carrot::subaddress_index_extended{
+          {std::uint32_t(source.recipient.maj_i), std::uint32_t(source.recipient.min_i)},
+          carrot::AddressDeriveType::Carrot
+        }
       }
-    ); */
+    );
   }
   catch (const carrot::device_error& e)
   {
     MWARNING("Failed to compute key image: " << e.what());
   }
+
   return std::nullopt;
 }
+
+std::optional<crypto::key_image> lws::get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key, const crypto::secret_key& image_key, const crypto::secret_key& address_key)
+{
+  crypto::public_key account_spend{};
+  crypto::public_key account_view{};
+
+  carrot::make_carrot_address_spend_pubkey(
+    primary.spend_public,
+    address_key,
+    std::uint32_t(source.recipient.maj_i),
+    std::uint32_t(source.recipient.min_i),
+    account_spend
+  );
+  carrot::make_carrot_address_spend_pubkey(
+    primary.view_public,
+    address_key,
+    std::uint32_t(source.recipient.maj_i),
+    std::uint32_t(source.recipient.min_i),
+    account_view
+  );
+
+  const carrot::generate_image_key_ram_borrowed_device image_device{image_key};
+  const carrot::carrot_hierarchy_address_device_ram_borrowed carrot_device{
+    account_spend, account_view, primary.view_public, address_key
+  };
+  const carrot::hybrid_hierarchy_address_device_composed hybrid_device{
+    nullptr, std::addressof(carrot_device)
+  };
+  const carrot::view_balance_secret_ram_borrowed_device balance_device{balance_key};
+  const carrot::key_image_device_composed final_device{
+    image_device, hybrid_device, std::addressof(balance_device), nullptr
+  };
+  return get_image(source, final_device);
+}
+
+std::optional<crypto::key_image> lws::get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key)
+{
+  crypto::secret_key image_key{};
+  crypto::secret_key address_key{};
+
+  carrot::make_carrot_generateimage_key(balance_key, image_key);
+  carrot::make_carrot_generateaddress_secret(balance_key, address_key);
+
+  return get_image(source, primary, balance_key, image_key, address_key);
+}
+

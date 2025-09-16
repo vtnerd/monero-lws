@@ -39,6 +39,7 @@
 #include <string>
 #include <utility>
 
+#include "carrot_core/account_secrets.h" // monero/src
 #include "checkpoints/checkpoints.h"
 #include "config.h"
 #include "crypto/crypto.h"
@@ -59,6 +60,7 @@
 #include "lmdb/value_stream.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "span.h"
+#include "util/transactions.h"
 #include "wire/adapted/array.h"
 #include "wire/filters.h"
 #include "wire/json.h"
@@ -982,6 +984,9 @@ namespace db
 
   expect<lws::account> storage_reader::get_full_account(const account& user)
   {
+    crypto::secret_key balance_key{};
+    crypto::secret_key image_key{};
+    crypto::secret_key address_key{};
     std::vector<std::pair<db::output_id, db::address_index>> receives{};
     std::vector<std::tuple<crypto::key_image, std::uint64_t, db::address_index>> balance{};
     std::vector<crypto::public_key> pubs{};
@@ -989,25 +994,34 @@ namespace db
     if (!receive_list)
       return receive_list.error();
 
+    const bool has_balance = user.flags & account_flags::view_balance_key;
     const std::size_t elems = receive_list->count();
-    receives.reserve(elems);
-    pubs.reserve(elems);
-/*
-    crypto::secret_key image_key{};
+    if (has_balance)
     {
-      crypto::secret_key balance_key{};
-      std::memcmpy(std::addressof(unwrap(unwrap(balance_key))), std::addressof(user.key), sizeof(user.key));
+      balance.reserve(elems);
+      std::memcpy(std::addressof(tools::unwrap(balance_key)), std::addressof(user.key), sizeof(user.key));
       carrot::make_carrot_generateimage_key(balance_key, image_key);
+      carrot::make_carrot_generateaddress_secret(balance_key, address_key);
     }
-    carrot::generate_image_key_ram_borrowed_device imager{image_key};
-*/
-    const bool do_balance = user.flags & account_flags::view_balance_key; 
+    else
+      receives.reserve(elems); 
+    pubs.reserve(elems);
+
     for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
     {
       auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
       auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
-      receives.emplace_back(std::move(id), std::move(subaddr));
       pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
+      if (has_balance)
+      {
+        std::optional<crypto::key_image> image =
+          ::lws::get_image(output.get_value<db::output>(), user.address, balance_key, image_key, address_key);
+        if (!image)
+          MONERO_THROW(error::crypto_failure, "Failed to calculate carrot key image");
+        balance.emplace_back(std::move(*image), std::move(id.low), std::move(subaddr));
+      }
+      else if (output.get_value<MONERO_FIELD(db::output, spend_meta.mixin_count)>() != carrot_output)
+        receives.emplace_back(std::move(id), std::move(subaddr));
     }
 
     return lws::account{user, std::move(receives), std::move(balance), std::move(pubs)};

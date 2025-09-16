@@ -35,11 +35,12 @@
 #include "ringct/rctTypes.h"  // moneor/src 
 
 namespace carrot { class key_image_device; }
-
 namespace lws
 {
   void decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& key);
   std::optional<std::pair<std::uint64_t, rct::key>> decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2);
 
   std::optional<crypto::key_image> get_image(const db::output& source, const carrot::key_image_device& imager);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key, const crypto::secret_key& image_key, const crypto::secret_key& address_key);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key);
 }

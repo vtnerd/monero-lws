@@ -328,7 +328,7 @@ namespace lws
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
       std::pair<std::uint8_t, db::output::payment_id_> payment_id;
       cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
-      std::vector<crypto::key_derivation> additional_derivations;
+      std::vector<mx25519_pubkey> additional_derivations;
 
       {
         std::vector<cryptonote::tx_extra_field> extra;
@@ -360,14 +360,14 @@ namespace lws
         const account::key_type account_type = user.type();
         const carrot::view_incoming_key_ram_borrowed_device incoming_device{user.view_key()}; 
 
-        mx25519_pubkey x25519_derived;
-        crypto::key_derivation derived;
-        if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(key.pub_key), x25519_derived))
-        {
-          derived = carrot::raw_byte_convert<crypto::key_derivation>(x25519_derived);
-        }
-        else if (!is_carrot && crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
+        mx25519_pubkey derived;
+        crypto::key_derivation ed25519_derived;
+        if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(key.pub_key), derived))
         {}
+        else if (!is_carrot && crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), ed25519_derived))
+        {
+          derived = carrot::raw_byte_convert<mx25519_pubkey>(ed25519_derived);
+        }
         else // failed derivation
           continue; // to next user
 
@@ -378,12 +378,12 @@ namespace lws
           for (auto const& out: tx.vout)
           {
             ++index;
-            if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(additional_tx_pub_keys.data[index]), x25519_derived))
-            {
-              additional_derivations[index] = carrot::raw_byte_convert<crypto::key_derivation>(x25519_derived);
-            }
-            else if (!is_carrot && crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
+            if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(additional_tx_pub_keys.data[index]), additional_derivations[index]))
             {}
+            else if (!is_carrot && crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), ed25519_derived))
+            {
+              additional_derivations[index] = carrot::raw_byte_convert<mx25519_pubkey>(ed25519_derived);
+            }
             else // failed derivation
             {
               additional_derivations.clear();
@@ -424,7 +424,7 @@ namespace lws
                   carrot_subaccount->first,
                   timestamp,
                   tx.unlock_time,
-                  std::numeric_limits<std::uint32_t>::max(),
+                  db::carrot_output,
                   {0, 0, 0}, // reserved
                   payment_id.first,
                   payment_id.second.long_,
@@ -477,8 +477,8 @@ namespace lws
 
           const bool found_tag =
             is_carrot ||
-            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, additional_derivations.at(index), index)) ||
-            cryptonote::out_can_be_to_acc(view_tag_opt, derived, index); 
+            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, carrot::raw_byte_convert<crypto::key_derivation>(additional_derivations.at(index)), index)) ||
+            cryptonote::out_can_be_to_acc(view_tag_opt, carrot::raw_byte_convert<crypto::key_derivation>(derived), index); 
 
           if (!found_tag)
             continue; // to next output
@@ -487,7 +487,7 @@ namespace lws
           std::uint64_t amount{};
           carrot::CarrotEnoteType enote_type{};
           db::address_index account_index{};
-          crypto::key_derivation active_derived{};
+          mx25519_pubkey active_derived{};
           crypto::public_key active_pub{};
           rct::key mask{};
 
@@ -543,7 +543,7 @@ namespace lws
               if (carrot::try_scan_carrot_enote_external_receiver(
                 enote,                
                 cpayment_id,
-                carrot::raw_byte_convert<mx25519_pubkey>(active_derived),
+                active_derived,
                 {std::addressof(user.spend_public()), 1},
                 incoming_device,
                 gout,
@@ -555,11 +555,8 @@ namespace lws
                 enote_type
                 ))
               {
-                if (decrypted_id != carrot::payment_id_t{})
-                {
-                  payment_id.first = sizeof(crypto::hash8);
-                  payment_id.second.short_ = carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
-                }
+                payment_id.first = sizeof(crypto::hash8);
+                payment_id.second.short_ = carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
               } 
               else if (account_type != account::key_type::balance || !carrot::try_scan_carrot_enote_internal_receiver(
                 enote,
@@ -574,10 +571,10 @@ namespace lws
               ))
                 continue; // to next available active_derived
 
-              mixin = std::numeric_limits<std::uint32_t>::max();
-              mask = carrot::raw_byte_convert<rct::key>(unwrap(unwrap(blinding)));
+              mixin = db::carrot_output;
+              mask = carrot::raw_byte_convert<rct::key>(tools::unwrap(blinding));
             }
-            else if (/* !is_carrot && */ !crypto::wallet::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
+            else if (/* !is_carrot && */ !crypto::wallet::derive_subaddress_public_key(out_pub_key, carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, derived_pub))
               continue; // to next available active_derived
 
             if (user.spend_public() != derived_pub)
@@ -614,7 +611,7 @@ namespace lws
             {
               cryptonote::txin_to_key const* const in_data =
                 boost::get<cryptonote::txin_to_key>(std::addressof(in));
-              if (in_data)
+              if (in_data && in_data->key_offsets.empty())
               {
                 spend_action(
                   user,
@@ -624,7 +621,7 @@ namespace lws
                     db::output_id::unknown_spend(), // no clue which output was spent
                     timestamp,
                     tx.unlock_time,
-                    std::numeric_limits<std::uint32_t>::max(),
+                    db::carrot_output,
                     {0, 0, 0}, // reserved
                     payment_id.first,
                     payment_id.second.long_,
@@ -645,7 +642,7 @@ namespace lws
           {
             const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_derived, index, bulletproof2
+              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, bulletproof2
             );
             if (!decrypted)
             {
@@ -664,7 +661,7 @@ namespace lws
             if (!payment_id.first && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
             {
               payment_id.first = sizeof(crypto::hash8);
-              lws::decrypt_payment_id(payment_id.second.short_, active_derived);
+              lws::decrypt_payment_id(payment_id.second.short_, carrot::raw_byte_convert<crypto::key_derivation>(active_derived));
             }
           }
           const bool added = output_action(

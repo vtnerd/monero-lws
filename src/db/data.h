@@ -270,6 +270,8 @@ namespace db
     return {extra(real_val >> 6), std::uint8_t(real_val & 0x3f)};
   }
 
+  constexpr const std::uint32_t carrot_output = std::numeric_limits<std::uint32_t>::max();
+
   //! Information for an output that has been received by an `account`.
   struct output
   {
@@ -281,7 +283,7 @@ namespace db
       output_id id;             //!< Unique id for output within monero
       // `link` and `id` must be in this order for LMDB optimizations
       std::uint64_t amount;
-      std::uint32_t mixin_count;//!< Ring-size of TX
+      std::uint32_t mixin_count;//!< Ring-size of TX or `carrot_output`
       std::uint32_t index;      //!< Offset within a tx
       crypto::public_key tx_public;
 
@@ -308,7 +310,7 @@ namespace db
     } payment_id;
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
-    crypto::key_image first_image; //!< Required for carrot/fmcp++ spending
+    crypto::key_image first; //!< Required for carrot/fmcp++ spending
   };
   static_assert(
     sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32,
@@ -325,7 +327,7 @@ namespace db
     // `link`, `image`, and `source` must in this order for LMDB optimizations
     std::uint64_t timestamp;  //!< Timestamp of spend
     std::uint64_t unlock_time;//!< Unlock time of spend
-    std::uint32_t mixin_count;//!< Ring-size of TX output
+    std::uint32_t mixin_count;//!< Ring-size of TX output or carrot_output
     char reserved[3];
     std::uint8_t length;      //!< Length of `payment_id` field (0..32).
     crypto::hash payment_id;  //!< Unencrypted only, can't decrypt spend

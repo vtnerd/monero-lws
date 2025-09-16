@@ -123,9 +123,6 @@ namespace lws
     //! \return Secret balance view key, iff `type() == key_type::balance`.
     crypto::secret_key const& balance_key() const;
 
-    //! \return Secret generate-image key, iff `type() == key_type::balance`.
-    crypto::secret_key image_key() const;
-
     //! \return Current scan height of `this`.
     db::block_id scan_height() const noexcept { return height_; }
 
@@ -146,6 +143,9 @@ namespace lws
 
     //! Track a possible `spend`.
     void add_spend(db::spend const& spend);
+
+    //! \return Key image for `out` iff `type() == key_type::balance`.
+    std::optional<crypto::key_image> get_image(db::output const& out) const;
   };
 
   struct by_height

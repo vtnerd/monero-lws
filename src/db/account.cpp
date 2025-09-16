@@ -34,6 +34,8 @@
 #include "common/expect.h"
 #include "db/data.h"
 #include "db/string.h"
+#include "error.h"
+#include "util/transactions.h"
 #include "wire/adapted/crypto.h"
 #include "wire/adapted/pair.h"
 #include "wire/adapted/tuple.h"
@@ -256,15 +258,7 @@ namespace lws
     null_check();
     return immutable_->balance_key;
   }
-
-  crypto::secret_key account::image_key() const
-  {
-    crypto::secret_key imager{};
-    if (immutable_)
-      carrot::make_carrot_generateimage_key(immutable_->balance_key, imager);
-    return imager;
-  }
-
+ 
   std::optional<db::address_index> account::get_spendable(db::output_id const& id) const noexcept
   {
     const auto searchable = 
@@ -297,8 +291,16 @@ namespace lws
 
     if (type() == key_type::balance)
     {
+      const std::optional<crypto::key_image> image = get_image(out);
+      if (!image)
+        MONERO_THROW(error::crypto_failure, "Failed to generate carrot key image");
+      auto elem = std::make_tuple(*image, out.spend_meta.id.low, out.recipient);
+      balance_.insert(
+        std::lower_bound(balance_.begin(), balance_.end(), elem),
+        elem
+      );
     }
-    else
+    else if (out.spend_meta.mixin_count != db::carrot_output)
     {
       auto spendable_value = std::make_pair(out.spend_meta.id, out.recipient);
       spendable_.insert(
@@ -314,6 +316,12 @@ namespace lws
   {
     spends_.push_back(spend);
   }
-} // lws
 
+  std::optional<crypto::key_image> account::get_image(db::output const& out) const
+  {
+    if (!immutable_ || type() != key_type::balance)
+      return std::nullopt;
+    return ::lws::get_image(out, immutable_->pubs, immutable_->balance_key);
+  }
+} // lws
 
