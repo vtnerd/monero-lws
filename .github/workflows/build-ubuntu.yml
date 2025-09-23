@@ -105,4 +105,56 @@ jobs:
       
     - name: Run Tests
       run: cd ${{github.workspace}}/lws/build && ctest
+  build-sanitizer-tests:
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        rmq: [WITH_RMQ=ON]
+        sanitizer: [SANITIZER=address]
+    steps:
+    - name: set apt conf (Debian based Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: ${{env.APT_SET_CONF}}
+    - name: update apt (Debian based Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: sudo apt update
+    - name: Install dependencies (Debian based Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: ${{env.APT_INSTALL_LINUX}}
+    - name: Install RabbitMQ iff WITH_RMQ (Debian based Linux)
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest')
+      run: sudo apt -y install librabbitmq-dev
+
+    - name: Install dependencies (MacOS)
+      if: matrix.os == 'macos-latest'
+      run: ${{env.BREW_INSTALL_MAC}}
+    - name: Install RabbitMQ iff WITH_RMQ (MacOS)
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest')
+      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
+
+    - name: Checkout Monero Source
+      uses: actions/checkout@v4
+      with:
+        repository: monero-project/monero
+        path: ${{github.workspace}}/monero/
+        submodules: recursive
+
+    - name: Checkout LWS Source
+      uses: actions/checkout@v4
+      with:
+        path: ${{github.workspace}}/lws
+
+    - name: Configure LWS
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/lws/build -D${{matrix.rmq}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero ${{github.workspace}}/lws -D${{matrix.sanitizer}} -DBUILD_TESTS=ON
+
+    - name: Build LWS
+      # Build your program with the given configuration
+      run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
+
+    - name: Run Tests
+      run: cd ${{github.workspace}}/lws/build && ctest --output-on-failure
 
