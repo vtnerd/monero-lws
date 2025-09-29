@@ -94,7 +94,7 @@ LWS_CASE("db::storage::sync_chain")
     EXPECT(db.sync_chain(last_block.id, chain, false));
 
     {
-      const lws::account accounts[1] = {lws::account{get_account(), {}, {}}};
+      const lws::account accounts[1] = {lws::account{get_account(), {}, {}, {}}};
       EXPECT(accounts[0].scan_height() == last_block.id);
       const auto updated = db.update(last_block.id, chain, accounts, nullptr);
       EXPECT(updated);
@@ -158,7 +158,7 @@ LWS_CASE("db::storage::sync_chain")
 
     SECTION("Old Blocks dont rollback height")
     {
-      lws::account accounts[1] {lws::account{get_account(), {}, {}}};
+      lws::account accounts[1] {lws::account{get_account(), {}, {}, {}}};
       const auto old_block = lws::db::block_id(lmdb::to_native(last_block.id) - 5);
       const auto new_block = lws::db::block_id(lmdb::to_native(last_block.id) + 4);
       EXPECT(accounts[0].scan_height() == new_block);

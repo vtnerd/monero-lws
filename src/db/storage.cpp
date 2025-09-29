@@ -39,12 +39,14 @@
 #include <string>
 #include <utility>
 
+#include "carrot_core/account_secrets.h" // monero/src
 #include "checkpoints/checkpoints.h"
 #include "config.h"
 #include "crypto/crypto.h"
 #include "cryptonote_basic/cryptonote_basic.h"
 #include "cryptonote_core/cryptonote_tx_utils.h"
 #include "db/account.h"
+#include "db/carrot.h"
 #include "db/string.h"
 #include "error.h"
 #include "hex.h"
@@ -59,6 +61,7 @@
 #include "lmdb/value_stream.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "span.h"
+#include "util/transactions.h"
 #include "wire/adapted/array.h"
 #include "wire/filters.h"
 #include "wire/json.h"
@@ -194,6 +197,41 @@ namespace db
       sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8,
       "padding in output"
     );
+  }
+
+  namespace v2
+  {
+    //! Third DB value, with no carrot/fcmp++ data
+    struct output
+    {
+      transaction_link link;        //! Orders and links `output` to `spend`s.
+
+      //! Data that a linked `spend` needs in some REST endpoints.
+      struct spend_meta_
+      {
+        output_id id;             //!< Unique id for output within monero
+        // `link` and `id` must be in this order for LMDB optimizations
+        std::uint64_t amount;
+        std::uint32_t mixin_count;//!< Ring-size of TX
+        std::uint32_t index;      //!< Offset within a tx
+        crypto::public_key tx_public;
+      } spend_meta;
+
+      std::uint64_t timestamp;
+      std::uint64_t unlock_time; //!< Not always a timestamp; mirrors chain value.
+      crypto::hash tx_prefix_hash;
+      crypto::public_key pub;    //!< One-time spendable public key.
+      rct::key ringct_mask;      //!< Unencrypted CT mask
+      char reserved[7];
+      extra_and_length extra;    //!< Extra info + length of payment id
+      union payment_id_
+      {
+        crypto::hash8 short_;  //!< Decrypted short payment id
+        crypto::hash long_;    //!< Long version of payment id (always decrypted)
+      } payment_id;
+      std::uint64_t fee;       //!< Total fee for transaction
+      address_index recipient;
+    };
   }
 
 
@@ -346,8 +384,11 @@ namespace db
     constexpr const lmdb::basic_table<account_id, v1::output> outputs_v1{
       "outputs_v1_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
     };
+    constexpr const lmdb::basic_table<account_id, v2::output> outputs_v2{
+      "outputs_v2_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
+    };
     constexpr const lmdb::basic_table<account_id, output> outputs{
-      "outputs_v2_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
+      "outputs_v3_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
     };
     constexpr const lmdb::basic_table<account_id, v0::spend> spends_v0{
       "spends_by_account_id,block_id,tx_hash,image", MDB_DUPSORT, &spend_compare
@@ -755,6 +796,12 @@ namespace db
       else if (v1_outputs != lmdb::error(MDB_NOTFOUND))
         MONERO_THROW(v1_outputs.error(), "Error opening old outputs table");
 
+      const auto v2_outputs = outputs_v2.open(*txn);
+      if (v2_outputs)
+        MONERO_UNWRAP(convert_table<v2::output, output>(*txn, *v2_outputs, tables.outputs));
+      else if (v2_outputs != lmdb::error(MDB_NOTFOUND))
+        MONERO_THROW(v2_outputs.error(), "Error opening old outputs table");
+
       const auto v0_spends = spends_v0.open(*txn);
       if (v0_spends)
         MONERO_UNWRAP(convert_table<v0::spend, spend>(*txn, *v0_spends, tables.spends));
@@ -997,25 +1044,49 @@ namespace db
 
   expect<lws::account> storage_reader::get_full_account(const account& user)
   {
+    crypto::secret_key balance_key{};
+    crypto::secret_key image_key{};
+    crypto::secret_key address_key{};
+    crypto::secret_key incoming_key{};
     std::vector<std::pair<db::output_id, db::address_index>> receives{};
+    std::vector<std::tuple<crypto::key_image, std::uint64_t, db::address_index>> balance{};
     std::vector<crypto::public_key> pubs{};
     auto receive_list = get_outputs(user.id);
     if (!receive_list)
       return receive_list.error();
 
+    const bool has_balance = user.flags & account_flags::view_balance_key;
     const std::size_t elems = receive_list->count();
-    receives.reserve(elems);
+    if (has_balance)
+    {
+      balance.reserve(elems);
+      std::memcpy(std::addressof(tools::unwrap(balance_key)), std::addressof(user.key), sizeof(user.key));
+      ::carrot::make_carrot_generateimage_key(balance_key, image_key);
+      ::carrot::make_carrot_generateaddress_secret(balance_key, address_key);
+      ::carrot::make_carrot_viewincoming_key(balance_key, incoming_key);
+    }
+    else
+      receives.reserve(elems); 
     pubs.reserve(elems);
 
     for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
     {
-      auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+      auto meta = output.get_value<MONERO_FIELD(db::output, spend_meta)>();
       auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
-      receives.emplace_back(std::move(id), std::move(subaddr));
       pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
+      if (has_balance)
+      {
+        std::optional<crypto::key_image> image =
+          carrot::get_image(output.get_value<db::output>(), user.address, balance_key, image_key, address_key, incoming_key);
+        if (!image)
+          MONERO_THROW(error::crypto_failure, "Failed to calculate carrot key image");
+        balance.emplace_back(std::move(*image), std::move(meta.id.low), std::move(subaddr));
+      }
+      else if (!meta.is_carrot())
+        receives.emplace_back(std::move(meta.id), std::move(subaddr));
     }
 
-    return lws::account{user, std::move(receives), std::move(pubs)};
+    return lws::account{user, std::move(receives), std::move(balance), std::move(pubs)};
   }
 
   expect<std::pair<account_status, account>>
@@ -1100,7 +1171,9 @@ namespace db
 
     MDB_val key = lmdb::to_val(type);
     MDB_val value = lmdb::to_val(address);
-    MLWS_LMDB_CHECK(mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH));
+    const int err = mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH);
+    if (err)
+      return log_lmdb_error(err, __LINE__, __FILE__, MDB_NOTFOUND);
     return requests.get_value<request_info>(value);
   }
 
@@ -1148,11 +1221,7 @@ namespace db
 
     const int err = mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH);
     if (err)
-    {
-      if (err != MDB_NOTFOUND)
-        return log_lmdb_error(err, __LINE__, __FILE__);
-      return {lmdb::error(err)}; // do not log MDB_NOTFOUND; expected
-    }
+      return log_lmdb_error(err, __LINE__, __FILE__, MDB_NOTFOUND);
     return subaddress_indexes.get_value<MONERO_FIELD(subaddress_map, index)>(value);
   }
 
@@ -2078,10 +2147,14 @@ namespace db
           std::addressof(unwrap(copy)), std::addressof(user.key), sizeof(copy)
         );
 
-        if (!crypto::secret_key_to_public_key(copy, verify))
-          return {lws::error::bad_view_key};
+        if (user.flags & account_flags::view_balance_key)
+        {
+          crypto::secret_key incoming_key{};
+          ::carrot::make_carrot_viewincoming_key(copy, incoming_key);
+          copy = incoming_key;
+        }
 
-        if (verify != user.address.view_public)
+        if (!crypto::secret_key_to_public_key(copy, verify) || verify != user.address.view_public)
           return {lws::error::bad_view_key};
       }
 
@@ -2168,7 +2241,7 @@ namespace db
 
   namespace
   {
-    expect<std::vector<subaddress_dict>> do_upsert(MDB_cursor& ranges_cur, MDB_cursor& indexes_cur, const account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
+    expect<std::vector<subaddress_dict>> do_upsert(MDB_cursor& ranges_cur, MDB_cursor& indexes_cur, const account& user, std::optional<crypto::secret_key> generate_address, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
     {
       std::size_t subaddr_count = 0;
       std::vector<subaddress_dict> out{};
@@ -2199,8 +2272,23 @@ namespace db
         return true;
       };
 
-      MDB_val key = lmdb::to_val(id);
+      
+      if (user.flags & account_flags::view_balance_key)
+      {
+        crypto::secret_key balance_key;
+        unwrap(unwrap(balance_key)) = user.key;
+        ::carrot::make_carrot_generateaddress_secret(balance_key, generate_address.emplace());
+      }
+
+      crypto::secret_key view_key{};
+      std::optional<carrot::account> carrot_user;
+      if (generate_address)
+        carrot_user.emplace(user);
+      else
+        unwrap(unwrap(view_key)) = user.key;
+
       MDB_val value{};
+      MDB_val key = lmdb::to_val(user.id);
       int err = mdb_cursor_get(&indexes_cur, &key, &value, MDB_SET);
       if (err)
       {
@@ -2304,9 +2392,12 @@ namespace db
           {
             subaddress_map new_value{};
             new_value.index = address_index{major_entry.first, minor_index(minor)};
-            new_value.subaddress = new_value.index.get_spend_public(address, view_key);
+            if (carrot_user && generate_address)
+              new_value.subaddress = new_value.index.get_spend_public(*carrot_user, *generate_address);
+            else
+              new_value.subaddress = new_value.index.get_spend_public(user.address, view_key);
 
-            key = lmdb::to_val(id);
+            key = lmdb::to_val(user.id);
             value = lmdb::to_val(new_value);
             const int err = mdb_cursor_put(&indexes_cur, &key, &value, MDB_NODUPDATA);
             if (err && err != MDB_KEYEXIST)
@@ -2318,7 +2409,7 @@ namespace db
           subaddress_ranges.make_value(major_entry.first, new_dict);
         if (!value_bytes)
           return value_bytes.error();
-        key = lmdb::to_val(id);
+        key = lmdb::to_val(user.id);
         value = MDB_val{value_bytes->size(), const_cast<void*>(static_cast<const void*>(value_bytes->data()))};
         MLWS_LMDB_CHECK(mdb_cursor_put(&ranges_cur, &key, &value, MDB_NODUPDATA));
       }
@@ -2326,7 +2417,7 @@ namespace db
       return {std::move(out)};
     }
 
-    expect<void> do_lookahead(MDB_cursor& outputs_cur, MDB_cursor& ranges_cur, MDB_cursor& indexes_cur, const account_id id, const account_address& address, const crypto::secret_key& view_key, const address_index& lookahead, const std::uint32_t max_subaddresses)
+    expect<void> do_lookahead(MDB_cursor& outputs_cur, MDB_cursor& ranges_cur, MDB_cursor& indexes_cur, const account& user, const address_index& lookahead, const std::uint32_t max_subaddresses)
     {
       const auto major = to_uint(lookahead.maj_i);
       const auto minor = to_uint(lookahead.min_i);
@@ -2339,7 +2430,7 @@ namespace db
       if (max_subaddresses < major * minor)
         return {error::max_subaddresses};
 
-      MDB_val key = lmdb::to_val(id);
+      MDB_val key = lmdb::to_val(user.id);
       MDB_val value{};
 
       std::vector<subaddress_dict> initial{};
@@ -2374,7 +2465,7 @@ namespace db
               const auto this_minor = add_and_clamp(minor - 1, to_uint(receipient->min_i));
 
               // Quick Sanity Check before vector expansion
-              if (std::numeric_limits<std::uint32_t>::max() < needed / minor)
+              if (minor && std::numeric_limits<std::uint32_t>::max() < needed / minor)
                 return {error::max_subaddresses};
               if (max_subaddresses < needed * minor)
                 return {error::max_subaddresses};
@@ -2423,7 +2514,7 @@ namespace db
         }
       }
 
-      const auto upserted = do_upsert(ranges_cur, indexes_cur, id, address, view_key, std::move(initial), max_subaddresses);
+      const auto upserted = do_upsert(ranges_cur, indexes_cur, user, std::nullopt, std::move(initial), max_subaddresses);
       if (!upserted)
         return upserted.error();
       return success();
@@ -2431,11 +2522,8 @@ namespace db
 
     expect<void> do_lookahead(account& user, MDB_cursor& outputs_cur, MDB_cursor& ranges_cur, MDB_cursor& indexes_cur, const address_index& lookahead, const std::uint32_t max_subaddresses)
     {
-      crypto::secret_key key;
-      static_assert(sizeof(key) == sizeof(user.key));
-      std::memcpy(std::addressof(unwrap(unwrap(key))), std::addressof(user.key), sizeof(key));
       const expect<void> attempt =
-        do_lookahead(outputs_cur, ranges_cur, indexes_cur, user.id, user.address, key, lookahead, max_subaddresses);
+        do_lookahead(outputs_cur, ranges_cur, indexes_cur, user, lookahead, max_subaddresses);
       if (attempt == error::max_subaddresses)
       {
         user.lookahead = lookahead;
@@ -2580,7 +2668,6 @@ namespace db
   expect<std::vector<webhook_new_account>> storage::creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags, address_index lookahead) noexcept
   {
     MONERO_PRECOND(db != nullptr);
-
     if (!db->create_queue_max)
       return {lws::error::create_queue_max};
 
@@ -2999,9 +3086,8 @@ namespace db
         MDB_val key = lmdb::to_val(hook_key);
         MDB_val value = lmdb::to_val(sorter);
         int err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_GET_BOTH_RANGE);
-
         for (; /* all user/payment_id==x entries */ ;)
-        {
+        {      
           if (err)
           {
             if (err != MDB_NOTFOUND)
@@ -3331,20 +3417,30 @@ namespace db
   }
 
   expect<std::vector<subaddress_dict>>
-  storage::upsert_subaddresses(const account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
+  storage::upsert_subaddresses(const account_id id, std::optional<crypto::secret_key> generate_address, std::vector<subaddress_dict> subaddrs, const std::uint32_t max_subaddr)
   {
     MONERO_PRECOND(db != nullptr);
     std::sort(subaddrs.begin(), subaddrs.end());
 
-    return db->try_write([this, id, &address, &view_key, &subaddrs, max_subaddr] (MDB_txn& txn) -> expect<std::vector<subaddress_dict>>
+    return db->try_write([this, id, &generate_address, &subaddrs, max_subaddr] (MDB_txn& txn) -> expect<std::vector<subaddress_dict>>
     {
+      cursor::accounts            accounts_cur;
       cursor::subaddress_ranges   ranges_cur;
       cursor::subaddress_indexes  indexes_cur;
 
+      MONERO_CHECK(check_cursor(txn, this->db->tables.accounts,          accounts_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.subaddress_ranges, ranges_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.subaddress_indexes, indexes_cur));
 
-      return do_upsert(*ranges_cur, *indexes_cur, id, address, view_key, subaddrs, max_subaddr);
+      const account_status status_key = account_status::active;
+      MDB_val key = lmdb::to_val(status_key);
+      MDB_val value = lmdb::to_val(id);
+      MLWS_LMDB_CHECK(mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_GET_BOTH));
+
+      const expect<lws::db::account> user = accounts.get_value<account>(value);
+      if (!user)
+        return user.error();
+      return do_upsert(*ranges_cur, *indexes_cur, *user, generate_address, subaddrs, max_subaddr);
     });
   }
 
@@ -3425,11 +3521,8 @@ namespace db
             }
           }
 
-          crypto::secret_key viewkey;
-          static_assert(sizeof(viewkey) == sizeof(user->key));
-          std::memcpy(std::addressof(unwrap(unwrap(viewkey))), std::addressof(user->key), sizeof(viewkey));
           upserted =
-            do_upsert(*ranges_cur, *indexes_cur, user->id, address, viewkey, std::move(upsertions), max_subaddresses);
+            do_upsert(*ranges_cur, *indexes_cur, *user, std::nullopt, std::move(upsertions), max_subaddresses);
         }
       }
 

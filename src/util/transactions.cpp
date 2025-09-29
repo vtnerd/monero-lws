@@ -27,10 +27,12 @@
 
 #include "transactions.h"
 
-#include "cryptonote_config.h"
-#include "crypto/crypto.h"
-#include "crypto/hash.h"
-#include "ringct/rctOps.h"
+#include "cryptonote_config.h"            // monero/src
+#include "crypto/crypto.h"                // monero/src
+#include "crypto/hash.h"                  // monero/src
+#include "db/data.h"
+#include "misc_log_ex.h"                  // monero/contrib/include
+#include "ringct/rctOps.h"                // monero/src
 
 void lws::decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& key)
 {
@@ -45,7 +47,7 @@ void lws::decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& k
     out.data[b] ^= hash.data[b];
 }
 
-boost::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2)
+std::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2)
 {
   crypto::secret_key scalar{};
   crypto::derivation_to_scalar(sk, index, scalar);
@@ -57,5 +59,6 @@ boost::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct
   rct::addKeys2(Ctmp, copy.mask, copy.amount, rct::H);
   if (rct::equalKeys(commitment, Ctmp))
     return {{rct::h2d(copy.amount), copy.mask}};
-  return boost::none;
+  return std::nullopt;
 }
+
