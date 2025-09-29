@@ -246,6 +246,8 @@ namespace db
     expect<std::vector<account_address>>
       change_status(account_status status, epee::span<const account_address> addresses);
 
+    //! Add an account, for immediate inclusion in the active list.
+    expect<void> add_account(account_pubs const& pubs, crypto::secret_key const& key, account_flags flags = account_flags::default_account) noexcept;
 
     //! Add an account, for immediate inclusion in the active list.
     expect<void> add_account(account_address const& address, crypto::secret_key const& key, account_flags flags = account_flags::default_account) noexcept;
@@ -255,7 +257,7 @@ namespace db
       rescan(block_id height, epee::span<const account_address> addresses);
 
     //! Add an account for later approval. For use with the login endpoint.
-    expect<std::vector<webhook_new_account>> creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags, address_index lookahead) noexcept;
+    expect<std::vector<webhook_new_account>> creation_request(account_pubs const& pubs, crypto::secret_key const& key, account_flags flags, address_index lookahead) noexcept;
 
     /*!
       Request lock height of an existing account. No effect if the `start_height`
@@ -312,7 +314,7 @@ namespace db
         (whereas `subaddrs` may overlap with existing indexes).
       */
     expect<std::vector<subaddress_dict>>
-      upsert_subaddresses(account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
+      upsert_subaddresses(account_id id, std::optional<crypto::secret_key> address_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
 
     /*! Update lookahead where `match` was a matching subaddress on-chain.
       \return The number of new subaddresses added via lookahead, or -1 if

@@ -1,4 +1,4 @@
-// Copyright (c) 2023, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,20 +27,31 @@
 
 #pragma once
 
-#include <boost/filesystem/path.hpp>
-#include "crypto/crypto.h" // monero/src/
-#include "db/account.h"
-#include "db/data.h"
-#include "db/storage.h"
+#include <array>
+#include <tuple>
+#include <utility>
 
-namespace lws { namespace db { namespace test
+#include "wire/field.h"
+#include "wire/read.h"
+#include "wire/write.h"
+
+namespace wire
 {
-  struct cleanup_db
+  template<typename F, typename T, std::size_t... I>
+  void map_tuple(F& format, T& self, std::index_sequence<I...>)
   {
-    ~cleanup_db();
-  };
+    const std::array<std::string, sizeof...(I)> names = {
+      std::to_string(I)...
+    };
+    wire::object(format, wire::field<I>(std::get<I>(names).c_str(), std::get<I>(self))...);
+  }
 
-  lws::db::storage get_fresh_db();
-  lws::db::account make_db_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
-  lws::account make_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
-}}} // lws // db // test
+  template<typename R, typename... T>
+  void read_bytes(R& source, std::tuple<T...>& dest)
+  { map_tuple(source, dest, std::index_sequence_for<T...>()); }
+
+  template<typename W, typename... T>
+  void write_bytes(W& dest, const std::tuple<T...>& source)
+  { map_tuple(dest, source, std::index_sequence_for<T...>()); }
+}
+

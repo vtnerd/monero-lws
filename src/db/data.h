@@ -33,11 +33,14 @@
 #include <cstdint>
 #include <iosfwd>
 #include <limits>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "db/fwd.h"
+#include "carrot_core/core_types.h"
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
@@ -46,6 +49,8 @@
 #include "wire/msgpack/fwd.h"
 #include "wire/traits.h"
 #include "wire/wrapper/array.h"
+
+namespace carrot { class key_image_device; }
 
 namespace lws
 {
@@ -78,12 +83,30 @@ namespace db
   inline constexpr std::uint64_t to_uint(const block_id src) noexcept
   { return std::uint64_t(src); }
 
+  inline constexpr block_id add(const block_id src, const std::uint64_t value) noexcept
+  { return block_id(std::uint64_t(src) + value); }
+
+  inline constexpr block_id increment(const block_id src) noexcept
+  { return add(src, 1); }
+
   //! References a global output number, as determined by the public chain
   struct output_id
   {
     //! \return Special ID for outputs not yet in a block.
     static constexpr output_id txpool() noexcept
     { return {0, std::numeric_limits<std::uint64_t>::max()}; }
+
+    //! \return Special ID for unknown spent output
+    static constexpr output_id unknown_spend() noexcept
+    { return {0, std::numeric_limits<std::uint64_t>::max() - 1}; }
+
+    // New output ids, post fcmp++/carrot are called `global`
+
+    static constexpr output_id unified(const std::uint64_t id) noexcept
+    { return {std::numeric_limits<std::uint64_t>::max(), id}; }
+
+    constexpr bool is_unified() const noexcept
+    { return high == std::numeric_limits<std::uint64_t>::max(); }
 
     std::uint64_t high; //!< Amount on public chain; rct outputs are `0`
     std::uint64_t low;  //!< Offset within `amount` on the public chain
@@ -102,7 +125,8 @@ namespace db
   {
     default_account = 0,
     admin_account   = 1,          //!< Indicates `key` can be used for admin requests
-    account_generated_locally = 2 //!< Flag sent by client on initial login request
+    account_generated_locally = 2,//!< Flag sent by client on initial login request
+    view_balance_key = 4,         //!< Indicates `key` is carrot v1 view-balance
   };
 
   enum class request : std::uint8_t
@@ -121,15 +145,50 @@ namespace db
   struct view_key : crypto::ec_scalar {};
   // wire::is_blob trait below
 
-  //! The public keys of a monero address
+  //! Format stored in the DB in account and creation request
+  struct account_pubs
+  {
+    crypto::public_key view_public;//!< In address format; see `carrot::account`. Must be first.
+    crypto::public_key flex_public;//!< Partial spend pubkey when carrot view-balance, otherwise full spend-public
+  };
+  static_assert(sizeof(account_pubs) == 64, "padding in account pubs");
+  WIRE_DECLARE_OBJECT(account_pubs);
+
+
+  //! The public keys of a monero address (as encoded in base58)
   struct account_address
   {
+    explicit account_address(const account& acct);
+    explicit account_address(const request_info& info);
+    explicit account_address(const account_pubs& pubs, const carrot::balance_secrets* secrets);
+    explicit account_address(const account_pubs& pubs, const crypto::secret_key* kgi);
+
+    //! This constructor assumes `pubs` is NOT for a balance key 
+    explicit account_address(const account_pubs& pubs)
+      : account_address(pubs, static_cast<crypto::secret_key*>(nullptr))
+    {}
+
+    explicit account_address(const account_pubs& pubs, const std::unique_ptr<const carrot::balance_secrets> secrets)
+      : account_address(pubs, secrets.get())
+    {}
+
+    account_address(const crypto::public_key& view, const crypto::public_key& spend) noexcept
+      : view_public(view), spend_public(spend)
+    {}
+
+    account_address() noexcept
+      : account_address(crypto::public_key{}, crypto::public_key{})
+    {}
+
+    account_address(const account_address&) = default;
+    account_address& operator=(const account_address&) = default;
+
     crypto::public_key view_public; //!< Must be first for LMDB optimizations.
     crypto::public_key spend_public;
   };
   static_assert(sizeof(account_address) == 64, "padding in account_address");
   WIRE_DECLARE_OBJECT(account_address);
-
+  
   //! Major index of a subaddress
   enum class major_index : std::uint32_t { primary = 0 };
   WIRE_AS_INTEGER(major_index);
@@ -163,10 +222,15 @@ namespace db
     minor_index min_i;
 
     crypto::public_key get_spend_public(account_address const& base, crypto::secret_key const& view) const;
+    crypto::public_key get_spend_public(carrot::account const& base, crypto::secret_key const& address) const;
     constexpr bool is_zero() const noexcept
     {
       return maj_i == major_index::primary && min_i == minor_index::primary;
-    } 
+    }
+    static constexpr address_index primary() noexcept
+    {
+      return {major_index::primary, minor_index::primary};
+    }
   };
   static_assert(sizeof(address_index) == 4 * 2, "padding in address_index");
   WIRE_DECLARE_OBJECT(address_index);
@@ -184,7 +248,7 @@ namespace db
   {
     account_id id;          //!< Must be first for LMDB optimizations
     account_time access;    //!< Last time `get_address_info` was called.
-    account_address address;
+    account_pubs pubs;
     view_key key;           //!< Doubles as authorization handle for REST API.
     block_id scan_height;   //!< Last block scanned; check-ins are always by block
     block_id start_height;  //!< Account started scanning at this block height
@@ -193,6 +257,8 @@ namespace db
     char reserved[3];
     address_index lookahead;
     block_id lookahead_fail;
+
+    std::unique_ptr<carrot::balance_secrets> get_balance_secrets() const;
   };
   static_assert(sizeof(account) == (4 * 2) + 64 + 32 + (8 * 2) + (4 * 2) + (4 * 2) + 8, "padding in account");
   void write_bytes(wire::writer&, const account&, bool show_key = false);
@@ -267,6 +333,10 @@ namespace db
     return {extra(real_val >> 6), std::uint8_t(real_val & 0x3f)};
   }
 
+  // `output.spend_meta.mixin` is set to one of two below values when carrot
+  constexpr const std::uint32_t carrot_external = std::numeric_limits<std::uint32_t>::max();
+  constexpr const std::uint32_t carrot_internal = carrot_external - 1;
+
   //! Information for an output that has been received by an `account`.
   struct output
   {
@@ -278,9 +348,25 @@ namespace db
       output_id id;             //!< Unique id for output within monero
       // `link` and `id` must be in this order for LMDB optimizations
       std::uint64_t amount;
-      std::uint32_t mixin_count;//!< Ring-size of TX
+      std::uint32_t mixin_count;//!< Ring-size of TX or `carrot_output`
       std::uint32_t index;      //!< Offset within a tx
       crypto::public_key tx_public;
+
+      constexpr bool is_carrot() const noexcept
+      { return carrot_internal <= mixin_count; }
+
+      //! \return `mixin` value as used by LWS-RPC.
+      constexpr std::uint32_t rpc_mixin() const noexcept
+      { return is_carrot() ? std::numeric_limits<std::uint32_t>::max() : mixin_count; }
+
+      //! \return metadata when an external receive triggered an unknown spend
+      static constexpr spend_meta_ unknown() noexcept
+      {
+        return spend_meta_{
+          .id = output_id::unknown_spend(),
+          .mixin_count = carrot_external
+        }; 
+      }
     } spend_meta;
 
     std::uint64_t timestamp;
@@ -297,9 +383,13 @@ namespace db
     } payment_id;
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
+    crypto::key_image first_image; //!< First in tx
+    ::carrot::encrypted_janus_anchor_t anchor; //!< Useful for carrot spending
+
+    constexpr bool is_carrot() const noexcept { return spend_meta.is_carrot(); }
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
+    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32 + 16,
     "padding in output"
   );
   WIRE_DECLARE_OBJECT(output);
@@ -313,7 +403,7 @@ namespace db
     // `link`, `image`, and `source` must in this order for LMDB optimizations
     std::uint64_t timestamp;  //!< Timestamp of spend
     std::uint64_t unlock_time;//!< Unlock time of spend
-    std::uint32_t mixin_count;//!< Ring-size of TX output
+    std::uint32_t mixin_count;//!< Ring-size of TX output or carrot_output
     char reserved[3];
     std::uint8_t length;      //!< Length of `payment_id` field (0..32).
     crypto::hash payment_id;  //!< Unencrypted only, can't decrypt spend
@@ -333,13 +423,15 @@ namespace db
 
   struct request_info
   {
-    account_address address;//!< Must be first for LMDB optimizations
+    account_pubs pubs;//!< Must be first for LMDB optimizations
     view_key key;
     block_id start_height;
     account_time creation;        //!< Time the request was created.
     account_flags creation_flags; //!< Generated locally?
     char reserved[3];
     address_index lookahead;      //!< Desired subaddress lookahead
+
+    std::unique_ptr<carrot::balance_secrets> get_balance_secrets() const;
   };
   static_assert(sizeof(request_info) == 64 + 32 + 8 + (4 * 2) + (4*2), "padding in request_info");
   void write_bytes(wire::writer& dest, const request_info& self, bool show_key = false);

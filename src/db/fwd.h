@@ -33,6 +33,12 @@ namespace lws
 {
   class account;
 
+namespace carrot
+{
+  struct account;
+  struct balance_secrets;
+}
+
 namespace db
 {
   enum account_flags : std::uint8_t;
@@ -48,6 +54,7 @@ namespace db
 
   struct account;
   struct account_address;
+  struct account_pubs;
   struct address_index;
   struct block_info;
   struct key_image;
