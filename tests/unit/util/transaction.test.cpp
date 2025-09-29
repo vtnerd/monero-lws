@@ -27,6 +27,7 @@
 
 #include "transaction.test.h"
 
+#include "carrot_core/payment_proposal.h"        // monero/src
 #include "crypto/crypto.h"                       // monero/src
 #include "cryptonote_basic/account.h"            // monero/src
 #include "cryptonote_core/cryptonote_tx_utils.h" // monero/src

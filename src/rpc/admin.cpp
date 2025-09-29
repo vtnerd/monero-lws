@@ -79,7 +79,7 @@ namespace
   void write_bytes(wire::writer& dest, const truncated<lws::db::account>& self)
   {
     wire::object(dest,
-      wire::field("address", lws::db::address_string(self.value.address)),
+      wire::field("address", lws::db::address_string(lws::db::account_address{self.value})),
       wire::field("scan_height", self.value.scan_height),
       wire::field("access_time", self.value.access)
     );
@@ -88,7 +88,7 @@ namespace
   void write_bytes(wire::writer& dest, const truncated<lws::db::request_info>& self)
   {
     wire::object(dest,
-      wire::field("address", lws::db::address_string(self.value.address)),
+      wire::field("address", lws::db::address_string(lws::db::account_address{self.value})),
       wire::field("start_height", self.value.start_height),
       wire::field("lookahead", self.value.lookahead)
     );
