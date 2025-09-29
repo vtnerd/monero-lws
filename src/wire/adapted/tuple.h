@@ -24,24 +24,34 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #pragma once
 
-#include <cstdint>
+#include <array>
+#include <tuple>
+#include <utility>
 
-namespace lws { namespace version
+#include "wire/field.h"
+#include "wire/read.h"
+#include "wire/write.h"
+
+namespace wire
 {
-  constexpr const char branch[] = "@MLWS_COMMIT_BRANCH@";
-  constexpr const char commit[] = "@MLWS_COMMIT_HASH@";
-  constexpr const char date[] = "@MLWS_COMMIT_DATE@";
-  constexpr const char id[] = "1.0-alpha";
-  constexpr const char name[] = "monero-lws";
-
-  // openmonero is currently on 1.6 and we have multiple additions since then
-  namespace api
+  template<typename F, typename T, std::size_t... I>
+  void map_tuple(F& format, T& self, std::index_sequence<I...>)
   {
-    constexpr const std::uint16_t major = 1;
-    constexpr const std::uint16_t minor = 7;
-    constexpr const std::uint32_t combined = std::uint32_t(major) << 16 | minor;
+    const std::array<std::string, sizeof...(I)> names = {
+      std::to_string(I)...
+    };
+    wire::object(format, wire::field<I>(std::get<I>(names).c_str(), std::get<I>(self))...);
   }
-}} // lws // version
+
+  template<typename R, typename... T>
+  void read_bytes(R& source, std::tuple<T...>& dest)
+  { map_tuple(source, dest, std::index_sequence_for<T...>()); }
+
+  template<typename W, typename... T>
+  void write_bytes(W& dest, const std::tuple<T...>& source)
+  { map_tuple(dest, source, std::index_sequence_for<T...>()); }
+}
 

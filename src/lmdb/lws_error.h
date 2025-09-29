@@ -38,5 +38,5 @@
 
 namespace lws
 {
-  std::error_code log_lmdb_error(int err, int line, const char* file);
+  std::error_code log_lmdb_error(int err, int line, const char* file, int skip = 0);
 }

@@ -30,14 +30,18 @@
 #include "lmdb/error.h"  // monero/src
 #include "misc_log_ex.h" // monero/src
 
-std::error_code lws::log_lmdb_error(const int err, const int line, const char* file)
+std::error_code lws::log_lmdb_error(const int err, const int line, const char* file, int skip)
 {
   const std::error_code code{lmdb::error(err)};
-  char const* const name_end = std::strrchr(file, '/');
-  if (name_end)
-    file = name_end + 1;
 
-  MERROR("lmdb error (" << file << ':' << line << "): " << code.message());
+  if (err != skip)
+  {
+    char const* const name_end = std::strrchr(file, '/');
+    if (name_end)
+      file = name_end + 1;
+
+    MERROR("lmdb error (" << file << ':' << line << "): " << code.message());
+  }
   return code;
 }
 

@@ -26,22 +26,33 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
-#include <cstdint>
+#include <optional>
+#include "db/fwd.h"
+#include "crypto/crypto.h" // monero/src
 
-namespace lws { namespace version
+namespace carrot
 {
-  constexpr const char branch[] = "@MLWS_COMMIT_BRANCH@";
-  constexpr const char commit[] = "@MLWS_COMMIT_HASH@";
-  constexpr const char date[] = "@MLWS_COMMIT_DATE@";
-  constexpr const char id[] = "1.0-alpha";
-  constexpr const char name[] = "monero-lws";
-
-  // openmonero is currently on 1.6 and we have multiple additions since then
-  namespace api
+  struct janus_anchor_t;
+  using encrypted_janus_anchor_t = janus_anchor_t;
+  class key_image_device;
+  class view_incoming_key_device;
+}
+namespace lws { namespace carrot
+{
+  //! View public differs from "address" account - see carrot docs
+  struct account 
   {
-    constexpr const std::uint16_t major = 1;
-    constexpr const std::uint16_t minor = 7;
-    constexpr const std::uint32_t combined = std::uint32_t(major) << 16 | minor;
-  }
-}} // lws // version
+    crypto::public_key view;
+    crypto::public_key spend;
+    crypto::secret_key incoming;
 
+    explicit account(const db::account& source);
+    account() noexcept
+      : view{}, spend{}, incoming{}
+    {}
+  };
+
+  std::optional<crypto::key_image> get_image(const db::output& source, const ::carrot::key_image_device& imager, const ::carrot::view_incoming_key_device& incoming, const crypto::secret_key& balance_key);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key, const crypto::secret_key& image_key, const crypto::secret_key& address_key, const crypto::secret_key& incoming_key);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key);
+}} // lws // carrot

@@ -89,7 +89,8 @@ namespace
   {
     wire::object(dest,
       wire::field("address", lws::db::address_string(self.value.address)),
-      wire::field("start_height", self.value.start_height)
+      wire::field("start_height", self.value.start_height),
+      wire::field("lookahead", self.value.lookahead)
     );
   }
 
