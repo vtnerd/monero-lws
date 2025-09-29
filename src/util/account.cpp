@@ -1,4 +1,4 @@
-// Copyright (c) 2023, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,46 +25,27 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "account.h"
 
-#include "storage.test.h"
+#include "carrot_core/account_secrets.h" // monero/sr
+#include "carrot_impl/format_utils.h"    // monero/src
+#include "db/data.h"
+#include "ringct/rctOps.h"               // monero/src
 
-#include <boost/filesystem/operations.hpp>
-#include "common/util.h"   // monero/src/
-
-namespace lws { namespace db { namespace test
+namespace lws
 {
-  namespace
+  //! "Wallet" pubkeys as specified by carrot documentation
+  carrot_account::carrot_account(const db::account& source)
+    : spend(source.address.spend_public)
   {
-    boost::filesystem::path get_db_location()
+    unwrap(unwrap(incoming)) = source.key;
+    if (source.flags & db::view_balance_key)
     {
-      return tools::get_default_data_dir() + "light_wallet_server_unit_testing";
+      const crypto::secret_key balance = incoming;
+      carrot::make_carrot_viewincoming_key(balance, incoming);
     }
-  }
 
-  cleanup_db::~cleanup_db()
-  {
-    boost::filesystem::remove_all(get_db_location());
+    view = rct2pk(rct::scalarmultKey(rct::pk2rct(spend), rct::sk2rct(incoming)));
   }
+}
 
-  storage get_fresh_db()
-  {
-    const boost::filesystem::path location = get_db_location();
-    boost::filesystem::remove_all(location);
-    boost::filesystem::create_directories(location);
-    return storage::open(location.c_str(), 5);
-  }
-
-  db::account make_db_account(const account_address& pubs, const crypto::secret_key& key)
-  {
-    view_key converted_key{};
-    std::memcpy(std::addressof(converted_key), std::addressof(unwrap(unwrap(key))), sizeof(key));
-    return {
-      account_id(1), account_time(0), pubs, converted_key
-    };
-  }
-
-  lws::account make_account(const account_address& pubs, const crypto::secret_key& key)
-  {
-    return lws::account{make_db_account(pubs, key), {}, {}, {}};
-  }
-}}} // lws // db // test
