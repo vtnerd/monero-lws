@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,10 +27,13 @@
 
 #pragma once
 
-namespace lws
+#include <type_traits>
+
+#include "carrot_core/core_types.h" // monero/src
+#include "wire/traits.h"
+
+namespace wire
 {
-  struct carrot_account;
-  class gamma_picker;
-  struct random_output;
-  struct random_ring;
+  WIRE_DECLARE_BLOB(carrot::encrypted_janus_anchor_t);
+  WIRE_DECLARE_BLOB(carrot::view_tag_t);
 }

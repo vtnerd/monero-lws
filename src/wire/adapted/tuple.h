@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,10 +27,31 @@
 
 #pragma once
 
-namespace lws
+#include <array>
+#include <tuple>
+#include <utility>
+
+#include "wire/field.h"
+#include "wire/read.h"
+#include "wire/write.h"
+
+namespace wire
 {
-  struct carrot_account;
-  class gamma_picker;
-  struct random_output;
-  struct random_ring;
+  template<typename F, typename T, std::size_t... I>
+  void map_tuple(F& format, T& self, std::index_sequence<I...>)
+  {
+    const std::array<std::string, sizeof...(I)> names = {
+      std::to_string(I)...
+    };
+    wire::object(format, wire::field<I>(std::get<I>(names).c_str(), std::get<I>(self))...);
+  }
+
+  template<typename R, typename... T>
+  void read_bytes(R& source, std::tuple<T...>& dest)
+  { map_tuple(source, dest, std::index_sequence_for<T...>()); }
+
+  template<typename W, typename... T>
+  void write_bytes(W& dest, const std::tuple<T...>& source)
+  { map_tuple(dest, source, std::index_sequence_for<T...>()); }
 }
+

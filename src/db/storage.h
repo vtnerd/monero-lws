@@ -312,7 +312,7 @@ namespace db
         (whereas `subaddrs` may overlap with existing indexes).
       */
     expect<std::vector<subaddress_dict>>
-      upsert_subaddresses(account_id id, const account_address& address, const crypto::secret_key& view_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
+      upsert_subaddresses(account_id id, std::optional<crypto::secret_key> address_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
 
     /*! Update lookahead where `match` was a matching subaddress on-chain.
       \return The number of new subaddresses added via lookahead, or -1 if
