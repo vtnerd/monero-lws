@@ -623,8 +623,8 @@ namespace lws
                     tx.unlock_time,
                     db::carrot_output,
                     {0, 0, 0}, // reserved
-                    payment_id.first,
-                    payment_id.second.long_,
+                    0,
+                    crypto::hash{},
                     db::address_index{account_index.maj_i, db::minor_index::primary}, // best guess
                   }
                 );

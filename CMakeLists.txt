@@ -88,7 +88,9 @@ set(MONERO_LIBRARIES
   easylogging
   version
   wallet-crypto
+  fcmp_pp
   mx25519
+  wallet
 )
 
 set(MONERO_OPTIONAL wallet-crypto)

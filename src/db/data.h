@@ -311,6 +311,9 @@ namespace db
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
     crypto::key_image first; //!< Required for carrot/fmcp++ spending
+
+    constexpr bool is_carrot() const noexcept
+    { return spend_meta.mixin_count == carrot_output; }
   };
   static_assert(
     sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32,
