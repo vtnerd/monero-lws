@@ -31,6 +31,7 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <ctime>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 
@@ -42,6 +43,7 @@
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "wire.h"
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
@@ -133,6 +135,15 @@ namespace
       optional_rct = std::addressof(rct);
     }
 
+    carrot::encrypted_janus_anchor_t const* anchor = nullptr;
+    crypto::key_image const* first = nullptr;
+    if (self.data.first.is_carrot())
+    {
+      anchor = std::addressof(self.data.first.anchor);
+      if (!(unpack(self.data.first.extra).second & lws::db::coinbase_output))
+        first = std::addressof(self.data.first.first_image);
+    }
+
     wire::object(dest,
       wire::field("amount", lws::rpc::safe_uint64(self.data.first.spend_meta.amount)),
       wire::field("public_key", self.data.first.pub),
@@ -146,7 +157,9 @@ namespace
       wire::field("height", self.data.first.link.height),
       wire::field("spend_key_images", std::cref(self.data.second)),
       wire::optional_field("rct", optional_rct),
-      wire::field("recipient", std::cref(self.data.first.recipient))
+      wire::field("recipient", std::cref(self.data.first.recipient)),
+      wire::optional_field("first_key_image", first),
+      wire::optional_field("janus_anchor", anchor)
     );
   }
 
@@ -248,7 +261,7 @@ namespace lws
       wire::field("key_image", std::cref(self.possible_spend.image)),
       wire::field("tx_pub_key", std::cref(self.meta.tx_public)),
       wire::field("out_index", self.meta.index),
-      wire::field("mixin", self.possible_spend.mixin_count),
+      wire::field("mixin", self.meta.rpc_mixin()),
       wire::field("sender", std::cref(self.possible_spend.sender))
     );
   }
@@ -301,8 +314,7 @@ namespace lws
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
         wire::field("mempool", false),
-        wire::field("mixin", self.value().info.spend_meta.mixin_count),
-        wire::field("recipient", self.value().info.recipient),
+        wire::field("mixin", self.value().info.spend_meta.rpc_mixin()),
         wire::field("spent_outputs", std::cref(self.value().spends))
       );
     }
@@ -386,13 +398,27 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, login_request& self)
   {
     std::string address;
+    std::optional<db::view_key> view_key;
+    std::optional<db::view_key> balance_key;
     wire::object(source,
       wire::field("address", std::ref(address)),
-      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("view_key", std::ref(view_key)),
+      wire::optional_field("balance_key", std::ref(balance_key)),
       WIRE_FIELD(create_account),
       WIRE_FIELD(generated_locally)
     );
+
+    const unsigned count =
+      unsigned(bool(view_key)) + unsigned(bool(balance_key));
+    if (count != 1)
+      WIRE_DLOG_THROW(wire::error::schema::fixed_binary, "one of: view_key, balance_key");
+
+    self.balance_key = bool(balance_key);
     convert_address(address, self.creds.address);
+    if (view_key)
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*view_key), sizeof(view_key));
+    else
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*balance_key), sizeof(balance_key));
   }
   void rpc::write_bytes(wire::json_writer& dest, const login_response self)
   {
@@ -402,9 +428,11 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, provision_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_OPTIONAL_FIELD(maj_i),
       WIRE_OPTIONAL_FIELD(min_i),
       WIRE_OPTIONAL_FIELD(n_maj),
@@ -412,6 +440,8 @@ namespace lws
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
 
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)
@@ -426,12 +456,16 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_FIELD_ARRAY(subaddrs, max_subaddrs),
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
 } // lws
