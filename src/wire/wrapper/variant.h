@@ -31,6 +31,7 @@
 #include <boost/variant/variant_fwd.hpp>
 #include <functional>
 #include <utility>
+#include <variant>
 
 #include "wire/error.h"
 #include "wire/fwd.h"
@@ -114,6 +115,10 @@ namespace wire
     // other variant overloads can be added here as needed
 
     template<typename U, typename... T>
+    inline const U* get_if(const std::variant<T...>& value)
+    { return std::get_if<U>(std::addressof(value)); }
+
+    template<typename U, typename... T>
     inline const U* get_if(const boost::variant<T...>& value)
     { return boost::get<U>(std::addressof(value)); }
 
@@ -177,6 +182,14 @@ namespace wire
   namespace adapt
   {
     // other variant overloads can be added here as needed
+
+    template<typename U, typename... T>
+    inline U& get(std::variant<T...>& value)
+    { return std::get<U>(value); }
+
+    template<typename U, typename... T>
+    inline const U& get(const std::variant<T...>& value)
+    { return std::get<U>(value); }
 
     template<typename U, typename... T>
     inline U& get(boost::variant<T...>& value)

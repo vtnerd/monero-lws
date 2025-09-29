@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include "carrot_core/payment_proposal.h"             // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "cryptonote_core/cryptonote_tx_utils.h"      // monero/src
 #include "db/account.h"
@@ -46,8 +47,8 @@ namespace
   lws::db::account make_account(const cryptonote::account_keys& src)
   {
     lws::db::account out{};
-    std::memcpy(&out.address.spend_public, &src.m_account_address.m_spend_public_key, sizeof(out.address.spend_public));
-    std::memcpy(&out.address.view_public, &src.m_account_address.m_view_public_key, sizeof(out.address.view_public));
+    std::memcpy(&out.pubs.flex_public, &src.m_account_address.m_spend_public_key, sizeof(out.pubs.flex_public));
+    std::memcpy(&out.pubs.view_public, &src.m_account_address.m_view_public_key, sizeof(out.pubs.view_public));
     std::memcpy(&out.key, &unwrap(unwrap(src.m_view_secret_key)), sizeof(out.key));
     return out;
   }
@@ -62,7 +63,7 @@ LWS_CASE("mempool")
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     lws::mempool pool{};
-    lws::account account{make_account(base), {}, {}};
+    lws::account account{make_account(base), {}, {}, {}};
 
     SECTION("empty")
     {
@@ -159,7 +160,7 @@ LWS_CASE("mempool")
             }
           }
         };
-        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), address, base.m_view_secret_key, indexes, 2));
+        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, indexes, 2));
       }
 
       hw::core::device_default hw{};
@@ -181,7 +182,7 @@ LWS_CASE("mempool")
         auto reader = MONERO_UNWRAP(db.start_read());
         const lws::db::account db_account = MONERO_UNWRAP(reader.get_account(address)).second;
         lookahead = db_account.lookahead;
-        lws::account full_account{db_account, {}, {}};
+        lws::account full_account{db_account, {}, {}, {}};
 
         const auto results = pool.scan_account(full_account, reader);
         EXPECT(results.size() == 1);
@@ -231,7 +232,7 @@ LWS_CASE("mempool")
 
       {
         auto reader = MONERO_UNWRAP(db.start_read());
-        lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}};
+        lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}, {}};
         EXPECT(pool.scan_account(full_account, reader).empty());
       }
 
@@ -244,11 +245,11 @@ LWS_CASE("mempool")
             }
           }
         };
-        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), address, other.m_view_secret_key, indexes, 2));
+        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, indexes, 2));
       }
 
       auto reader = MONERO_UNWRAP(db.start_read());
-      lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}};
+      lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}, {}};
       const auto results = pool.scan_account(full_account, reader);
       EXPECT(results.size() == 1);
       EXPECT(results.at(0).hash == get_transaction_hash(tx.tx));

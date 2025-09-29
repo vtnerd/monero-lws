@@ -27,6 +27,7 @@
 
 #include "blocks.h"
 
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "cryptonote_config.h" // monero/src
 #include "crypto/hash-ops.h"   // monero/src
 #include "db/storage.h"
@@ -67,7 +68,8 @@ namespace lws
       {
         memset(&result, 0, sizeof(crypto::hash));  // only happens when generating genesis block
       }
-      crypto::rx_slow_hash(hash.data, bd.data(), bd.size(), result.data);
+      const int rx_variant = cryptonote::get_randomx_variant_for_hf_version(major_version);
+      crypto::rx_slow_hash(hash.data, rx_variant, bd.data(), bd.size(), result.data);
     } else {
       const int pow_variant = major_version >= 7 ? major_version - 6 : 0;
       crypto::cn_slow_hash(bd.data(), bd.size(), result, pow_variant, std::uint64_t(height));

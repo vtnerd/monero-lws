@@ -57,7 +57,7 @@ namespace lws { namespace db { namespace test
     return storage::open(location.c_str(), 5);
   }
 
-  db::account make_db_account(const account_address& pubs, const crypto::secret_key& key)
+  db::account make_db_account(const account_pubs& pubs, const crypto::secret_key& key)
   {
     view_key converted_key{};
     std::memcpy(std::addressof(converted_key), std::addressof(unwrap(unwrap(key))), sizeof(key));
@@ -66,9 +66,9 @@ namespace lws { namespace db { namespace test
     };
   }
 
-  lws::account make_account(const account_address& pubs, const crypto::secret_key& key)
+  lws::account make_account(const account_pubs& pubs, const crypto::secret_key& key)
   {
-    return lws::account{make_db_account(pubs, key), {}, {}};
+    return lws::account{make_db_account(pubs, key), {}, {}, {}};
   }
 }}} // lws // db // test
 
@@ -148,7 +148,7 @@ LWS_CASE("lws::db::storage")
 
       // both find the height index entry at the account's scan_height
       EXPECT(db.rescan(scan_height, {std::addressof(account_address), 1}));
-      lws::account real_account{get_account(), {}, {}};
+      lws::account real_account{get_account(), {}, {}, {}};
       EXPECT(db.update(scan_height, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
       EXPECT(get_account().scan_height == lws::db::block_id(to_uint(last_block.id) + 5));
     }
@@ -166,7 +166,7 @@ LWS_CASE("lws::db::storage")
       EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 10));
       EXPECT(get_account().scan_height == scan_height);
 
-      lws::account real_account{get_account(), {}, {}};
+      lws::account real_account{get_account(), {}, {}, {}};
       EXPECT(db.update(scan_height, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
       EXPECT(get_account().scan_height == lws::db::block_id(to_uint(last_block.id) + 5));
     }
@@ -191,7 +191,7 @@ LWS_CASE("lws::db::storage")
       const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
       const crypto::key_image image = crypto::rand<crypto::key_image>();
 
-      lws::account real_account{account, {}, {}};
+      lws::account real_account{account, {}, {}, {}};
       real_account.add_out(
         lws::db::output{
           link,

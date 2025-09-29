@@ -88,9 +88,9 @@ namespace
 
 LWS_CASE("db::storage::*_webhook")
 {
-  lws::db::account_address account{};
+  lws::db::account_pubs account{};
   crypto::secret_key view{};
-  crypto::generate_keys(account.spend_public, view);
+  crypto::generate_keys(account.flex_public, view);
   crypto::generate_keys(account.view_public, view);
 
   SETUP("One Account and one Webhook Database")
@@ -99,7 +99,7 @@ LWS_CASE("db::storage::*_webhook")
     lws::db::storage db = lws::db::test::get_fresh_db();
     const lws::db::block_info last_block =
       MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
-    MONERO_UNWRAP(db.add_account(account, view));
+    MONERO_UNWRAP(db.add_account(lws::db::account_address{account}, view));
 
     const auto get_height = [&db] (const lws::db::block_id height) -> std::vector<lws::db::account_id>
     {
@@ -113,7 +113,7 @@ LWS_CASE("db::storage::*_webhook")
         lws::db::webhook_data{"http://the_url", "the_token", 3}
       };
       MONERO_UNWRAP(
-        db.add_webhook(lws::db::webhook_type::tx_confirmation, account, std::move(value))
+        db.add_webhook(lws::db::webhook_type::tx_confirmation, lws::db::account_address{account}, std::move(value))
       );
     }
 
@@ -134,8 +134,9 @@ LWS_CASE("db::storage::*_webhook")
 
     SECTION("storage::clear_webhooks(addresses)")
     {
+      const lws::db::account_address address{account};
       EXPECT(MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_webhooks()).size() == 1);
-      MONERO_UNWRAP(db.clear_webhooks({std::addressof(account), 1}));
+      MONERO_UNWRAP(db.clear_webhooks({std::addressof(address), 1}));
 
       lws::db::storage_reader reader = MONERO_UNWRAP(db.start_read());
       const auto result = MONERO_UNWRAP(reader.get_webhooks());
@@ -166,10 +167,10 @@ LWS_CASE("db::storage::*_webhook")
           lws::db::webhook_data{"http://the_url_spend", "the_token_spend"}
         };
         MONERO_UNWRAP(
-          db.add_webhook(lws::db::webhook_type::tx_spend, account, std::move(value))
+          db.add_webhook(lws::db::webhook_type::tx_spend, lws::db::account_address{account}, std::move(value))
         );
         MONERO_UNWRAP(
-          db.add_webhook(lws::db::webhook_type::tx_confirmation, account, std::move(value2))
+          db.add_webhook(lws::db::webhook_type::tx_confirmation, lws::db::account_address{account}, std::move(value2))
         );
       }
 
@@ -429,7 +430,7 @@ LWS_CASE("db::storage::*_webhook")
           lws::db::webhook_data{"http://the_url_spend", "the_token_spend"}
         };
         MONERO_UNWRAP(
-          db.add_webhook(lws::db::webhook_type::tx_spend, account, std::move(value))
+          db.add_webhook(lws::db::webhook_type::tx_spend, lws::db::account_address{account}, std::move(value))
         );
       }
       SECTION("storage::get_webhooks()")

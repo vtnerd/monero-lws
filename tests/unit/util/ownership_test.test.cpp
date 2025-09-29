@@ -50,8 +50,8 @@ namespace
   {
     lws::db::account out{};
     out.id = id;
-    std::memcpy(&out.address.spend_public, &src.m_account_address.m_spend_public_key, sizeof(out.address.spend_public));
-    std::memcpy(&out.address.view_public, &src.m_account_address.m_view_public_key, sizeof(out.address.view_public));
+    std::memcpy(&out.pubs.flex_public, &src.m_account_address.m_spend_public_key, sizeof(out.pubs.flex_public));
+    std::memcpy(&out.pubs.view_public, &src.m_account_address.m_view_public_key, sizeof(out.pubs.view_public));
     std::memcpy(&out.key, &unwrap(unwrap(src.m_view_secret_key)), sizeof(out.key));
     return out;
   }
@@ -170,16 +170,16 @@ LWS_CASE("lws::ownership_test")
       std::vector<lws::account> users;
       if (sender_first)
       {
-        users.emplace_back(make_account(sender, sender_id), std::move(spendable), std::vector<crypto::public_key>{});
-        users.emplace_back(make_account(receiver, receiver_id), std::vector<std::pair<lws::db::output_id, lws::db::address_index>>{}, std::vector<crypto::public_key>{});
+        users.emplace_back(make_account(sender, sender_id), std::move(spendable), std::vector<lws::account::balance_t>{}, std::vector<crypto::public_key>{});
+        users.emplace_back(make_account(receiver, receiver_id), std::vector<lws::account::spendable_t>{}, std::vector<lws::account::balance_t>{}, std::vector<crypto::public_key>{});
       }
       else
       {
-        users.emplace_back(make_account(receiver, receiver_id), std::vector<std::pair<lws::db::output_id, lws::db::address_index>>{}, std::vector<crypto::public_key>{});
-        users.emplace_back(make_account(sender, sender_id), std::move(spendable), std::vector<crypto::public_key>{});
+        users.emplace_back(make_account(receiver, receiver_id), std::vector<lws::account::spendable_t>{}, std::vector<lws::account::balance_t>{}, std::vector<crypto::public_key>{});
+        users.emplace_back(make_account(sender, sender_id), std::move(spendable), std::vector<lws::account::balance_t>{}, std::vector<crypto::public_key>{});
       }
 
-      scan(epee::to_mut_span(users), lws::db::block_id(10), 0, nullptr, tx, {100, 101});
+      scan(epee::to_mut_span(users), lws::db::block_id(10), 0, nullptr, tx, {100, 101}, false);
 
       EXPECT(outputs.size() == 2);
       for (const auto& output : outputs)
