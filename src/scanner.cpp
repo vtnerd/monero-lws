@@ -45,6 +45,7 @@
 #include "common/error.h"                             // monero/src
 #include "config.h"
 #include "carrot_core/device_ram_borrowed.h"          // monero/src
+#include "carrot_core/enote_utils.h"                   // monero/src
 #include "carrot_core/scan.h"                         // monero/src
 #include "carrot_impl/format_utils.h"                 // monero/src
 #include "crypto/crypto.h"                            // monero/src
@@ -358,13 +359,13 @@ namespace lws
           continue; // to next user
 
         const account::key_type account_type = user.type();
-        const carrot::view_incoming_key_ram_borrowed_device incoming_device{user.view_key()}; 
+        const crypto::secret_key& view_key = user.view_key();
 
         mx25519_pubkey derived;
         crypto::key_derivation ed25519_derived;
-        if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(key.pub_key), derived))
+        if (is_carrot && carrot::make_carrot_uncontextualized_shared_key_receiver(view_key, carrot::raw_byte_convert<mx25519_pubkey>(key.pub_key), derived))
         {}
-        else if (!is_carrot && crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), ed25519_derived))
+        else if (!is_carrot && crypto::wallet::generate_key_derivation(key.pub_key, view_key, ed25519_derived))
         {
           derived = carrot::raw_byte_convert<mx25519_pubkey>(ed25519_derived);
         }
@@ -378,9 +379,9 @@ namespace lws
           for (auto const& out: tx.vout)
           {
             ++index;
-            if (is_carrot && incoming_device.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(additional_tx_pub_keys.data[index]), additional_derivations[index]))
+            if (is_carrot && carrot::make_carrot_uncontextualized_shared_key_receiver(view_key, carrot::raw_byte_convert<mx25519_pubkey>(additional_tx_pub_keys.data[index]), additional_derivations[index]))
             {}
-            else if (!is_carrot && crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), ed25519_derived))
+            else if (!is_carrot && crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], view_key, ed25519_derived))
             {
               additional_derivations[index] = carrot::raw_byte_convert<mx25519_pubkey>(ed25519_derived);
             }
@@ -424,7 +425,7 @@ namespace lws
                   carrot_subaccount->first,
                   timestamp,
                   tx.unlock_time,
-                  db::carrot_output,
+                  db::carrot_internal,
                   {0, 0, 0}, // reserved
                   payment_id.first,
                   payment_id.second.long_,
@@ -490,6 +491,7 @@ namespace lws
           mx25519_pubkey active_derived{};
           crypto::public_key active_pub{};
           rct::key mask{};
+          carrot::encrypted_janus_anchor_t anchor{};
 
           // inspect the additional and traditional keys
           for (std::size_t attempt = 0; attempt < 2; ++attempt)
@@ -521,12 +523,18 @@ namespace lws
               carrot::payment_id_t decrypted_id{};
               carrot::janus_anchor_t janus;
 
+              carrot::encrypted_amount_t encrypted_amount;
+              static_assert(sizeof(encrypted_amount) <= sizeof(tx.rct_signatures.ecdhInfo.at(index).amount));
+              std::memcpy(std::addressof(encrypted_amount), std::addressof(tx.rct_signatures.ecdhInfo.at(index).amount), sizeof(encrypted_amount));
+
+              const carrot::view_incoming_key_ram_borrowed_device incoming_device{view_key}; 
               const carrot::view_balance_secret_ram_borrowed_device balance_device{user.balance_key()}; 
               const auto& carrot_info = boost::get<cryptonote::txout_to_carrot_v1>(out.target);
+              anchor = carrot_info.encrypted_janus_anchor;
               carrot::CarrotEnoteV1 enote{
                 out_pub_key,
                 tx.rct_signatures.outPk.at(index).mask,
-                {},
+                encrypted_amount,
                 carrot_info.encrypted_janus_anchor,
                 carrot_info.view_tag,
                 carrot::raw_byte_convert<mx25519_pubkey>(active_pub),
@@ -557,8 +565,9 @@ namespace lws
               {
                 payment_id.first = sizeof(crypto::hash8);
                 payment_id.second.short_ = carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
+                mixin = db::carrot_external;
               } 
-              else if (account_type != account::key_type::balance || !carrot::try_scan_carrot_enote_internal_receiver(
+              else if (account_type == account::key_type::balance && carrot::try_scan_carrot_enote_internal_receiver(
                 enote,
                 balance_device,
                 gout,
@@ -568,10 +577,13 @@ namespace lws
                 blinding,
                 enote_type,
                 janus
-              ))
+                ))
+              {
+                mixin = db::carrot_internal;
+              }
+              else
                 continue; // to next available active_derived
 
-              mixin = db::carrot_output;
               mask = carrot::raw_byte_convert<rct::key>(tools::unwrap(blinding));
             }
             else if (/* !is_carrot && */ !crypto::wallet::derive_subaddress_public_key(out_pub_key, carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, derived_pub))
@@ -621,7 +633,7 @@ namespace lws
                     db::output_id::unknown_spend(), // no clue which output was spent
                     timestamp,
                     tx.unlock_time,
-                    db::carrot_output,
+                    db::carrot_external,
                     {0, 0, 0}, // reserved
                     0,
                     crypto::hash{},
@@ -686,7 +698,8 @@ namespace lws
               payment_id.second,
               cryptonote::get_tx_fee(tx),
               account_index,
-              first_key_image
+              first_key_image,
+              anchor
             }
           );
 

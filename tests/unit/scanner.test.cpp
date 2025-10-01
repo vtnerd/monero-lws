@@ -30,6 +30,7 @@
 
 #include <boost/thread.hpp>
 
+#include "carrot_core/account_secrets.h"
 #include "carrot_core/device_ram_borrowed.h"          // monero/src
 #include "carrot_impl/address_device_ram_borrowed.h"  // monero/src
 #include "carrot_impl/format_utils.h"                 // monero/src
@@ -266,7 +267,7 @@ namespace
           {},
           {},
           carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public),
-          source.first,
+          source.first_image,
           source.spend_meta.amount,
           std::nullopt,
           carrot::subaddress_index_extended{
@@ -293,7 +294,7 @@ namespace
     };
   }
 
-  transaction make_carrot_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const tree_cache& cache, const curve_tree& tree, const std::vector<lws::db::output>& sources)
+  transaction make_carrot_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const lws::db::account_address& dest, const tree_cache& cache, const curve_tree& tree, const std::vector<lws::db::output>& sources, const carrot::payment_id_t& pid = {})
   {
     struct select_inputs
     {
@@ -309,19 +310,7 @@ namespace
         out = sources;
       }
     };
- 
-    struct pair
-    {
-      crypto::public_key pub;
-      crypto::secret_key sec;
-    };
-
-    pair spend{};
-    pair view{};
-
-    crypto::generate_keys(spend.pub, spend.sec);
-    crypto::generate_keys(view.pub, view.sec);
-
+  
     std::vector<carrot::CarrotSelectedInput> sources_real;
     for (const auto& source : sources)
       sources_real.push_back(make_carrot_input(source));
@@ -335,7 +324,7 @@ namespace
     carrot::make_carrot_transaction_proposal_v1_transfer(
       {
         carrot::CarrotPaymentProposalV1{
-          carrot::CarrotDestinationV1{spend.pub, view.pub, false},
+          carrot::CarrotDestinationV1{dest.spend_public, dest.view_public, false, pid},
           amount,
           carrot::gen_janus_anchor()
         }
@@ -433,6 +422,26 @@ namespace
       ),
       .carrot = enotes
     };
+  }
+
+  transaction make_carrot_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const tree_cache& cache, const curve_tree& tree, const std::vector<lws::db::output>& sources)
+  { 
+    struct pair
+    {
+      crypto::public_key pub;
+      crypto::secret_key sec;
+
+      pair()
+        : pub{}, sec{}
+      {
+        crypto::generate_keys(pub, sec);
+      }
+    };
+
+    pair spend{};
+    pair view{};
+
+    return make_carrot_tx(lest_env, keys, {spend.pub, view.pub}, cache, tree, sources);
   }
 
   void scanner_thread(lws::scanner& scanner, void* ctx, const std::vector<epee::byte_slice>& reply)
@@ -535,6 +544,29 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
     keys2.m_account_address.m_view_public_key,
     keys2.m_account_address.m_spend_public_key
   };
+
+  cryptonote::account_keys keys3{};
+  crypto::generate_keys(keys3.m_account_address.m_spend_public_key, keys3.m_spend_secret_key);
+
+  // carrot view-balance account
+  lws::db::account_address account3{};
+  {
+    crypto::secret_key incoming_key{};
+    crypto::secret_key prove_key{};
+    crypto::secret_key image_key{};
+    crypto::key_derivation view_public{};
+
+    carrot::make_carrot_provespend_key(keys3.m_spend_secret_key, prove_key);
+    carrot::make_carrot_viewbalance_secret(keys3.m_spend_secret_key, keys3.m_view_secret_key);
+    carrot::make_carrot_generateimage_key(keys3.m_view_secret_key, image_key);
+    carrot::make_carrot_spend_pubkey(image_key, prove_key, account3.spend_public); 
+
+    carrot::make_carrot_viewincoming_key(keys3.m_view_secret_key, incoming_key);
+    crypto::secret_key_to_public_key(incoming_key, account3.view_public);
+
+    keys3.m_account_address.m_spend_public_key = account3.spend_public;
+    keys3.m_account_address.m_view_public_key = account3.view_public;
+  }
 
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
@@ -737,7 +769,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
       );
  
       // third block block
-      transaction tx5 = make_carrot_tx(lest_env, keys, cache, *tree, {legacy_output});
+      transaction tx5 = make_carrot_tx(lest_env, keys, account3, cache, *tree, {legacy_output});
 
       bmessage.blocks.emplace_back();
       bmessage.blocks.back().block.miner_tx = make_miner_tx(lest_env, last_block.id).tx;
@@ -781,6 +813,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
 
       EXPECT(db.add_account(account, keys.m_view_secret_key));
       EXPECT(db.add_account(account2, keys2.m_view_secret_key));
+      EXPECT(db.add_account(account3, keys3.m_view_secret_key, lws::db::view_balance_key));
 
       messages.clear();
       messages.push_back(daemon_response(bmessage));
@@ -797,7 +830,6 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
         const join on_scope_exit{server_thread};
         scanner.run(std::move(rpc), 1, {}, {}, opts);
       }
-
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
 
       EXPECT(get_account().scan_height == lws::db::block_id(std::uint64_t(legacy_block_id) + 1));
@@ -805,7 +837,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
         static constexpr const std::uint64_t miner_reward = 35184372088830;
         const auto carrot1_block_id = lws::db::block_id(std::uint64_t(legacy_block_id) + 1);
         const std::uint8_t carrot1_index = tx5.carrot.at(0).amount == miner_reward / 2;
+        const std::uint8_t carrot2_index = tx5.carrot.at(0).amount != miner_reward / 2;
         const std::uint64_t carrot1_amount = tx5.carrot.at(carrot1_index).amount;
+        const std::uint64_t carrot2_amount = tx5.carrot.at(carrot2_index).amount;
         const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
           {
             {lws::db::output_id{0, 100}, miner_reward}, legacy_output 
@@ -924,7 +958,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, std::uint64_t(301 + carrot1_index)},
                 carrot1_amount,
-                lws::db::carrot_output,
+                lws::db::carrot_external,
                 carrot1_index,
                 carrot::raw_byte_convert<crypto::public_key>(
                   tx5.carrot.at(carrot1_index).enote.enote_ephemeral_pubkey
@@ -940,7 +974,8 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               519840000, // fee
               lws::db::address_index{},
-              tx5.carrot.at(carrot1_index).enote.tx_first_key_image
+              tx5.carrot.at(carrot1_index).enote.tx_first_key_image,
+              tx5.carrot.at(carrot1_index).enote.anchor_enc
             }
           }
         };
@@ -971,7 +1006,66 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
             EXPECT(real_output.payment_id.short_ == expected_output->second.payment_id.short_);
           EXPECT(real_output.fee == expected_output->second.fee);
           EXPECT(real_output.recipient == expected_output->second.recipient);
-          EXPECT(real_output.first == expected_output->second.first);
+          EXPECT(real_output.first_image == expected_output->second.first_image);
+          EXPECT(real_output.anchor == expected_output->second.anchor);
+        }
+
+        const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected2{
+          {
+            {lws::db::output_id{0, std::uint64_t(301 + carrot2_index)}, carrot2_amount}, lws::db::output{
+              lws::db::transaction_link{carrot1_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(301 + carrot2_index)},
+                carrot2_amount,
+                lws::db::carrot_external,
+                carrot2_index,
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx5.carrot.at(carrot1_index).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.carrot.at(carrot2_index).enote.onetime_address,
+              tx5.carrot.at(carrot2_index).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              519840000, // fee
+              lws::db::address_index{},
+              tx5.carrot.at(carrot2_index).enote.tx_first_key_image,
+              tx5.carrot.at(carrot2_index).enote.anchor_enc
+            }
+          }
+        };
+
+        outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(3)));
+        EXPECT(outputs.count() == 1);
+        output_it = outputs.make_iterator();
+        for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
+        {
+          auto real_output = *output_it;
+          const auto expected_output =
+            expected2.find(std::make_pair(real_output.spend_meta.id, real_output.spend_meta.amount));
+          EXPECT(expected_output != expected.end());
+
+          EXPECT(real_output.link.height == expected_output->second.link.height);
+          EXPECT(real_output.link.tx_hash == expected_output->second.link.tx_hash);
+          EXPECT(real_output.spend_meta.id == expected_output->second.spend_meta.id);
+          EXPECT(real_output.spend_meta.amount == expected_output->second.spend_meta.amount);
+          EXPECT(real_output.spend_meta.mixin_count == expected_output->second.spend_meta.mixin_count);
+          EXPECT(real_output.spend_meta.index == expected_output->second.spend_meta.index);
+          EXPECT(real_output.tx_prefix_hash == expected_output->second.tx_prefix_hash);
+          EXPECT(real_output.spend_meta.tx_public == expected_output->second.spend_meta.tx_public);
+          EXPECT(real_output.pub == expected_output->second.pub);
+          EXPECT(rct::commit(real_output.spend_meta.amount, real_output.ringct_mask) == expected_output->second.ringct_mask);
+          EXPECT(real_output.extra == expected_output->second.extra);
+          if (unpack(expected_output->second.extra).second == 8)
+            EXPECT(real_output.payment_id.short_ == expected_output->second.payment_id.short_);
+          EXPECT(real_output.fee == expected_output->second.fee);
+          EXPECT(real_output.recipient == expected_output->second.recipient);
+          EXPECT(real_output.first_image == expected_output->second.first_image);
+          EXPECT(real_output.anchor == expected_output->second.anchor);
         }
 
         auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
@@ -1009,13 +1103,16 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
         EXPECT(real_spend.link.height == carrot1_block_id);
         EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx5.tx));
         EXPECT(real_spend.source == lws::db::output_id::unknown_spend());
-        EXPECT(real_spend.mixin_count == lws::db::carrot_output);
+        EXPECT(real_spend.mixin_count == lws::db::carrot_external);
         EXPECT(real_spend.length == 0);
         EXPECT(real_spend.payment_id == crypto::hash{});
         EXPECT(real_spend.sender == lws::db::address_index{});
 
         EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
         EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
+
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(3))).count() == 1);
+        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(3))).count() == 0);
       }
     } //SECTION (lws::scanner::run)
   } // SETUP

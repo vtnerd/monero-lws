@@ -43,6 +43,7 @@
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "wire.h"
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
@@ -134,6 +135,15 @@ namespace
       optional_rct = std::addressof(rct);
     }
 
+    carrot::encrypted_janus_anchor_t const* anchor = nullptr;
+    crypto::key_image const* first = nullptr;
+    if (self.data.first.is_carrot())
+    {
+      anchor = std::addressof(self.data.first.anchor);
+      if (!(unpack(self.data.first.extra).second & lws::db::coinbase_output))
+        first = std::addressof(self.data.first.first_image);
+    }
+
     wire::object(dest,
       wire::field("amount", lws::rpc::safe_uint64(self.data.first.spend_meta.amount)),
       wire::field("public_key", self.data.first.pub),
@@ -147,7 +157,9 @@ namespace
       wire::field("height", self.data.first.link.height),
       wire::field("spend_key_images", std::cref(self.data.second)),
       wire::optional_field("rct", optional_rct),
-      wire::field("recipient", std::cref(self.data.first.recipient))
+      wire::field("recipient", std::cref(self.data.first.recipient)),
+      wire::optional_field("first_key_image", first),
+      wire::optional_field("janus_anchor", anchor)
     );
   }
 
@@ -249,7 +261,7 @@ namespace lws
       wire::field("key_image", std::cref(self.possible_spend.image)),
       wire::field("tx_pub_key", std::cref(self.meta.tx_public)),
       wire::field("out_index", self.meta.index),
-      wire::field("mixin", self.possible_spend.mixin_count),
+      wire::field("mixin", self.meta.rpc_mixin()),
       wire::field("sender", std::cref(self.possible_spend.sender))
     );
   }
@@ -302,8 +314,7 @@ namespace lws
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
         wire::field("mempool", false),
-        wire::field("mixin", self.value().info.spend_meta.mixin_count),
-        wire::field("recipient", self.value().info.recipient),
+        wire::field("mixin", self.value().info.meta.rpc_mixin()),
         wire::field("spent_outputs", std::cref(self.value().spends))
       );
     }

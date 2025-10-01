@@ -987,6 +987,7 @@ namespace db
     crypto::secret_key balance_key{};
     crypto::secret_key image_key{};
     crypto::secret_key address_key{};
+    crypto::secret_key incoming_key{};
     std::vector<std::pair<db::output_id, db::address_index>> receives{};
     std::vector<std::tuple<crypto::key_image, std::uint64_t, db::address_index>> balance{};
     std::vector<crypto::public_key> pubs{};
@@ -1002,6 +1003,7 @@ namespace db
       std::memcpy(std::addressof(tools::unwrap(balance_key)), std::addressof(user.key), sizeof(user.key));
       carrot::make_carrot_generateimage_key(balance_key, image_key);
       carrot::make_carrot_generateaddress_secret(balance_key, address_key);
+      carrot::make_carrot_viewincoming_key(balance_key, incoming_key);
     }
     else
       receives.reserve(elems); 
@@ -1009,19 +1011,19 @@ namespace db
 
     for (auto output = receive_list->make_iterator(); !output.is_end(); ++output)
     {
-      auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+      auto meta = output.get_value<MONERO_FIELD(db::output, spend_meta)>();
       auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
       pubs.emplace_back(output.get_value<MONERO_FIELD(db::output, pub)>());
       if (has_balance)
       {
         std::optional<crypto::key_image> image =
-          ::lws::get_image(output.get_value<db::output>(), user.address, balance_key, image_key, address_key);
+          ::lws::get_image(output.get_value<db::output>(), user.address, balance_key, image_key, address_key, incoming_key);
         if (!image)
           MONERO_THROW(error::crypto_failure, "Failed to calculate carrot key image");
-        balance.emplace_back(std::move(*image), std::move(id.low), std::move(subaddr));
+        balance.emplace_back(std::move(*image), std::move(meta.id.low), std::move(subaddr));
       }
-      else if (output.get_value<MONERO_FIELD(db::output, spend_meta.mixin_count)>() != carrot_output)
-        receives.emplace_back(std::move(id), std::move(subaddr));
+      else if (!meta.is_carrot())
+        receives.emplace_back(std::move(meta.id), std::move(subaddr));
     }
 
     return lws::account{user, std::move(receives), std::move(balance), std::move(pubs)};
@@ -2077,10 +2079,14 @@ namespace db
           std::addressof(unwrap(copy)), std::addressof(user.key), sizeof(copy)
         );
 
-        if (!crypto::secret_key_to_public_key(copy, verify))
-          return {lws::error::bad_view_key};
+        if (user.flags & account_flags::view_balance_key)
+        {
+          crypto::secret_key incoming_key{};
+          carrot::make_carrot_viewincoming_key(copy, incoming_key);
+          copy = incoming_key;
+        }
 
-        if (verify != user.address.view_public)
+        if (!crypto::secret_key_to_public_key(copy, verify) || verify != user.address.view_public)
           return {lws::error::bad_view_key};
       }
 

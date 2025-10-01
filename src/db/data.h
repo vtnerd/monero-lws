@@ -38,6 +38,7 @@
 #include <utility>
 #include <vector>
 
+#include "carrot_core/core_types.h"
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
@@ -270,7 +271,9 @@ namespace db
     return {extra(real_val >> 6), std::uint8_t(real_val & 0x3f)};
   }
 
-  constexpr const std::uint32_t carrot_output = std::numeric_limits<std::uint32_t>::max();
+  // `output.spend_meta.mixin` is set to one of two below values when carrot
+  constexpr const std::uint32_t carrot_external = std::numeric_limits<std::uint32_t>::max();
+  constexpr const std::uint32_t carrot_internal = carrot_external - 1;
 
   //! Information for an output that has been received by an `account`.
   struct output
@@ -287,11 +290,17 @@ namespace db
       std::uint32_t index;      //!< Offset within a tx
       crypto::public_key tx_public;
 
+      constexpr bool is_carrot() const noexcept
+      { return carrot_internal <= mixin_count; }
+
+      constexpr bool rpc_mixin() const noexcept
+      { return is_carrot() ? std::numeric_limits<std::uint32_t>::max() : mixin_count }
+
       static constexpr spend_meta_ unknown() noexcept
       {
         return spend_meta_{
           .id = output_id::unknown_spend(),
-          .mixin_count = std::numeric_limits<std::uint32_t>::max()
+          .mixin_count = carrot_external
         }; 
       }
     } spend_meta;
@@ -310,13 +319,13 @@ namespace db
     } payment_id;
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
-    crypto::key_image first; //!< Required for carrot/fmcp++ spending
+    crypto::key_image first_image; //!< First in tx
+    carrot::encrypted_janus_anchor_t anchor; //!< Useful for carrot spending
 
-    constexpr bool is_carrot() const noexcept
-    { return spend_meta.mixin_count == carrot_output; }
+    constexpr bool is_carrot() const noexcept { return spend_meta.is_carrot(); }
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32,
+    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4 + 32 + 16,
     "padding in output"
   );
   WIRE_DECLARE_OBJECT(output);

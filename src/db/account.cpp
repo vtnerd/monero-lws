@@ -300,7 +300,7 @@ namespace lws
         elem
       );
     }
-    else if (out.spend_meta.mixin_count != db::carrot_output)
+    else if (!out.is_carrot())
     {
       auto spendable_value = std::make_pair(out.spend_meta.id, out.recipient);
       spendable_.insert(
