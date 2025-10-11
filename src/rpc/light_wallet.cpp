@@ -314,7 +314,7 @@ namespace lws
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
         wire::field("mempool", false),
-        wire::field("mixin", self.value().info.meta.rpc_mixin()),
+        wire::field("mixin", self.value().info.spend_meta.rpc_mixin()),
         wire::field("spent_outputs", std::cref(self.value().spends))
       );
     }

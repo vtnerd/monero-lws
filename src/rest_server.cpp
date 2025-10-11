@@ -1471,7 +1471,7 @@ namespace lws
               db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
-          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global->options.max_subaddresses);
+          auto upserted = data.global->disk.clone().upsert_subaddresses(id, std::nullopt, ranges, data.global->options.max_subaddresses);
           if (!upserted)
             return upserted.error();
           new_ranges = std::move(*upserted);
@@ -1708,7 +1708,7 @@ namespace lws
         std::vector<db::subaddress_dict> all_ranges;
         auto disk = data.global->disk.clone();
         auto new_ranges =
-          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global->options.max_subaddresses);
+          disk.upsert_subaddresses(id, std::nullopt, req.subaddrs, data.global->options.max_subaddresses);
         if (!new_ranges)
           return new_ranges.error();
 

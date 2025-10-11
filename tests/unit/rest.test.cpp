@@ -328,8 +328,7 @@ LWS_CASE("rest_server")
           "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + "\","
           "\"coinbase\":true,"
           "\"mempool\":false,"
-          "\"mixin\":16,"
-          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
+          "\"mixin\":16}"
         "]}"
       );
 
@@ -478,7 +477,6 @@ LWS_CASE("rest_server")
           "\"coinbase\":true,"
           "\"mempool\":false,"
           "\"mixin\":16,"
-          "\"recipient\":{\"maj_i\":2,\"min_i\":66},"
           "\"spent_outputs\":[{"
             "\"amount\":\"40000\","
             "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","

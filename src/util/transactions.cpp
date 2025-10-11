@@ -70,7 +70,7 @@ std::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::
   return std::nullopt;
 }
 
-std::optional<crypto::key_image> lws::get_image(const db::output& source, const carrot::key_image_device& imager, const carrot::view_incoming_key_device& incoming)
+std::optional<crypto::key_image> lws::get_image(const db::output& source, const carrot::key_image_device& imager, const carrot::view_incoming_key_device& incoming, const crypto::secret_key& balance_key)
 {
   try
   {
@@ -86,8 +86,13 @@ std::optional<crypto::key_image> lws::get_image(const db::output& source, const 
         carrot::make_carrot_input_context_coinbase(std::uint64_t(source.link.height)) :
         carrot::make_carrot_input_context(source.first_image);
 
-    if (!incoming.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public), shared))
-      return std::nullopt;
+    if (source.spend_meta.mixin_count == db::carrot_external)
+    {
+      if (!incoming.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public), shared))
+        return std::nullopt;
+    }
+    else
+      shared = carrot::raw_byte_convert<mx25519_pubkey>(unwrap(unwrap(balance_key)));
 
     carrot::make_carrot_view_tag(shared.data, context, source.pub, tag);
 
@@ -162,7 +167,7 @@ std::optional<crypto::key_image> lws::get_image(const db::output& source, const 
   const carrot::key_image_device_composed final_device{
     image_device, hybrid_device, std::addressof(balance_device), std::addressof(incoming_device)
   };
-  return get_image(source, final_device, incoming_device);
+  return get_image(source, final_device, incoming_device, balance_key);
 }
 
 std::optional<crypto::key_image> lws::get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key)

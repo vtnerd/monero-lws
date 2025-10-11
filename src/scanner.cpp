@@ -336,7 +336,7 @@ namespace lws
         cryptonote::parse_tx_extra(tx.extra, extra);
         // allow partial parsing of tx extra (similar to wallet2.cpp)
 
-        if (!cryptonote::find_tx_extra_field_by_type(extra, key))
+        if (!cryptonote::find_tx_extra_field_by_type(extra, key) && !is_carrot)
           return;
 
         extra_nonce.emplace();
@@ -357,6 +357,9 @@ namespace lws
       {
         if (height <= user.scan_height())
           continue; // to next user
+
+        if (payment_id.first == sizeof(crypto::hash8))
+          payment_id = {};
 
         const account::key_type account_type = user.type();
         const crypto::secret_key& view_key = user.view_key();
@@ -397,6 +400,7 @@ namespace lws
         std::uint32_t mixin = 0;
         std::size_t index = -1;
         crypto::key_image first_key_image{};
+        cryptonote::txin_gen const* coinbase = nullptr;
         for (auto const& in : tx.vin)
         {
           ++index;
@@ -417,6 +421,7 @@ namespace lws
                 user.get_spendable(in_data->k_image) : std::nullopt;
             if (carrot_subaccount)
             {
+              // carrot balance-key case: output key image was observed
               spend_action(
                 user,
                 db::spend{
@@ -427,8 +432,8 @@ namespace lws
                   tx.unlock_time,
                   db::carrot_internal,
                   {0, 0, 0}, // reserved
-                  payment_id.first,
-                  payment_id.second.long_,
+                  0,
+                  crypto::hash{},
                   carrot_subaccount->second
                 }
               );
@@ -443,6 +448,7 @@ namespace lws
               if (!subaccount)
                 continue; // to next input
 
+              // original spend case: output listed in ring
               spend_action(
                 user,
                 db::spend{
@@ -460,7 +466,7 @@ namespace lws
               );
             }
           }
-          else if (boost::get<cryptonote::txin_gen>(std::addressof(in)))
+          else if ((coinbase = boost::get<cryptonote::txin_gen>(std::addressof(in))))
             ext = db::extra(ext | db::coinbase_output);
         }
 
@@ -485,22 +491,17 @@ namespace lws
             continue; // to next output
 
           bool found_pub = false;
-          std::uint64_t amount{};
-          carrot::CarrotEnoteType enote_type{};
-          db::address_index account_index{};
+          std::uint64_t amount = out.amount;
+          carrot::CarrotEnoteType enote_type = carrot::CarrotEnoteType::PAYMENT;
+          db::address_index account_index = db::address_index::primary();
           mx25519_pubkey active_derived{};
           crypto::public_key active_pub{};
-          rct::key mask{};
+          rct::key mask = rct::identity();
           carrot::encrypted_janus_anchor_t anchor{};
 
           // inspect the additional and traditional keys
           for (std::size_t attempt = 0; attempt < 2; ++attempt)
           {
-            amount = out.amount;
-            enote_type = carrot::CarrotEnoteType::PAYMENT;
-            account_index = db::address_index::primary();
-            mask = rct::identity();
-
             if (attempt == 0)
             {
               active_derived = derived;
@@ -514,77 +515,106 @@ namespace lws
             else
               break; // inspection loop
 
-            crypto::public_key derived_pub;
-            if (is_carrot)
+            crypto::public_key derived_pub{};
+            cryptonote::txout_to_carrot_v1 const* const carrot_info =
+              boost::get<cryptonote::txout_to_carrot_v1>(std::addressof(out.target));
+            if (carrot_info)
             {
-              crypto::secret_key gout;
-              crypto::secret_key tout;
-              crypto::secret_key blinding;
-              carrot::payment_id_t decrypted_id{};
-              carrot::janus_anchor_t janus;
+              payment_id = {};
+              mixin = db::carrot_external;
+              anchor = carrot_info->encrypted_janus_anchor;
 
-              carrot::encrypted_amount_t encrypted_amount;
-              static_assert(sizeof(encrypted_amount) <= sizeof(tx.rct_signatures.ecdhInfo.at(index).amount));
-              std::memcpy(std::addressof(encrypted_amount), std::addressof(tx.rct_signatures.ecdhInfo.at(index).amount), sizeof(encrypted_amount));
-
-              const carrot::view_incoming_key_ram_borrowed_device incoming_device{view_key}; 
-              const carrot::view_balance_secret_ram_borrowed_device balance_device{user.balance_key()}; 
-              const auto& carrot_info = boost::get<cryptonote::txout_to_carrot_v1>(out.target);
-              anchor = carrot_info.encrypted_janus_anchor;
-              carrot::CarrotEnoteV1 enote{
-                out_pub_key,
-                tx.rct_signatures.outPk.at(index).mask,
-                encrypted_amount,
-                carrot_info.encrypted_janus_anchor,
-                carrot_info.view_tag,
-                carrot::raw_byte_convert<mx25519_pubkey>(active_pub),
-                first_key_image
-              };
-
-              std::optional<carrot::encrypted_payment_id_t> cpayment_id;
-              if (extra_nonce && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
-                cpayment_id = carrot::raw_byte_convert<carrot::encrypted_payment_id_t>(payment_id.second.short_);
-
-              static_assert(sizeof(enote.amount_enc) <= sizeof(tx.rct_signatures.ecdhInfo.at(index).amount));
-              std::memcpy(enote.amount_enc.bytes, tx.rct_signatures.ecdhInfo.at(index).amount.bytes, sizeof(carrot::encrypted_amount_t));
-
-              if (carrot::try_scan_carrot_enote_external_receiver(
-                enote,                
-                cpayment_id,
-                active_derived,
-                {std::addressof(user.spend_public()), 1},
-                incoming_device,
-                gout,
-                tout,
-                derived_pub,
-                amount,
-                blinding,
-                decrypted_id,
-                enote_type
-                ))
+              if (coinbase)
               {
-                payment_id.first = sizeof(crypto::hash8);
-                payment_id.second.short_ = carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
-                mixin = db::carrot_external;
-              } 
-              else if (account_type == account::key_type::balance && carrot::try_scan_carrot_enote_internal_receiver(
-                enote,
-                balance_device,
-                gout,
-                tout,
-                derived_pub,
-                amount,
-                blinding,
-                enote_type,
-                janus
+                crypto::secret_key unused1, unused2;
+                if (!carrot::try_scan_carrot_coinbase_enote_receiver(
+                  carrot::CarrotCoinbaseEnoteV1{
+                    out_pub_key,
+                    out.amount,
+                    anchor,
+                    carrot_info->view_tag,
+                    carrot::raw_byte_convert<mx25519_pubkey>(active_pub),
+                    coinbase->height
+                  },
+                  active_derived,
+                  {std::addressof(user.spend_public()), 1},
+                  unused1,
+                  unused2,
+                  derived_pub
                 ))
+                  continue; // to next available active derived 
+              }
+              else if (index < tx.rct_signatures.outPk.size())
               {
-                mixin = db::carrot_internal;
+                crypto::hash8 temp{};
+                crypto::secret_key gout;
+                crypto::secret_key tout;
+                crypto::secret_key blinding{};
+                carrot::payment_id_t decrypted_id{};
+                carrot::janus_anchor_t janus;
+                std::optional<carrot::encrypted_payment_id_t> cpayment_id;
+
+                carrot::CarrotEnoteV1 enote{
+                  out_pub_key,
+                  tx.rct_signatures.outPk.at(index).mask,
+                  carrot::encrypted_amount_t{},
+                  anchor,
+                  carrot_info->view_tag,
+                  carrot::raw_byte_convert<mx25519_pubkey>(active_pub),
+                  first_key_image
+                };
+
+                static_assert(sizeof(enote.amount_enc) <= sizeof(tx.rct_signatures.ecdhInfo.at(index).amount));
+                if (index < tx.rct_signatures.ecdhInfo.size())
+                  std::memcpy(std::addressof(enote.amount_enc), std::addressof(tx.rct_signatures.ecdhInfo.at(index).amount), sizeof(enote.amount_enc));
+              
+                if (extra_nonce && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, temp))
+                  cpayment_id = carrot::raw_byte_convert<carrot::encrypted_payment_id_t>(temp);
+
+                const carrot::view_incoming_key_ram_borrowed_device incoming_device{view_key}; 
+                const carrot::view_balance_secret_ram_borrowed_device balance_device{user.balance_key()};  
+                if (carrot::try_scan_carrot_enote_external_receiver(
+                  enote,                
+                  cpayment_id,
+                  active_derived,
+                  {std::addressof(user.spend_public()), 1},
+                  incoming_device,
+                  gout,
+                  tout,
+                  derived_pub,
+                  amount,
+                  blinding,
+                  decrypted_id,
+                  enote_type
+                  ))
+                {
+                  payment_id.first = sizeof(crypto::hash8);
+                  payment_id.second.short_ = carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
+                }
+                else if (account_type == account::key_type::balance && carrot::try_scan_carrot_enote_internal_receiver(
+                  enote,
+                  balance_device,
+                  gout,
+                  tout,
+                  derived_pub,
+                  amount,
+                  blinding,
+                  enote_type,
+                  janus
+                  ))
+                {
+                  mixin = db::carrot_internal;
+                }
+                else
+                  continue; // to next available active_derived
+
+                mask = carrot::raw_byte_convert<rct::key>(tools::unwrap(blinding));
               }
               else
-                continue; // to next available active_derived
-
-              mask = carrot::raw_byte_convert<rct::key>(tools::unwrap(blinding));
+              {
+                MWARNING("Invalid tx format detected: " << tx_hash);
+                continue; // to next active_derived
+              }
             }
             else if (/* !is_carrot && */ !crypto::wallet::derive_subaddress_public_key(out_pub_key, carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, derived_pub))
               continue; // to next available active_derived

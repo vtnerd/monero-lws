@@ -42,6 +42,7 @@
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
+#include "util/fwd.h"
 #include "wire/fwd.h"
 #include "wire/json/fwd.h"
 #include "wire/msgpack/fwd.h"
@@ -80,6 +81,12 @@ namespace db
 
   inline constexpr std::uint64_t to_uint(const block_id src) noexcept
   { return std::uint64_t(src); }
+
+  inline constexpr block_id add(const block_id src, const std::uint64_t value) noexcept
+  { return block_id(std::uint64_t(src) + value); }
+
+  inline constexpr block_id increment(const block_id src) noexcept
+  { return add(src, 1); }
 
   //! References a global output number, as determined by the public chain
   struct output_id
@@ -165,6 +172,7 @@ namespace db
     minor_index min_i;
 
     crypto::public_key get_spend_public(account_address const& base, crypto::secret_key const& view) const;
+    crypto::public_key get_spend_public(carrot_account const& base, crypto::secret_key const& address) const;
     constexpr bool is_zero() const noexcept
     {
       return maj_i == major_index::primary && min_i == minor_index::primary;
@@ -293,9 +301,11 @@ namespace db
       constexpr bool is_carrot() const noexcept
       { return carrot_internal <= mixin_count; }
 
-      constexpr bool rpc_mixin() const noexcept
-      { return is_carrot() ? std::numeric_limits<std::uint32_t>::max() : mixin_count }
+      //! \return `mixin` value as used by LWS-RPC.
+      constexpr std::uint32_t rpc_mixin() const noexcept
+      { return is_carrot() ? std::numeric_limits<std::uint32_t>::max() : mixin_count; }
 
+      //! \return metadata when an external receive triggered an unknown spend
       static constexpr spend_meta_ unknown() noexcept
       {
         return spend_meta_{

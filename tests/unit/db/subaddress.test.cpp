@@ -98,7 +98,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(100)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       {
         lws::db::storage_reader reader = MONERO_UNWRAP(db.start_read());
 
@@ -112,7 +112,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         check_address_map(lest_env, reader, user, subs);
       }
       subs.back().first = lws::db::major_index(1);
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 199);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 199);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
@@ -133,7 +133,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(100)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -148,7 +148,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
 
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(101), lws::db::minor_index(200)}}};
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 200);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 200);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -163,7 +163,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
 
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(201), lws::db::minor_index(201)}}};
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 200);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 200);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
@@ -184,7 +184,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(101), lws::db::minor_index(200)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -200,11 +200,11 @@ LWS_CASE("db::storage::upsert_subaddresses")
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(100)}}};
 
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 199);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 199);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 200);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 200);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -231,7 +231,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(101), lws::db::minor_index(200)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -247,11 +247,11 @@ LWS_CASE("db::storage::upsert_subaddresses")
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(300)}}};
       
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 299);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 299);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 300);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 300);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -279,7 +279,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(100)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -294,11 +294,11 @@ LWS_CASE("db::storage::upsert_subaddresses")
 
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(102), lws::db::minor_index(200)}}};
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 198);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 198);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 199);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 199);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -326,7 +326,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(101), lws::db::minor_index(200)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -341,11 +341,11 @@ LWS_CASE("db::storage::upsert_subaddresses")
 
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(99)}}};
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 198);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 198);
       EXPECT(result.has_error());
       EXPECT(result == lws::error::max_subaddresses);
 
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 199);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 199);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -373,7 +373,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
         lws::db::major_index(0),
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(200)}}}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 200);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 200);
       EXPECT(result.has_value());
       EXPECT(result->size() == 1);
       EXPECT(result->at(0).first == lws::db::major_index(0));
@@ -388,7 +388,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
 
       subs.back().second =
         lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(5), lws::db::minor_index(99)}}};
-      result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 300);
+      result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 300);
       EXPECT(result.has_value());
       EXPECT(result->size() == 0);
 
@@ -414,7 +414,7 @@ LWS_CASE("db::storage::upsert_subaddresses")
       subs.back().second.get_container().push_back(
         lws::db::index_range{lws::db::minor_index(101), lws::db::minor_index(200)}
       );
-      auto result = db.upsert_subaddresses(lws::db::account_id(1), user.account, user.view, subs, 100);
+      auto result = db.upsert_subaddresses(lws::db::account_id(1), std::nullopt, subs, 100);
       EXPECT(result.has_error());
       EXPECT(result == wire::error::schema::array);
     }
