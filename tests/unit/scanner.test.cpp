@@ -722,6 +722,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
 
     EXPECT(crypto::generate_key_derivation(account3.spend_public, incoming_key, view_public));
     keys3.m_account_address.m_view_public_key = carrot::raw_byte_convert<crypto::public_key>(view_public);
+
+    keys3.m_account_address.m_view_public_key =
+      rct::rct2pk(rct::scalarmultKey(rct::pk2rct(account3.spend_public), rct::sk2rct(incoming_key)));
   }
 
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")

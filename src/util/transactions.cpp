@@ -147,13 +147,8 @@ std::optional<crypto::key_image> lws::get_image(const db::output& source, const 
 
 std::optional<crypto::key_image> lws::get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key, const crypto::secret_key& image_key, const crypto::secret_key& address_key, const crypto::secret_key& incoming_key)
 {
-  crypto::public_key account_view{};
-  {
-    crypto::key_derivation account_view2{};
-    if (!crypto::generate_key_derivation(primary.spend_public, incoming_key, account_view2))
-      return std::nullopt;
-    account_view = carrot::raw_byte_convert<crypto::public_key>(account_view2);
-  }
+  const crypto::public_key account_view =
+    rct2pk(rct::scalarmultKey(rct::pk2rct(primary.spend_public), rct::sk2rct(incoming_key)));
 
   const carrot::view_incoming_key_ram_borrowed_device incoming_device{incoming_key};
   const carrot::generate_image_key_ram_borrowed_device image_device{image_key};
