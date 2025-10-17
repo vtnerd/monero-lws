@@ -99,8 +99,8 @@ RUN git clone --recursive --branch ${MONERO_BRANCH} \
     && mkdir -p build/release && cd build/release \
     # Create make build files manually for release-static-linux-${TARGETARCH}
     && case ${TARGETARCH:-amd64} in \
-        "arm64") cmake -D STATIC=ON -D ARCH="armv8-a" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-armv8" ../.. ;; \
-        "amd64") cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=release -D BUILD_TAG="linux-x64" ../.. ;; \
+        "arm64") cmake -D STATIC=ON -D ARCH="armv8-a" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=Release -D BUILD_TAG="linux-armv8" ../.. ;; \
+        "amd64") cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=Release -D BUILD_TAG="linux-x64" ../.. ;; \
         *) echo "Dockerfile does not support this platform"; exit 1 ;; \
     esac \
     # Build only monerod binary using number of available threads
@@ -115,7 +115,7 @@ ARG NPROC
 RUN set -ex \
     && git submodule init && git submodule update \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D STATIC=ON -D BUILD_TESTS=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
+    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D BUILD_TESTS=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
     && make -j${NPROC:-$(nproc)} \
     && ./tests/unit/monero-lws-unit
 
