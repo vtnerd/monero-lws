@@ -39,9 +39,32 @@ Differences from [OpenMonero](https://github.com/moneroexamples/openmonero):
   - Uses amd64 ASM acceleration from Monero project, if available
   - Supports webhook notifications, including "0-conf" notification
 
+
 ## License
 
 See [LICENSE](LICENSE).
+
+
+## Docker
+
+### Alpha Release
+
+Docker image for the `master` (alpha) branch can be fetched via:
+  * `docker pull ghcr.io/vtnerd/monero-lws:master`
+  * `docker pull vtnerd/monero-lws:master`
+
+This branch differs from the `develop` branch in that users should NOT expect
+incompatible DB changes; if users never "roll-back" their copy of `master` then
+the DB should also be in a valid state for use. However, the `master` version
+is considered alpha software so things could break, resulting in complications
+if the DB was not saved prior to upgrading.
+
+We need alpha testers, so consider using this where possible!
+
+> The `develop` branch should only be used for development purposes - breaking
+> DB changes are expected (but probably rare). No docker image is provided for
+> this branch - see compilation section below.
+
 
 ## Compiling Monero-lws from source
 
