@@ -1,10 +1,10 @@
 # Initial base from https://github.com/sethforprivacy/monero-lws/blob/588c7f1965d3afbda8a65dc870645650e063e897/Dockerfile
 
 # Set monerod version to install from github
-ARG MONERO_BRANCH=v0.18.4.0
-ARG MONERO_COMMIT_HASH=f1311d4237404ab7da76241dbf10e92a65132cc4
+ARG MONERO_BRANCH=v0.18.4.3
+ARG MONERO_COMMIT_HASH=7c6e84466a90f6701ebe09ff8f61ea8af3883181
 
-# Select ubuntu:20.04 for the build image base
+# Select ubuntu:22.04 for the build image base
 FROM ubuntu:22.04 as build
 
 # Install all dependencies for a static build
@@ -16,18 +16,19 @@ RUN apt-get update \
 RUN apt-get install --no-install-recommends -y \
     build-essential \
     ca-certificates \
+    ccache \
     cmake \
+    doxygen \
     git \
-    libboost-all-dev \
+    libgnutls30 \
     libldns-dev \
-    libnorm-dev \
-    libpgm-dev \
+    liblzma-dev \
+    libprotobuf-dev \
     libsodium-dev \
     libssl-dev \
     libudev-dev \
     libunwind8-dev \
     libusb-1.0-0-dev \
-    libzmq3-dev \
     pkg-config \
     wget \
     && apt-get clean \
@@ -44,25 +45,48 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7_1/expat-2.7.1.tar.bz2 && \
-    echo "45c98ae1e9b5127325d25186cf8c511fa814078e9efeae7987a574b482b79b3d  expat-2.7.1.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.7.1.tar.bz2 && \
-    rm expat-2.7.1.tar.bz2 && \
-    cd expat-2.7.1 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7_3/expat-2.7.3.tar.bz2 && \
+    echo "59c31441fec9a66205307749eccfee551055f2d792f329f18d97099e919a3b2f expat-2.7.3.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.7.3.tar.bz2 && \
+    rm expat-2.7.3.tar.bz2 && \
+    cd expat-2.7.3 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.23.0.tar.gz && \
-    echo "959bd5f3875316d7b3f67ee237a56de5565f5b35fc9b5fc3cea6cfe735a03bb8  unbound-1.23.0.tar.gz" | sha256sum -c && \
-    tar -xzf unbound-1.23.0.tar.gz && \
-    rm unbound-1.23.0.tar.gz && \
-    cd unbound-1.23.0 && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.24.0.tar.gz && \
+    echo "147b22983cc7008aa21007e251b3845bfcf899ffd2d3b269253ebf2e27465086 unbound-1.24.0.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.24.0.tar.gz && \
+    rm unbound-1.24.0.tar.gz && \
+    cd unbound-1.24.0 && \
     ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
+
+# Build libzmq for static builds
+WORKDIR /tmp
+RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz && \
+    echo "6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43 zeromq-4.3.5.tar.gz" | sha256sum -c && \
+    tar -xzf zeromq-4.3.5.tar.gz && \
+    rm zeromq-4.3.5.tar.gz && \
+    cd zeromq-4.3.5 && \
+    ./configure --disable-shared --enable-static --with-libsodium --disable-libunwind --with-pic && \
+    make -j${NPROC:-$(nproc)} && \
+    make -j${NPROC:-$(nproc)} install
+
+# Build boost for latest security updates
+WORKDIR /tmp
+RUN set -ex && wget https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.bz2 && \
+    echo "85a33fa22621b4f314f8e85e1a5e2a9363d22e4f4992925d4bb3bc631b5a0c7a boost_1_89_0.tar.bz2" | sha256sum -c && \
+    tar -xf boost_1_89_0.tar.bz2 && \
+    rm boost_1_89_0.tar.bz2 && \
+    cd boost_1_89_0 && \
+    ./bootstrap.sh && \
+    ./b2 -j${NPROC:-$(nproc)} runtime-link=static link=static threading=multi variant=release \
+      --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
+      --with-program_options --with-regex --with-serialization --with-serialization install
 
 # Switch to Monero source directory
 WORKDIR /monero
@@ -91,25 +115,13 @@ ARG NPROC
 RUN set -ex \
     && git submodule init && git submodule update \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D STATIC=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
-    && make -j${NPROC:-$(nproc)}
+    && cmake -D STATIC=ON -D BUILD_TESTS=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
+    && make -j${NPROC:-$(nproc)} \
+    && ./tests/unit/monero-lws-unit
 
 # Begin final image build
 # Select Ubuntu 20.04LTS for the image base
 FROM ubuntu:22.04
-
-# Added DEBIAN_FRONTEND=noninteractive to workaround tzdata prompt on installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Upgrade base image
-RUN apt-get update \
-    && apt-get upgrade --no-install-recommends -y
-
-# Install necessary dependencies
-RUN apt-get install --no-install-recommends -y \
-    ca-certificates \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
 
 # Add user and setup directories for monero-lws
 RUN useradd -ms /bin/bash monero-lws \
@@ -125,5 +137,5 @@ COPY --chown=monero-lws:monero-lws --from=build /monero-lws/build/src/monero-lws
 # Expose REST server port
 EXPOSE 8443
 
-ENTRYPOINT ["monero-lws-daemon", "--db-path=/home/monero-lws/.bitmonero/light_wallet_server"]
+ENTRYPOINT ["monero-lws-daemon"]
 CMD ["--daemon=tcp://monerod:18082", "--sub=tcp://monerod:18083", "--log-level=4"]
