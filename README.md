@@ -10,6 +10,7 @@
   - [Introduction](#introduction)
   - [About this project](#about-this-project)
   - [License](#license)
+  - [Docker](#docker)
   - [Compiling Monero-lws from source](#compiling-monero-lws-from-source)
 
 
@@ -46,10 +47,34 @@ See [LICENSE](LICENSE).
 
 
 ## Docker
+Data is stored at `/home/monero-lws/.bitmonero/light_wallet_server` by default,
+and be modified by `--db-path` at runtime.
+
+### Latest Stable Release
+Docker image for latest stable release can be fetched via:
+
+  * `docker pull ghcr.io/vtnerd/monero-lws`
+  * `docker pull vtnerd/monero-lws`
+
+Users of this tag should never expect a DB migration issue, provided they never
+"downgrade" to a prior major version.
+
+### Supported Releases
+Docker images for `0` and `0.3` are provided. The major number refers to
+backwards incompatible DB changes, and the minor revision refers to new features
+that could cause instability. Stability minded users can use these tags while
+they are still listed as officially supported here in the README or on the
+Docker overview page.
+
+  * `docker pull ghcr.io/vtnerd/monero-lws:0`
+  * `docker pull vtnerd/monero-lws:0`
+  * `docker pull ghcr.io/vtnerd/monero-lws:0.3`
+  * `docker pull vtnerd/monero-lws:0.3`
 
 ### Alpha Release
 
 Docker image for the `master` (alpha) branch can be fetched via:
+
   * `docker pull ghcr.io/vtnerd/monero-lws:master`
   * `docker pull vtnerd/monero-lws:master`
 
