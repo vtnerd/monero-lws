@@ -29,6 +29,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/optional/optional.hpp>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -131,6 +132,17 @@ namespace rpc
     //! Wait for new block announce or internal timeout.
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
 
+    using rpc_handler = std::function<expect<void>(std::string&&)>;
+    using block_pub_handler = std::function<expect<void>(minimal_chain_pub&&)>;
+    using txpool_pub_handler = std::function<expect<void>(full_txpool_pub&&)>;
+
+    //! Loops until an error or shutdown happens, emitting events.
+    expect<void> event_loop(
+      rpc_handler on_rpc,
+      block_pub_handler on_block,
+      txpool_pub_handler on_txpool
+    );
+
     //! \return A JSON message for RPC request `M`.
     template<typename M>
     static epee::byte_slice make_message(char const* const name, const M& message)
@@ -223,6 +235,9 @@ namespace rpc
 
     //! \return The full address of the monerod ZMQ daemon.
     std::string const& daemon_address() const;
+
+    //! \return The full address of the monerod PUB port.
+    std::string const& pub_address() const;
 
     //! \return Exchange rate checking interval
     std::chrono::minutes cache_interval() const; 

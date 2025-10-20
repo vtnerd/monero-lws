@@ -27,6 +27,7 @@
 
 #include "client.h"
 
+#include <array>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/utility/string_ref.hpp>
@@ -481,6 +482,118 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
+  expect<void> client::event_loop(
+    rpc_handler on_rpc,
+    block_pub_handler on_block,
+    txpool_pub_handler on_txpool)
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(signal_sub != nullptr);
+
+    std::array<zmq_pollitem_t, 3> poll_items{};
+    std::size_t count = 0;
+
+    poll_items[count++] = {signal_sub.get(), 0, short(ZMQ_POLLIN | ZMQ_POLLERR), 0};
+    if (daemon != nullptr)
+      poll_items[count++] = {daemon.get(), 0, short(ZMQ_POLLIN | ZMQ_POLLERR), 0};
+    if (daemon_sub != nullptr)
+      poll_items[count++] = {daemon_sub.get(), 0, short(ZMQ_POLLIN | ZMQ_POLLERR), 0};
+
+    while (true)
+    {
+      const int ready = zmq_poll(poll_items.data(), count, -1);
+      if (ready < 0)
+      {
+        const int err = zmq_errno();
+        if (err == EINTR)
+          continue;
+        MERROR("Failed polling sockets: " << err);
+        return net::zmq::make_error_code(err);
+      }
+
+      // check for abort messages:
+      if (poll_items[0].revents & (ZMQ_POLLIN | ZMQ_POLLERR))
+      {
+        char buf[1];
+        MONERO_ZMQ_CHECK(zmq_recv(signal_sub.get(), buf, 1, 0));
+        switch (buf[0])
+        {
+        case 'P':
+          return {lws::error::signal_abort_process};
+        case 'S':
+          return {lws::error::signal_abort_scan};
+        default:
+          return {lws::error::signal_unknown};
+        }
+      }
+
+      // check for rpc responses:
+      if (daemon && (poll_items[1].revents & (ZMQ_POLLIN | ZMQ_POLLERR)))
+      {
+        auto json = net::zmq::receive(daemon.get(), ZMQ_DONTWAIT);
+        if (!json)
+        {
+          if (json == net::zmq::make_error_code(EFSM))
+          {
+            MERROR("FSM again: " << json.error());
+            break;
+          }
+          if (json == net::zmq::make_error_code(EAGAIN) || json == net::zmq::make_error_code(EFSM))
+            break;
+          MERROR("Failed reading RPC response: " << json.error());
+          return json.error();
+        } else if (on_rpc)
+          MONERO_CHECK(on_rpc(std::move(*json)));
+      }
+
+      // check for PUB notificatons:
+      std::size_t sub_index = daemon ? 2 : 1;
+      if (daemon_sub && (poll_items[sub_index].revents & (ZMQ_POLLIN | ZMQ_POLLERR)))
+      {
+        while (true)
+        {
+          auto json = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+          if (!json)
+          {
+            if (json == net::zmq::make_error_code(EAGAIN))
+              break;
+            MERROR("Failed reading pub message: " << json.error());
+            return json.error();
+          }
+
+          if (boost::string_ref{*json}.starts_with(minimal_chain_topic))
+          {
+            json->erase(0, sizeof(minimal_chain_topic));
+            auto parsed = rpc::minimal_chain_pub::from_json(std::move(*json));
+            if (!parsed)
+            {
+              MERROR("Failed parsing chain pub: " << parsed.error().message());
+              return parsed.error();
+            }
+            if (on_block)
+              MONERO_CHECK(on_block(std::move(*parsed)));
+          }
+          else if (boost::string_ref{*json}.starts_with(full_txpool_topic))
+          {
+            json->erase(0, sizeof(full_txpool_topic));
+            auto parsed = rpc::full_txpool_pub::from_json(std::move(*json));
+            if (!parsed)
+            {
+              MERROR("Failed parsing txpool pub: " << parsed.error().message());
+              return parsed.error();
+            }
+            if (on_txpool)
+              MONERO_CHECK(on_txpool(std::move(*parsed)));
+          }
+          else
+            return {lws::error::bad_daemon_response};
+        }
+      }
+    }
+
+    return {};
+  }
+
   expect<net::zmq::async_client> client::make_async_client(boost::asio::io_context& io) const
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -623,6 +736,13 @@ namespace rpc
     if (ctx == nullptr)
       MONERO_THROW(common_error::kInvalidArgument, "Invalid lws::rpc::context");
     return ctx->daemon_addr;
+  }
+
+  std::string const& context::pub_address() const
+  {
+    if (ctx == nullptr)
+      MONERO_THROW(common_error::kInvalidArgument, "Invalid lws::rpc::context");
+    return ctx->sub_addr;
   }
 
   std::chrono::minutes context::cache_interval() const

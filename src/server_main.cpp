@@ -45,6 +45,7 @@
 #include "db/storage.h"
 #include "error.h"
 #include "lws_version.h"
+#include "mempool.h"
 #include "options.h"
 #include "rest_server.h"
 #include "scanner.h"
@@ -334,10 +335,17 @@ namespace
     if (!sub_address.empty())
       MINFO("Using monerod ZMQ sub at " << sub_address);
 
+    auto mempool = std::make_shared<lws::mempool>();
+
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
     lws::rest_server server{
-      epee::to_span(prog.rest_servers), prog.admin_rest_servers, std::move(disk), std::move(client), std::move(prog.rest_config)
+      epee::to_span(prog.rest_servers),
+      prog.admin_rest_servers,
+      std::move(disk),
+      std::move(client),
+      mempool,
+      std::move(prog.rest_config)
     };
     for (const std::string& address : prog.rest_servers)
       MINFO("Listening for REST clients at " << address);
@@ -347,6 +355,7 @@ namespace
     // blocks until SIGINT
     scanner.run(
       std::move(ctx),
+      mempool,
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),

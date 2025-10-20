@@ -30,6 +30,7 @@
 namespace lws
 {
   class account;
+  class mempool;
   class rest_server;
   class scanner;
 }
