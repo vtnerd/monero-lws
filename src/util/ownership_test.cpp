@@ -66,7 +66,7 @@ namespace lws
   }
 
   void ownership_test::operator()(
-    epee::span<account> users,
+    epee::span<lws::account> users,
     crypto::hash const& tx_hash,
     cryptonote::transaction const& tx,
     const db::block_id height,
@@ -136,8 +136,8 @@ namespace lws
           for (std::uint64_t offset : in_data->key_offsets)
           {
             goffset += offset;
-            const auto subaccount = user.get_spendable(db::output_id{in_data->amount, goffset});
-            if (!subaccount)
+            const auto address_index = user.get_spendable(db::output_id{in_data->amount, goffset});
+            if (!address_index)
               continue;
 
             on_spend(
@@ -152,7 +152,7 @@ namespace lws
                 {0, 0, 0},
                 payment_id.first,
                 payment_id.second.long_,
-                *subaccount
+                *address_index
               }
             );
           }
