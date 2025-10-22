@@ -56,7 +56,7 @@ RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.24.0.tar.gz && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.24.1.tar.gz && \
     echo "7f2b1633e239409619ae0527f67878b0f33ae0ec0ee5a3a51c042c359ba1eeab unbound-1.24.1.tar.gz" | sha256sum -c && \
     tar -xzf unbound-1.24.1.tar.gz && \
     rm unbound-1.24.1.tar.gz && \
