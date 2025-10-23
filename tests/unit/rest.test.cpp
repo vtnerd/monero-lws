@@ -59,6 +59,16 @@ namespace
     rct::key amount;
   };
 
+  struct user_account
+  {
+    lws::db::account_address account;
+    crypto::secret_key view;
+
+    user_account(const lws::db::account_address& account, const crypto::secret_key& view)
+      : account(account), view(view)
+    {}
+  };
+
   struct carrot_account
   {
     lws::carrot_account account;
@@ -116,6 +126,23 @@ namespace
     return out;
   }
 
+  void check_address_map(lest::env& lest_env, lws::db::storage& db, const user_account& user, const std::pair<std::uint32_t, std::uint32_t> subaddress)
+  {
+    SETUP("check_address_map")
+    {
+      auto reader = MONERO_UNWRAP(db.start_read());
+      const lws::db::address_index index{
+        lws::db::major_index(subaddress.first),
+        lws::db::minor_index(subaddress.second)
+      };
+
+      lws::db::cursor::subaddress_indexes cur = nullptr;
+      auto result = reader.find_subaddress(lws::db::account_id(1), index.get_spend_public(user.account, user.view), cur);
+      EXPECT(result.has_value());
+      EXPECT(result == index);
+    }
+  }
+
   void check_address_map(lest::env& lest_env, lws::db::storage& db, const carrot_account& user, const std::pair<std::uint32_t, std::uint32_t> subaddress)
   {
     SETUP("check_address_map")
@@ -153,6 +180,7 @@ LWS_CASE("rest_server")
     crypto::generate_keys(temp2, account_incoming.generate_address);
   }
   const std::string generatekey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(account_incoming.generate_address))));
+  const user_account account_legacy{account, view};
 
   SETUP("Database and login")
   {
@@ -736,6 +764,8 @@ LWS_CASE("rest_server")
           "{\"key\":1,\"value\":[[0,4]]}]}"
       );
 
+      check_address_map(lest_env, db, account_legacy, {0, 4});
+
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"maj_i\":2,\"min_i\":5,\"n_maj\":2,\"n_min\":5}";
       response = invoke(client, "/provision_subaddrs", message);
       EXPECT(response ==
@@ -748,6 +778,8 @@ LWS_CASE("rest_server")
           "{\"key\":2,\"value\":[[5,9]]},"
           "{\"key\":3,\"value\":[[5,9]]}]}"
       );
+
+      check_address_map(lest_env, db, account_legacy, {3, 9});
     }
 
     SECTION("provision_subaddrs carrot incoming-only")
@@ -787,6 +819,8 @@ LWS_CASE("rest_server")
           "{\"key\":0,\"value\":[[1,10]]}]}"
       );
 
+      check_address_map(lest_env, db, account_legacy, {0, 10});
+
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"subaddrs\":[{\"key\":0,\"value\":[[11,20]]}]}";
       response = invoke(client, "/upsert_subaddrs", message);
       EXPECT(response ==
@@ -795,6 +829,8 @@ LWS_CASE("rest_server")
         "],\"all_subaddrs\":["
           "{\"key\":0,\"value\":[[1,20]]}]}"
       );
+
+      check_address_map(lest_env, db, account_legacy, {0, 20});
     }
 
     SECTION("upsert_subaddrs carrot incoming-only")
