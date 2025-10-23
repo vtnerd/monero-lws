@@ -36,6 +36,7 @@
 #include "net/http_client.h"
 #include "rest_server.h"
 #include "scanner.test.h"
+#include "util/account.h"
 
 namespace
 {
@@ -56,6 +57,16 @@ namespace
     rct::key commitment;
     rct::key mask;
     rct::key amount;
+  };
+
+  struct carrot_account
+  {
+    lws::carrot_account account;
+    crypto::secret_key generate_address;
+
+    carrot_account()
+      : account{}, generate_address{}
+    {}
   };
 
   std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
@@ -104,16 +115,44 @@ namespace
 
     return out;
   }
+
+  void check_address_map(lest::env& lest_env, lws::db::storage& db, const carrot_account& user, const std::pair<std::uint32_t, std::uint32_t> subaddress)
+  {
+    SETUP("check_address_map")
+    {
+      auto reader = MONERO_UNWRAP(db.start_read());
+      const lws::db::address_index index{
+        lws::db::major_index(subaddress.first),
+        lws::db::minor_index(subaddress.second)
+      };
+
+      lws::db::cursor::subaddress_indexes cur = nullptr;
+      auto result = reader.find_subaddress(lws::db::account_id(1), index.get_spend_public(user.account, user.generate_address), cur);
+      EXPECT(result.has_value());
+      EXPECT(result == index);
+    }
+  }
 }
 
 LWS_CASE("rest_server")
 {
   lws::db::account_address account_address{};
+  lws::db::account_address account{};
+  carrot_account account_incoming{};
   crypto::secret_key view{};
   crypto::generate_keys(account_address.spend_public, view);
   crypto::generate_keys(account_address.view_public, view);
   const std::string address = lws::db::address_string(account_address);
   const std::string viewkey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(view))));
+  {
+    lws::db::account temp{};
+    crypto::public_key temp2{};
+    temp.address = account;
+    std::memcpy(std::addressof(temp.key), std::addressof(unwrap(unwrap(view))), sizeof(temp.key));
+    account_incoming.account = lws::carrot_account{temp};
+    crypto::generate_keys(temp2, account_incoming.generate_address);
+  }
+  const std::string generatekey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(account_incoming.generate_address))));
 
   SETUP("Database and login")
   {
@@ -518,6 +557,169 @@ LWS_CASE("rest_server")
       );
     }
 
+    SECTION("One Carrot Receive, One Carrot Spend")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+
+      const lws::db::transaction_link link{
+        lws::db::block_id(5000), crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
+      const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
+      const crypto::public_key pub = crypto::rand<crypto::public_key>();
+      const rct::key ringct = crypto::rand<rct::key>();
+      const auto extra =
+        lws::db::extra(lws::db::extra::ringct_output);
+      const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
+      const crypto::hash payment_id = crypto::rand<crypto::hash>();
+      const crypto::key_image image = crypto::rand<crypto::key_image>();
+      const crypto::key_image first_ki = crypto::rand<crypto::key_image>();
+      const auto anchor = crypto::rand<carrot::encrypted_janus_anchor_t>();
+
+      lws::account real_account{account, {}, {}, {}};
+      real_account.add_out(
+        lws::db::output{
+          link,
+          lws::db::output::spend_meta_{
+            lws::db::output_id{350, 0},
+            std::uint64_t(70000),
+            lws::db::carrot_internal,
+            std::uint32_t(1),
+            tx_public
+          },
+          std::uint64_t(9000),
+          std::uint64_t(5670),
+          tx_prefix,
+          pub,
+          ringct,
+          {0, 0, 0, 0, 0, 0, 0},
+          lws::db::pack(extra, sizeof(crypto::hash8)),
+          payment_id_,
+          std::uint64_t(500),
+          lws::db::address_index{lws::db::major_index(0), lws::db::minor_index(0)},
+          first_ki,
+          anchor
+        }
+      );
+      real_account.add_spend(
+        lws::db::spend{
+          link,
+          image,
+          lws::db::output_id::unknown_spend(),
+          std::uint64_t(86),
+          std::uint64_t(9500),
+          lws::db::carrot_external,
+          {0, 0, 0},
+          0,
+          payment_id,
+          lws::db::address_index{lws::db::major_index(0), lws::db::minor_index(0)}
+        }
+      );
+
+      {
+        std::vector<crypto::hash> hashes{
+          last_block.hash,
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>()
+        };
+
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"70000\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"spent_outputs\":[{"
+          "\"amount\":\"0\","
+          "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
+          "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(crypto::public_key{})) + "\","
+          "\"out_index\":0,"
+          "\"mixin\":4294967295,"
+          "\"sender\":{\"maj_i\":0,\"min_i\":0}"
+        "}]}"
+      );
+
+      response = invoke(client, "/get_address_txs", message);
+      EXPECT(response ==
+        "{\"total_received\":\"70000\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"transactions\":["
+          "{\"id\":0,"
+          "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"timestamp\":\"1970-01-01T02:30:00Z\","
+          "\"total_received\":\"70000\","
+          "\"total_sent\":\"0\","
+          "\"fee\":\"500\","
+          "\"unlock_time\":5670,"
+          "\"height\":5000,"
+          "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_.short_)) + "\","
+          "\"coinbase\":false,"
+          "\"mempool\":false,"
+          "\"mixin\":4294967295,"
+          "\"spent_outputs\":[{"
+            "\"amount\":\"0\","
+            "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
+            "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(crypto::public_key{})) + "\","
+            "\"out_index\":0,"
+            "\"mixin\":4294967295,"
+            "\"sender\":{\"maj_i\":0,\"min_i\":0}"
+          "}]}"
+        "]}"
+      );
+
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(get_fee_response());
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      const join on_scope_exit{server_thread};
+
+      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 70000, 1, false);
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
+      response = invoke(client, "/get_unspent_outs", message);
+      EXPECT(response ==
+        "{\"per_byte_fee\":39,"
+        "\"fee_mask\":1000,"
+        "\"amount\":\"70000\","
+        "\"outputs\":["
+          "{\"amount\":\"70000\","
+          "\"public_key\":\"" + epee::to_hex::string(epee::as_byte_span(pub)) + "\","
+          "\"index\":1,"
+          "\"global_index\":0,"
+          "\"tx_id\":0,"
+          "\"tx_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"tx_prefix_hash\":\"" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + "\","
+          "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
+          "\"timestamp\":\"1970-01-01T02:30:00Z\","
+          "\"height\":5000,"
+          "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
+          "\"recipient\":{\"maj_i\":0,\"min_i\":0},"
+          "\"first_key_image\":\"" + epee::to_hex::string(epee::as_byte_span(first_ki)) + "\","
+          "\"janus_anchor\":\"" + epee::to_hex::string(epee::as_byte_span(anchor)) + "\"}"
+        "],\"fees\":[40,41]}"
+      );
+    }
+
+
     SECTION("provision_subaddrs")
     {
       const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
@@ -548,6 +750,29 @@ LWS_CASE("rest_server")
       );
     }
 
+    SECTION("provision_subaddrs carrot incoming-only")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message =
+        "{\"address\":\"" + address + "\","
+        "\"view_key\":\"" + viewkey + "\","
+        "\"generate_address_key\":\"" + generatekey + "\","
+        "\"maj_i\":0,\"min_i\":0,\"n_maj\":2,\"n_min\":5}";
+
+      response = invoke(client, "/provision_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":0,\"value\":[[0,4]]},"
+          "{\"key\":1,\"value\":[[0,4]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[0,4]]},"
+          "{\"key\":1,\"value\":[[0,4]]}]}"
+      );
+
+      check_address_map(lest_env, db, account_incoming, {0, 4});
+    }
+
     SECTION("upsert_subaddrs")
     {
       const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
@@ -570,6 +795,27 @@ LWS_CASE("rest_server")
         "],\"all_subaddrs\":["
           "{\"key\":0,\"value\":[[1,20]]}]}"
       );
+    }
+
+    SECTION("upsert_subaddrs carrot incoming-only")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message =
+        "{\"address\":\"" + address + "\","
+        "\"view_key\":\"" + viewkey + "\","
+        "\"generate_address_key\":\"" + generatekey + "\","
+        "\"subaddrs\":[{\"key\":0,\"value\":[[1,10]]}]}";
+
+      response = invoke(client, "/upsert_subaddrs", message);
+      EXPECT(response ==
+        "{\"new_subaddrs\":["
+          "{\"key\":0,\"value\":[[1,10]]}"
+        "],\"all_subaddrs\":["
+          "{\"key\":0,\"value\":[[1,10]]}]}"
+      );
+
+      check_address_map(lest_env, db, account_incoming, {0, 10});
     }
   }
 }

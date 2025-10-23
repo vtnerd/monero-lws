@@ -428,9 +428,11 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, provision_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_OPTIONAL_FIELD(maj_i),
       WIRE_OPTIONAL_FIELD(min_i),
       WIRE_OPTIONAL_FIELD(n_maj),
@@ -438,6 +440,8 @@ namespace lws
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
 
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)
@@ -452,12 +456,16 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_FIELD_ARRAY(subaddrs, max_subaddrs),
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
 } // lws

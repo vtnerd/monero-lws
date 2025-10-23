@@ -266,6 +266,7 @@ namespace rpc
   {
     provision_subaddrs_request() = delete;
     account_credentials creds;
+    std::optional<crypto::secret_key> generate_address;
     boost::optional<std::uint32_t> maj_i;
     boost::optional<std::uint32_t> min_i;
     boost::optional<std::uint32_t> n_maj;
@@ -295,6 +296,7 @@ namespace rpc
     upsert_subaddrs_request() = delete;
     account_credentials creds;
     std::vector<db::subaddress_dict> subaddrs;
+    std::optional<crypto::secret_key> generate_address;
     boost::optional<bool> get_all;
   };
   void read_bytes(wire::json_reader&, upsert_subaddrs_request&);
