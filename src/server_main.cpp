@@ -299,6 +299,8 @@ namespace
 
   void run(program prog)
   {
+    auto sub_address = prog.daemon_sub;
+
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
     auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), std::move(prog.rmq), prog.rates_interval, prog.untrusted_daemon);
@@ -307,6 +309,9 @@ namespace
     lws::scanner scanner{disk.clone(), prog.rest_config.webhook_verify};
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
+    if (!sub_address.empty())
+      MINFO("Using monerod ZMQ sub at " << sub_address);
+
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
     const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
