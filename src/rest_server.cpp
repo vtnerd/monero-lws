@@ -153,6 +153,9 @@ namespace lws
     //! `/daemon_status` and `get_unspent_outs` caches ZMQ result for this long
     constexpr const std::chrono::seconds daemon_cache_timeout{5};
 
+    constexpr const unsigned max_ring_size = 20;
+    constexpr const unsigned max_rings = 150;
+
     struct connection_data
     {
       rest_server_data* const global; //!< Valid for lifetime of server
@@ -695,7 +698,7 @@ namespace lws
         using histogram_rpc = cryptonote::rpc::GetOutputHistogram;
         using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
 
-        if (50 < req.count || 20 < req.amounts.values.size())
+        if (max_ring_size < req.count || max_rings < req.amounts.values.size())
           return {lws::error::exceeded_rest_request_limit};
 
         std::sort(req.amounts.values.begin(), req.amounts.values.end(), std::greater<>{});
