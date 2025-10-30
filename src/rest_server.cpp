@@ -69,6 +69,9 @@ namespace lws
     namespace http = epee::net_utils::http;
     constexpr const std::chrono::seconds reconnect_backoff{10};
 
+    constexpr const unsigned max_ring_size = 20;
+    constexpr const unsigned max_rings = 150;
+
     expect<rpc::client*> thread_client(const rpc::client& gclient, const bool reset = false)
     {
       struct tclient
@@ -421,7 +424,7 @@ namespace lws
 
         std::vector<std::uint64_t> amounts = std::move(req.amounts.values);
 
-        if (50 < req.count || 20 < amounts.size())
+        if (max_ring_size < req.count || max_rings < req.amounts.values.size())
           return {lws::error::exceeded_rest_request_limit};
 
         const expect<rpc::client*> tclient = thread_client(gclient);
