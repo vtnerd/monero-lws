@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-22.04, macos-14, macos-13]
+        os: [ubuntu-24.04, ubuntu-22.04, macos-15, macos-14]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
     - name: set apt conf (Debian based Linux)
@@ -70,10 +70,10 @@ jobs:
       run: sudo apt -y install librabbitmq-dev
 
     - name: Install dependencies (MacOS)
-      if: matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14'
+      if: matrix.os == 'macos-latest' || matrix.os == 'macos-14' || matrix.os == 'macos-15'
       run: ${{env.BREW_INSTALL_MAC}}
     - name: Install RabbitMQ iff WITH_RMQ (MacOS)
-      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-14')
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'macos-latest' || matrix.os == 'macos-14' || matrix.os == 'macos-15')
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
   
     - name: Checkout Monero Source
