@@ -1,4 +1,4 @@
-// Copyright (c) 2023, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,46 +25,15 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
 
-#include "storage.test.h"
+#include <type_traits>
 
-#include <boost/filesystem/operations.hpp>
-#include "common/util.h"   // monero/src/
+#include "carrot_core/core_types.h" // monero/src
+#include "wire/traits.h"
 
-namespace lws { namespace db { namespace test
+namespace wire
 {
-  namespace
-  {
-    boost::filesystem::path get_db_location()
-    {
-      return tools::get_default_data_dir() + "light_wallet_server_unit_testing";
-    }
-  }
-
-  cleanup_db::~cleanup_db()
-  {
-    boost::filesystem::remove_all(get_db_location());
-  }
-
-  storage get_fresh_db()
-  {
-    const boost::filesystem::path location = get_db_location();
-    boost::filesystem::remove_all(location);
-    boost::filesystem::create_directories(location);
-    return storage::open(location.c_str(), 5);
-  }
-
-  db::account make_db_account(const account_address& pubs, const crypto::secret_key& key)
-  {
-    view_key converted_key{};
-    std::memcpy(std::addressof(converted_key), std::addressof(unwrap(unwrap(key))), sizeof(key));
-    return {
-      account_id(1), account_time(0), pubs, converted_key
-    };
-  }
-
-  lws::account make_account(const account_address& pubs, const crypto::secret_key& key)
-  {
-    return lws::account{make_db_account(pubs, key), {}, {}, {}};
-  }
-}}} // lws // db // test
+  WIRE_DECLARE_BLOB(carrot::encrypted_janus_anchor_t);
+  WIRE_DECLARE_BLOB(carrot::view_tag_t);
+}
