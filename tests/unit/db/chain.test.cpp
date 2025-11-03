@@ -89,9 +89,9 @@ LWS_CASE("db::storage::sync_chain")
     };
 
     EXPECT(db.add_account(account, view));
-    EXPECT(db.sync_chain(lws::db::block_id(0), chain) == lws::error::bad_blockchain);
-    EXPECT(db.sync_chain(last_block.id, {chain + 1, 4}) == lws::error::bad_blockchain);
-    EXPECT(db.sync_chain(last_block.id, chain));
+    EXPECT(db.sync_chain(lws::db::block_id(0), chain, false) == lws::error::bad_blockchain);
+    EXPECT(db.sync_chain(last_block.id, {chain + 1, 4}, false) == lws::error::bad_blockchain);
+    EXPECT(db.sync_chain(last_block.id, chain, false));
 
     {
       const lws::account accounts[1] = {lws::account{get_account(), {}, {}}};
@@ -125,7 +125,7 @@ LWS_CASE("db::storage::sync_chain")
         crypto::rand<crypto::hash>()
       };
 
-      EXPECT(db.sync_chain(last_block.id, fchain));
+      EXPECT(db.sync_chain(last_block.id, fchain, false));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, fchain);
       EXPECT(get_account().scan_height == fork_height);
 
@@ -147,7 +147,7 @@ LWS_CASE("db::storage::sync_chain")
         crypto::rand<crypto::hash>()
       };
 
-      const auto sync_result = db.sync_chain(lws::db::block_id(point->first), fchain);
+      const auto sync_result = db.sync_chain(lws::db::block_id(point->first), fchain, false);
       EXPECT(sync_result == lws::error::bad_blockchain);
       EXPECT(get_account().scan_height == scan_height);
 

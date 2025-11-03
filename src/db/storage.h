@@ -235,7 +235,7 @@ namespace db
 
       \return True if the local blockchain is correctly synced.
     */
-    expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes);
+    expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool regtest);
 
     expect<void> sync_pow(block_id height, epee::span<const crypto::hash> hashes, epee::span<const pow_sync> pow);
 
