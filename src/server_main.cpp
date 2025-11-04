@@ -83,6 +83,7 @@ namespace
     const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
     const command_line::arg_descriptor<bool> auto_accept_creation;
     const command_line::arg_descriptor<bool> untrusted_daemon;
+    const command_line::arg_descriptor<bool> regtest;
 
     static std::string get_default_zmq()
     {
@@ -130,6 +131,7 @@ namespace
       , max_subaddresses{"max-subaddresses", "Maximum number of subaddresses per primary account (defaults to 0)", 0}
       , auto_accept_creation{"auto-accept-creation", "New account creation requests are automatically accepted", false}
       , untrusted_daemon{"untrusted-daemon", "Perform (expensive) chain-verification and PoW checks", false}
+      , regtest{"regtest", "Run in a regression testing mode", false}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -165,6 +167,7 @@ namespace
       command_line::add_arg(description, max_subaddresses);
       command_line::add_arg(description, auto_accept_creation);
       command_line::add_arg(description, untrusted_daemon);
+      command_line::add_arg(description, regtest);
     }
   };
 
@@ -185,6 +188,7 @@ namespace
     std::size_t scan_threads;
     unsigned create_queue_max;
     bool untrusted_daemon;
+    bool regtest;
   };
 
   void print_help(std::ostream& out)
@@ -273,8 +277,12 @@ namespace
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
       command_line::get_arg(args, opts.create_queue_max),
-      command_line::get_arg(args, opts.untrusted_daemon)
+      command_line::get_arg(args, opts.untrusted_daemon),
+      command_line::get_arg(args, opts.regtest)
     };
+
+    if (prog.regtest && lws::config::network != cryptonote::MAINNET)
+      MONERO_THROW(lws::error::configuration, "Regtest cannot be used with testnet or stagenet");
 
     if (!prog.lws_server_addr.empty() && (prog.rest_config.max_subaddresses || prog.untrusted_daemon))
       MONERO_THROW(lws::error::configuration, "Remote scanning cannot be used with subaddresses or untrusted daemon");
@@ -316,7 +324,7 @@ namespace
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),
-      lws::scanner_options{enable_subaddresses, prog.untrusted_daemon}
+      lws::scanner_options{enable_subaddresses, prog.untrusted_daemon, prog.regtest}
     );
   }
 } // anonymous
