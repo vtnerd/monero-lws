@@ -224,6 +224,14 @@ namespace rpc
   void write_bytes(wire::json_writer&, const get_subaddrs_response&);
 
 
+  struct import_request
+  {
+    import_request() = delete;
+    account_credentials creds;
+    std::uint64_t from_height;
+  };
+  void read_bytes(wire::json_reader&, import_request&);
+
   struct import_response
   {
     import_response() = delete;

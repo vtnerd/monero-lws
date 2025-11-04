@@ -1303,7 +1303,7 @@ namespace lws
 
     struct import_request
     {
-      using request = rpc::account_credentials;
+      using request = rpc::import_request;
       using response = rpc::import_response;
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
@@ -1311,17 +1311,17 @@ namespace lws
         bool new_request = false;
         bool fulfilled = false;
         {
-          auto user = open_account(req, data.global->disk.clone());
+          auto user = open_account(req.creds, data.global->disk.clone());
           if (!user)
             return user.error();
 
           data.passed_login = true;
-          if (user->first.start_height == db::block_id(0))
+          if (user->first.start_height <= db::block_id(req.from_height))
             fulfilled = true;
           else
           {
             const expect<db::request_info> info =
-              user->second.get_request(db::request::import_scan, req.address);
+              user->second.get_request(db::request::import_scan, req.creds.address);
 
             if (!info)
             {
@@ -1334,7 +1334,7 @@ namespace lws
         } // close reader
 
         if (new_request)
-          MONERO_CHECK(data.global->disk.clone().import_request(req.address, db::block_id(0)));
+          MONERO_CHECK(data.global->disk.clone().import_request(req.creds.address, db::block_id(req.from_height)));
 
         const char* status = new_request ?
           "Accepted, waiting for approval" : (fulfilled ? "Approved" : "Waiting for Approval");
