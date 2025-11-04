@@ -48,6 +48,7 @@
 #include "wire/traits.h"
 #include "wire/vector.h"
 #include "wire/wrapper/array.h"
+#include "wire/wrapper/defaulted.h"
 #include "wire/wrappers_impl.h"
 
 namespace
@@ -359,6 +360,17 @@ namespace lws
       wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand))),
       WIRE_FIELD(fees)
     );
+  }
+
+  void rpc::read_bytes(wire::json_reader& source, import_request& self)
+  {
+    std::string address;
+    wire::object(source,
+      wire::field("address", std::ref(address)),
+      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      WIRE_FIELD_DEFAULTED(from_height, unsigned(0))
+    );
+    convert_address(address, self.creds.address);
   }
 
   void rpc::write_bytes(wire::json_writer& dest, const import_response& self)

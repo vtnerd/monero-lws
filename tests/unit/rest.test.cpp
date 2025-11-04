@@ -108,11 +108,11 @@ namespace
 
 LWS_CASE("rest_server")
 {
-  lws::db::account_address account{};
+  lws::db::account_address account_address{};
   crypto::secret_key view{};
-  crypto::generate_keys(account.spend_public, view);
-  crypto::generate_keys(account.view_public, view);
-  const std::string address = lws::db::address_string(account);
+  crypto::generate_keys(account_address.spend_public, view);
+  crypto::generate_keys(account_address.view_public, view);
+  const std::string address = lws::db::address_string(account_address);
   const std::string viewkey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(view))));
 
   SETUP("Database and login")
@@ -139,9 +139,9 @@ LWS_CASE("rest_server")
 
     const lws::db::block_info last_block =
       MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
-    const auto get_account = [&db, &account] () -> lws::db::account
+    const auto get_account = [&db, &account_address] () -> lws::db::account
     {
-      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account)).second;
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account_address)).second;
     };
 
     enet::http::http_simple_client client{};
@@ -191,6 +191,49 @@ LWS_CASE("rest_server")
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
       EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\",\"fees\":[40,41]}");
+    }
+
+    SECTION("Import from height")
+    {
+      EXPECT(account.start_height != lws::db::block_id(0));
+
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      const std::string import_height = std::to_string(std::uint64_t(account.start_height) - 1);
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\", \"from_height\":" + import_height + "}";
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Accepted, waiting for approval\","
+        "\"new_request\":true,"
+        "\"request_fulfilled\":false}"
+      );
+
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}));
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + import_height + "," +
+        "\"scanned_block_height\":" + import_height + ","
+        "\"start_height\":" + import_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
     }
 
     SECTION("One Receive, Zero Spends")
