@@ -1729,12 +1729,12 @@ namespace db
     });
   }
 
-  expect<void> storage::sync_chain(block_id height, epee::span<const crypto::hash> hashes)
+  expect<void> storage::sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool regtest)
   {
     MONERO_PRECOND(!hashes.empty());
     MONERO_PRECOND(db != nullptr);
 
-    return db->try_write([this, height, hashes] (MDB_txn& txn) -> expect<void>
+    return db->try_write([this, height, hashes, regtest] (MDB_txn& txn) -> expect<void>
     {
       cursor::blocks blocks_cur;
       MONERO_CHECK(check_cursor(txn, this->db->tables.blocks, blocks_cur));
@@ -1767,7 +1767,7 @@ namespace db
 
         if (*hash != chain.front())
         {
-          if (current <= get_checkpoints().get_max_height())
+          if (!regtest && current <= get_checkpoints().get_max_height())
           {
             /* Either the daemon is performing an attack with a fake chain, or
               the daemon is still syncing. */

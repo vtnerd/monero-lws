@@ -1100,7 +1100,7 @@ namespace lws
     }
 
     // does not validate blockchain hashes
-    expect<rpc::client> sync_quick(scanner_sync& self, db::storage disk, rpc::client client)
+    expect<rpc::client> sync_quick(scanner_sync& self, db::storage disk, rpc::client client, bool regtest)
     {
       MINFO("Starting blockchain sync with daemon");
 
@@ -1123,7 +1123,7 @@ namespace lws
         if (resp->hashes.size() <= 1 || resp->hashes.back() == req.known_hashes.front())
           return {std::move(client)};
 
-        MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes)));
+        MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes), regtest));
 
         req.known_hashes.erase(req.known_hashes.begin(), --(req.known_hashes.end()));
         for (std::size_t num = 0; num < 10; ++num)
@@ -1302,13 +1302,13 @@ namespace lws
     return store(io, disk_, client, webhook, chain, users, pow);
   } 
 
-  expect<rpc::client> scanner::sync(rpc::client client, const bool untrusted_daemon)
+  expect<rpc::client> scanner::sync(rpc::client client, const bool untrusted_daemon, const bool regtest)
   {
     if (has_shutdown())
       MONERO_THROW(common_error::kInvalidArgument, "this has shutdown");
     if (untrusted_daemon)
       return sync_full(sync_, disk_.clone(), std::move(client));
-    return sync_quick(sync_, disk_.clone(), std::move(client));
+    return sync_quick(sync_, disk_.clone(), std::move(client), regtest);
   }
 
   void scanner::run(rpc::context ctx, std::size_t thread_count, const std::string& lws_server_addr, std::string lws_server_pass, const scanner_options& opts)

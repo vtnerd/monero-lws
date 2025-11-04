@@ -47,6 +47,7 @@ namespace lws
   {
     bool enable_subaddresses;
     bool untrusted_daemon;
+    bool regtest;
   };
 
   //! Used in `scan_loop` by server
@@ -119,7 +120,7 @@ namespace lws
     static bool loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, bool leader_thread);
     
     //! Use `client` to sync blockchain data, and \return client if successful.
-    expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false);
+    expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false, const bool regtest = false);
 
     //! Poll daemon until `shutdown()` is called, using `thread_count` threads.
     void run(rpc::context ctx, std::size_t thread_count, const std::string& server_addr, std::string server_pass, const scanner_options&);
