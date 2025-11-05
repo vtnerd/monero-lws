@@ -189,7 +189,9 @@ namespace db
       WIRE_FIELD(start_height),
       wire::field("creation_time", self.creation),
       wire::field("admin", admin),
-      wire::field("generated_locally", generated_locally)
+      wire::field("generated_locally", generated_locally),
+      WIRE_FIELD(lookahead),
+      WIRE_FIELD(lookahead_fail)
     );
   }
 
@@ -403,7 +405,8 @@ namespace db
       WIRE_FIELD(address),
       wire::optional_field("view_key", key),
       WIRE_FIELD(start_height),
-      wire::field("generated_locally", generated)
+      wire::field("generated_locally", generated),
+      WIRE_FIELD(lookahead)
     );
   }
 

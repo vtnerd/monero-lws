@@ -656,6 +656,9 @@ template< typename T, typename R >
 using ForNonContainerNonPointer = typename std::enable_if< ! (is_container<T>::value || std::is_pointer<T>::value), R>::type;
 
 template< typename T >
+auto to_string( T const & item ) -> ForNonContainerNonPointer<T, std::string>;
+
+template< typename T >
 auto make_enum_string( T const & item ) -> ForNonEnum<T, std::string>
 {
 #if lest__cpp_rtti

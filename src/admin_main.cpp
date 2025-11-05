@@ -96,12 +96,14 @@ namespace
   struct options : lws::options
   {
     const command_line::arg_descriptor<bool> show_sensitive;
+    const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
     const command_line::arg_descriptor<std::string> command;
     const command_line::arg_descriptor<std::vector<std::string>> arguments;
 
     options()
       : lws::options()
       , show_sensitive{"show-sensitive", "Show view keys", false}
+      , max_subaddresses{"max-subaddresses", "Max subaddresses allowed on import/create", 0}
       , command{"command", "Admin command to execute", ""}
       , arguments{"arguments", "Arguments to command"}
     {}
@@ -110,6 +112,7 @@ namespace
     {
       lws::options::prepare(description);
       command_line::add_arg(description, show_sensitive);
+      command_line::add_arg(description, max_subaddresses);
       command_line::add_arg(description, command);
       command_line::add_arg(description, arguments);
     }
@@ -119,6 +122,7 @@ namespace
   {
     lws::db::storage disk;
     std::vector<std::string> arguments;
+    std::uint32_t max_subaddresses;
     bool show_sensitive;
   };
 
@@ -154,6 +158,7 @@ namespace
 
     lws::rpc::address_requests req{
       get_addresses(epee::to_span(prog.arguments)),
+      prog.max_subaddresses,
       MONERO_UNWRAP(lws::db::request_from_string(prog.arguments[0]))
     };
     run_command(lws::rpc::accept_requests, out, std::move(prog.disk), std::move(req));
@@ -250,6 +255,7 @@ namespace
 
     lws::rpc::address_requests req{
       get_addresses(epee::to_span(prog.arguments)),
+      prog.max_subaddresses,
       lws::db::request_from_string(prog.arguments[0]).value()
     };
     run_command(lws::rpc::reject_requests, out, std::move(prog.disk), std::move(req));
@@ -381,6 +387,7 @@ namespace
       lws::db::storage::open(command_line::get_arg(args, opts.db_path).c_str(), 0)
     };
 
+    prog.max_subaddresses = command_line::get_arg(args, opts.max_subaddresses);
     prog.show_sensitive = command_line::get_arg(args, opts.show_sensitive);
     auto cmd = args[opts.command.name];
     if (cmd.empty())

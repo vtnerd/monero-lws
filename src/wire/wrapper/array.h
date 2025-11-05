@@ -152,6 +152,11 @@ namespace wire
     return {std::move(value)};
   }
 
+
+  template<typename T, typename C>
+  inline bool operator==(const array_<T, C>& lhs, const array_<T, C>& rhs)
+  { return lhs.get_container() == rhs.get_container(); }
+
   /* Do not register with `is_optional_on_empty` trait, this allows selection
      on whether an array is mandatory on wire. */
 
