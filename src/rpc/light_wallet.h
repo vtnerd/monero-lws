@@ -136,6 +136,7 @@ namespace rpc
         start_height(0),
         transaction_height(0),
         blockchain_height(0),
+        lookahead_fail(0),
         spent_outputs(),
         rates(common_error::kInvalidArgument)
     {}
@@ -148,6 +149,7 @@ namespace rpc
     std::uint64_t start_height;
     std::uint64_t transaction_height;
     std::uint64_t blockchain_height;
+    std::uint64_t lookahead_fail;
     std::vector<transaction_spend> spent_outputs;
     expect<lws::rates> rates;
   };
@@ -171,6 +173,7 @@ namespace rpc
     std::uint64_t start_height;
     std::uint64_t transaction_height;
     std::uint64_t blockchain_height;
+    std::uint64_t lookahead_fail;
     std::vector<transaction> transactions;
   };
   void write_bytes(wire::json_writer&, const get_address_txs_response&);
@@ -209,6 +212,7 @@ namespace rpc
     std::uint64_t per_byte_fee;
     std::uint64_t fee_mask;
     safe_uint64 amount;
+    std::uint64_t lookahead_fail;
     std::vector<std::pair<db::output, std::vector<crypto::key_image>>> outputs;
     std::vector<std::uint64_t> fees;
     crypto::secret_key user_key;
@@ -229,6 +233,7 @@ namespace rpc
     import_request() = delete;
     account_credentials creds;
     std::uint64_t from_height;
+    db::address_index lookahead;
   };
   void read_bytes(wire::json_reader&, import_request&);
 
@@ -239,6 +244,7 @@ namespace rpc
     std::string status;
     bool new_request;
     bool request_fulfilled;
+    bool lookahead = true;
   };
   void write_bytes(wire::json_writer&, const import_response&);
 
@@ -247,6 +253,7 @@ namespace rpc
   {
     login_request() = delete;
     account_credentials creds;
+    db::address_index lookahead;
     bool create_account;
     bool generated_locally;
   };
@@ -257,6 +264,7 @@ namespace rpc
     login_response() = delete;
     bool new_address;
     bool generated_locally;
+    bool lookahead = false; //! Can only use on new account creation
   };
   void write_bytes(wire::json_writer&, login_response);
 
