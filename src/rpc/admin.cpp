@@ -164,6 +164,7 @@ namespace lws { namespace rpc
   void read_bytes(wire::reader& source, address_requests& self)
   {
     read_addresses(source, self, WIRE_FIELD(type));
+    self.max_subaddresses = 0;
   }
   void read_bytes(wire::reader& source, modify_account_req& self)
   {
@@ -205,7 +206,7 @@ namespace lws { namespace rpc
 
   expect<void> accept_requests_::operator()(wire::writer& dest, db::storage disk, const request& req) const
   {
-    return write_addresses(dest, disk.accept_requests(req.type, epee::to_span(req.addresses)));
+    return write_addresses(dest, disk.accept_requests(req.type, epee::to_span(req.addresses), req.max_subaddresses));
   }
 
   expect<void> add_account_::operator()(wire::writer& out, db::storage disk, const request& req) const

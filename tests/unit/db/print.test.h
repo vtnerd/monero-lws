@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,58 +25,15 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "framework.test.h"
+#include <ostream>
 
-#include <boost/thread/thread.hpp>
-#include <cstdint>
-#include <list>
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "db/storage.h"
-#include "net/net_ssl.h"
-#include "rpc/client.h"
-#include "span.h"
-
-namespace lws
+namespace lws { namespace db
 {
-  struct rest_server_data;
-  class rest_server
+  inline std::ostream& operator<<(std::ostream& out, const index_ranges& src)
   {
-    struct internal;
-    template<typename> struct connection;
-    template<typename> struct handler_loop;
-    template<typename> struct accept_loop;
+    using lest::to_string;
+    return out << to_string(src.get_container());
+  }
+}} // lws // db
 
-    std::unique_ptr<rest_server_data> global_;
-    std::list<internal> ports_;
-    std::vector<boost::thread> workers_;
-
-    void run_io();
-
-  public:
-    struct configuration
-    {
-      epee::net_utils::ssl_authentication_t auth;
-      std::vector<std::string> access_controls;
-      std::size_t threads;
-      std::uint32_t max_subaddresses;
-      epee::net_utils::ssl_verification_t webhook_verify;
-      bool allow_external;
-      bool disable_admin_auth;
-      bool auto_accept_creation;
-      bool auto_accept_import;
-    };
-
-    explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);
-
-    rest_server(rest_server&&) = delete;
-    rest_server(rest_server const&) = delete;
-
-    ~rest_server() noexcept;
-
-    rest_server& operator=(rest_server&&) = delete;
-    rest_server& operator=(rest_server const&) = delete;
-  };
-}
