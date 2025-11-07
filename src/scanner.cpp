@@ -66,6 +66,7 @@
 #include "rpc/scanner/server.h"
 #include "rpc/webhook.h"
 #include "util/blocks.h"
+#include "util/ownership_test.h"
 #include "util/source_location.h"
 #include "util/transactions.h"
 
@@ -193,18 +194,21 @@ namespace lws
  
     struct add_spend
     {
-      void operator()(lws::account& user, const db::spend& spend) const
+      void operator()(lws::account& user, db::spend&& spend) const
       { user.add_spend(spend); }
     };
     struct add_output
     {
-      bool operator()(expect<db::storage_reader>&, lws::account& user, const db::output& out) const
-      { return user.add_out(out); }
+      void operator()(lws::account& user, db::output&& out) const
+      {
+        if (!user.add_out(out))
+          MWARNING("Output not added, duplicate public key encountered");
+      }
     };
 
     struct null_spend
     {
-      void operator()(lws::account&, const db::spend&) const noexcept
+      void operator()(lws::account&, db::spend&&) const noexcept
       {}
     };
     struct send_webhook
@@ -214,7 +218,7 @@ namespace lws
       scanner_sync& http_;
       std::unordered_map<crypto::hash, crypto::hash> txpool_;
 
-      bool operator()(expect<db::storage_reader>& reader, lws::account& user, const db::output& out)
+      void operator()(lws::account& user, db::output&& out)
       {
         /* Upstream monerod does not send all fields for a transaction, so
            mempool notifications cannot compute tx_hash correctly (it is not
@@ -225,25 +229,17 @@ namespace lws
         std::vector<db::webhook_value> hooks{};
 
         {
-          db::storage_reader* active_reader = reader ?
-            std::addressof(*reader) : nullptr;
-
-          expect<db::storage_reader> temp_reader{common_error::kInvalidArgument};
-          if (!active_reader)
+          expect<db::storage_reader> reader = disk_.start_read();
+          if (!reader)
           {
-            temp_reader = disk_.start_read();
-            if (!temp_reader)
-            {
-              MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
-              return false;
-            }
-            active_reader = std::addressof(*temp_reader);
+            MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
+            return;
           }
-          auto found = active_reader->find_webhook(key, out.payment_id.short_);
+          auto found = reader->find_webhook(key, out.payment_id.short_);
           if (!found)
           {
             MERROR("Failed db lookup for webhooks: " << found.error().message());
-            return false;
+            return;
           }
           hooks = std::move(*found);
         }
@@ -254,13 +250,13 @@ namespace lws
           if (!send(client_, rpc::client::make_message("get_transaction_pool", req)))
           {
             MERROR("Unable to compute tx hash for webhook, aborting");
-            return false;
+            return;
           }
           auto resp = client_.get_message(std::chrono::seconds{3});
           if (!resp)
           {
             MERROR("Unable to get txpool: " << resp.error().message());
-            return false;
+            return;
           }
 
           auto txpool = rpc::parse_json_response<rpc::get_transaction_pool>(std::move(*resp));
@@ -283,315 +279,9 @@ namespace lws
             events.pop_back(); //cannot compute tx_hash
         }
         send_payment_hook(http_.io_, client_, http_.webhooks_, epee::to_span(events));
-        return true;
+        return;
       }
     };
-
-    struct subaddress_reader
-    {
-      expect<db::storage_reader> reader;
-      std::optional<db::storage> disk;
-      db::cursor::subaddress_indexes cur;
-      const std::uint32_t max_subaddresses;
-
-      subaddress_reader(std::optional<db::storage> const& disk_in, const std::uint32_t max_subaddresses)
-        : reader(common_error::kInvalidArgument), disk(), cur(nullptr), max_subaddresses(max_subaddresses)
-      {
-        if (disk_in)
-          disk = disk_in->clone();
-
-        if (max_subaddresses)
-          update_reader();
-      }
-
-      void update_reader()
-      {
-        if (disk)
-          reader = disk->start_read();
-        if (!reader)
-          MERROR("Subadress lookup failure: " << reader.error().message());
-      }
-    };
-
-    void update_lookahead(const account& user, subaddress_reader& reader, const db::address_index& match, const db::block_id height)
-    {
-      if (match.is_zero())
-        return; // keep subaddress disabled servers quick
-
-      if (!reader.disk)
-        throw std::runtime_error{"Bad DB handle in scanner"};
-
-      auto upserted = reader.disk->update_lookahead(user.db_address(), height, match, reader.max_subaddresses);
-      if (upserted)
-      {
-        if (0 < *upserted)
-          reader.update_reader(); // update reader after upsert added new addresses
-        else if (*upserted < 0)
-          upserted = {error::max_subaddresses};
-      }
-
-      if (!upserted)
-        MWARNING("Failed to update lookahead for " << user.address() << ": " << upserted.error());
-    }
-
-    void scan_transaction_base(
-      epee::span<lws::account> users,
-      const db::block_id height,
-      const std::uint64_t timestamp,
-      crypto::hash const& tx_hash,
-      cryptonote::transaction const& tx,
-      std::vector<std::uint64_t> const& out_ids,
-      subaddress_reader& reader,
-      std::function<void(lws::account&, const db::spend&)> spend_action,
-      std::function<bool(expect<db::storage_reader>&, lws::account&, const db::output&)> output_action)
-    {
-      if (2 < tx.version)
-        throw std::runtime_error{"Unsupported tx version"};
-
-      cryptonote::tx_extra_pub_key key;
-      boost::optional<crypto::hash> prefix_hash;
-      boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
-      std::pair<std::uint8_t, db::output::payment_id_> payment_id;
-      cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
-      std::vector<crypto::key_derivation> additional_derivations;
-
-      {
-        std::vector<cryptonote::tx_extra_field> extra;
-        cryptonote::parse_tx_extra(tx.extra, extra);
-        // allow partial parsing of tx extra (similar to wallet2.cpp)
-
-        if (!cryptonote::find_tx_extra_field_by_type(extra, key))
-          return;
-
-        extra_nonce.emplace();
-        if (cryptonote::find_tx_extra_field_by_type(extra, *extra_nonce))
-        {
-          if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.long_))
-            payment_id.first = sizeof(crypto::hash);
-        }
-        else
-          extra_nonce = boost::none;
-
-        // additional tx pub keys present when there are 3+ outputs in a tx involving subaddresses
-        if (reader.reader)
-          cryptonote::find_tx_extra_field_by_type(extra, additional_tx_pub_keys);
-      } // destruct `extra` vector
-
-      for (account& user : users)
-      {
-        if (height <= user.scan_height())
-          continue; // to next user
-
-        crypto::key_derivation derived;
-        if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
-          continue; // to next user
-
-        if (reader.reader && additional_tx_pub_keys.data.size() == tx.vout.size())
-        {
-          additional_derivations.resize(tx.vout.size());
-          std::size_t index = -1;
-          for (auto const& out: tx.vout)
-          {
-            ++index;
-            if (!crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
-            {
-              additional_derivations.clear();
-              break; // vout loop
-            }
-          }
-        }
-
-        db::extra ext{};
-        std::uint32_t mixin = 0;
-        for (auto const& in : tx.vin)
-        {
-          cryptonote::txin_to_key const* const in_data =
-            boost::get<cryptonote::txin_to_key>(std::addressof(in));
-          if (in_data)
-          {
-            mixin = boost::numeric_cast<std::uint32_t>(
-              std::max(std::size_t(1), in_data->key_offsets.size()) - 1
-            );
-
-            std::uint64_t goffset = 0;
-            for (std::uint64_t offset : in_data->key_offsets)
-            {
-              goffset += offset;
-              const boost::optional<db::address_index> subaccount =
-                user.get_spendable(db::output_id{in_data->amount, goffset});
-              if (!subaccount)
-                continue; // to next input
-
-              spend_action(
-                user,
-                db::spend{
-                  db::transaction_link{height, tx_hash},
-                  in_data->k_image,
-                  db::output_id{in_data->amount, goffset},
-                  timestamp,
-                  tx.unlock_time,
-                  mixin,
-                  {0, 0, 0}, // reserved
-                  payment_id.first,
-                  payment_id.second.long_,
-                  *subaccount
-                }
-              );
-            }
-          }
-          else if (boost::get<cryptonote::txin_gen>(std::addressof(in)))
-            ext = db::extra(ext | db::coinbase_output);
-        }
-
-        std::size_t index = -1;
-        for (auto const& out : tx.vout)
-        {
-          ++index;
-
-          crypto::public_key out_pub_key;
-          if (!cryptonote::get_output_public_key(out, out_pub_key))
-            continue; // to next output
-
-          boost::optional<crypto::view_tag> view_tag_opt =
-            cryptonote::get_output_view_tag(out);
-
-          const bool found_tag =
-            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, additional_derivations.at(index), index)) ||
-            cryptonote::out_can_be_to_acc(view_tag_opt, derived, index); 
-
-          if (!found_tag)
-            continue; // to next output
-
-          bool found_pub = false;
-          db::address_index account_index{db::major_index::primary, db::minor_index::primary};
-          crypto::key_derivation active_derived{};
-          crypto::public_key active_pub{};
-
-          // inspect the additional and traditional keys
-          for (std::size_t attempt = 0; attempt < 2; ++attempt)
-          {
-            if (attempt == 0)
-            {
-              active_derived = derived;
-              active_pub = key.pub_key;
-            }
-            else if (!additional_derivations.empty())
-            {
-              active_derived = additional_derivations.at(index);
-              active_pub = additional_tx_pub_keys.data.at(index);
-            }
-            else
-              break; // inspection loop
-
-            crypto::public_key derived_pub;
-            if (!crypto::wallet::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
-              continue; // to next available active_derived
-
-            if (user.spend_public() != derived_pub)
-            {
-              if (!reader.reader)
-                continue; // to next available active_derived
-
-              const expect<db::address_index> match =
-                reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
-              if (!match)
-              {
-                if (match != lmdb::error(MDB_NOTFOUND))
-                  MERROR("Failure when doing subaddress search: " << match.error().message());
-                continue; // to next available active_derived
-              }
-
-              update_lookahead(user, reader, *match, height);
-              found_pub = true;
-              account_index = *match;
-              break; // additional_derivations loop
-            }
-            else
-            {
-              found_pub = true;
-              break; // additional_derivations loop
-            }
-          }
-
-          if (!found_pub)
-            continue; // to next output
-
-          if (!prefix_hash)
-          {
-            prefix_hash.emplace();
-            cryptonote::get_transaction_prefix_hash(tx, *prefix_hash);
-          }
-
-          std::uint64_t amount = out.amount;
-          rct::key mask = rct::identity();
-          if (!amount && !(ext & db::coinbase_output) && 1 < tx.version)
-          {
-            const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
-            const auto decrypted = lws::decode_amount(
-              tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_derived, index, bulletproof2
-            );
-            if (!decrypted)
-            {
-              MWARNING(user.address() << " failed to decrypt amount for tx " << tx_hash << ", skipping output");
-              continue; // to next output
-            }
-            amount = decrypted->first;
-            mask = decrypted->second;
-            ext = db::extra(ext | db::ringct_output);
-          }
-          else if (1 < tx.version)
-            ext = db::extra(ext | db::ringct_output);
-
-          if (extra_nonce)
-          {
-            if (!payment_id.first && cryptonote::get_encrypted_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.short_))
-            {
-              payment_id.first = sizeof(crypto::hash8);
-              lws::decrypt_payment_id(payment_id.second.short_, active_derived);
-            }
-          }
-          const bool added = output_action(
-            reader.reader,
-            user,
-            db::output{
-              db::transaction_link{height, tx_hash},
-              db::output::spend_meta_{
-                db::output_id{tx.version < 2 ? out.amount : 0, out_ids.at(index)},
-                amount,
-                mixin,
-                boost::numeric_cast<std::uint32_t>(index),
-                active_pub
-              },
-              timestamp,
-              tx.unlock_time,
-              *prefix_hash,
-              out_pub_key,
-              mask,
-              {0, 0, 0, 0, 0, 0, 0}, // reserved bytes
-              db::pack(ext, payment_id.first),
-              payment_id.second,
-              cryptonote::get_tx_fee(tx),
-              account_index
-            }
-          );
-
-          if (!added)
-            MWARNING("Output not added, duplicate public key encountered");
-        } // for all tx outs
-      } // for all users
-    }
-
-    void scan_transaction(
-      epee::span<lws::account> users,
-      const db::block_id height,
-      const std::uint64_t timestamp,
-      crypto::hash const& tx_hash,
-      cryptonote::transaction const& tx,
-      std::vector<std::uint64_t> const& out_ids,
-      subaddress_reader& reader)
-    {
-      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{});
-    }
 
     void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, scanner_sync& self, rpc::client& client, const scanner_options& opts)
     {
@@ -610,10 +300,11 @@ namespace lws
       const auto time =
         boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
-      subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.max_subaddresses};
-      send_webhook sender{disk, client, self};
+      ownership_test scan_transaction{null_spend{}, send_webhook{disk, client, self}};
+      if (opts.max_subaddresses > 0)
+        scan_transaction.enable_subaddresses(disk, opts.max_subaddresses);
       for (const auto& tx : parsed->txes)
-        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
+        scan_transaction(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
@@ -861,7 +552,9 @@ namespace lws
             );
           }
 
-          subaddress_reader reader{disk, opts.max_subaddresses};
+          ownership_test scan_transaction{add_spend{}, add_output{}};
+          if (disk && opts.max_subaddresses)
+            scan_transaction.enable_subaddresses(*disk, opts.max_subaddresses);
           db::block_difficulty::unsigned_int diff{};
           const db::block_id initial_height = db::block_id(fetched->start_height);
           for (auto block_data : boost::combine(blocks, indices))
@@ -888,8 +581,7 @@ namespace lws
               block.timestamp,
               miner_tx_hash,
               block.miner_tx,
-              *(indices.begin()),
-              reader
+              *(indices.begin())
             );
 
             if (opts.untrusted_daemon)
@@ -938,10 +630,9 @@ namespace lws
                 epee::to_mut_span(users),
                 db::block_id(fetched->start_height),
                 block.timestamp,
-                boost::get<0>(tx_data),
-                boost::get<1>(tx_data),
-                boost::get<2>(tx_data),
-                reader
+                boost::get<0>(tx_data), // tx_hashes
+                boost::get<1>(tx_data), // txes
+                boost::get<2>(tx_data) // indices
               );
             }
 
@@ -960,10 +651,9 @@ namespace lws
             blockchain.push_back(cryptonote::get_block_hash(block));
           } // for each block
 
-          reader.reader = std::error_code{common_error::kInvalidArgument}; // cleanup reader before next write
-
           MINFO("Thread " << thread_n << " processed " << blockchain.size() << " blocks(s) @ height " << fetched->start_height << " against " << users.size() << " account(s)");
 
+          scan_transaction.disable_subaddresses(); // cleanup reader before next write
           if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_span(users), epee::to_span(new_pow)))
             return false;
 
