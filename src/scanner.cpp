@@ -216,15 +216,9 @@ namespace lws
       db::storage const& disk_;
       rpc::client& client_;
       scanner_sync& http_;
-      std::unordered_map<crypto::hash, crypto::hash> txpool_;
 
       void operator()(lws::account& user, db::output&& out)
       {
-        /* Upstream monerod does not send all fields for a transaction, so
-           mempool notifications cannot compute tx_hash correctly (it is not
-           sent separately, a further blunder). Instead, if there are matching
-           outputs with webhooks, fetch mempool to compare tx_prefix_hash and
-           then use corresponding tx_hash. */
         const db::webhook_key key{user.id(), db::webhook_type::tx_confirmation};
         std::vector<db::webhook_value> hooks{};
 
@@ -244,39 +238,11 @@ namespace lws
           hooks = std::move(*found);
         }
 
-        if (!hooks.empty() && txpool_.empty())
-        {
-          cryptonote::rpc::GetTransactionPool::Request req{};
-          if (!send(client_, rpc::client::make_message("get_transaction_pool", req)))
-          {
-            MERROR("Unable to compute tx hash for webhook, aborting");
-            return;
-          }
-          auto resp = client_.get_message(std::chrono::seconds{3});
-          if (!resp)
-          {
-            MERROR("Unable to get txpool: " << resp.error().message());
-            return;
-          }
-
-          auto txpool = rpc::parse_json_response<rpc::get_transaction_pool>(std::move(*resp));
-          if (!txpool)
-            MONERO_THROW(txpool.error(), "Failed fetching transaction pool");
-          for (auto& tx : txpool->transactions)
-            txpool_.emplace(get_transaction_prefix_hash(tx.tx), tx.tx_hash);
-        }
-
         std::vector<db::webhook_tx_confirmation> events{};
         for (auto& hook : hooks)
         {
           events.push_back(db::webhook_tx_confirmation{key, std::move(hook), out});
           events.back().value.second.confirmations = 0;
-
-          const auto hash = txpool_.find(out.tx_prefix_hash);
-          if (hash != txpool_.end())
-            events.back().tx_info.link.tx_hash = hash->second;
-          else
-            events.pop_back(); //cannot compute tx_hash
         }
         send_payment_hook(http_.io_, client_, http_.webhooks_, epee::to_span(events));
         return;
@@ -304,7 +270,7 @@ namespace lws
       if (opts.max_subaddresses > 0)
         scan_transaction.enable_subaddresses(disk, opts.max_subaddresses);
       for (const auto& tx : parsed->txes)
-        scan_transaction(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs);
+        scan_transaction(users, db::block_id::txpool, time, get_transaction_hash(tx), tx, fake_outs);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
