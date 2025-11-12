@@ -584,7 +584,7 @@ namespace lws
         scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
     }
 
-    void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const bool leader_thread) noexcept
+    void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
     {
       struct stop_
       {
@@ -614,7 +614,7 @@ namespace lws
             auto new_client = MONERO_UNWRAP(client.clone());
             MONERO_UNWRAP(new_client.watch_scan_signals());
             user_data store_local{disk.clone()};
-            if (!scanner::loop(self, std::move(store_local), disk.clone(), std::move(new_client), std::move(users), *queue, opts, leader_thread))
+            if (!scanner::loop(self, std::move(store_local), disk.clone(), std::move(new_client), std::move(users), *queue, opts, thread_n))
               return;
           }
 
@@ -656,8 +656,10 @@ namespace lws
   scanner::~scanner()
   {}
 
-    bool scanner::loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const bool leader_thread) 
+    bool scanner::loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const size_t thread_n)
     {
+      const bool leader_thread = thread_n == 0;
+
       if (users.empty())
         return true;
 
@@ -927,6 +929,9 @@ namespace lws
           } // for each block
 
           reader.reader = std::error_code{common_error::kInvalidArgument}; // cleanup reader before next write
+
+          MINFO("Thread " << thread_n << " processed " << blockchain.size() << " blocks(s) @ height " << fetched->start_height << " against " << users.size() << " account(s)");
+
           if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_span(users), epee::to_span(new_pow)))
             return false;
 
@@ -1025,7 +1030,7 @@ namespace lws
           auto data = std::make_shared<thread_data>(
             MONERO_UNWRAP(ctx.connect()), disk.clone(), std::move(thread_users), queues[i], opts
           );
-          threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i == 0));
+          threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i));
         }
 
         users.clear();
@@ -1280,7 +1285,6 @@ namespace lws
       MONERO_THROW(updated.error(), "Failed to update accounts on disk");
     }
 
-    MINFO("Processed " << chain.size() << " block(s) against " << users.size() << " account(s)");
     send_payment_hook(io, client, webhook, epee::to_span(updated->confirm_pubs));
     send_spend_hook(io, client, webhook, epee::to_span(updated->spend_pubs));
     if (updated->accounts_updated != users.size())
