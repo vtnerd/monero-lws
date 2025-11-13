@@ -664,7 +664,7 @@ namespace lws
       catch (std::exception const& e)
       {
         self.shutdown();
-        MERROR(e.what());
+        MERROR("Scanner shutdown with error " << e.what());
       }
       catch (...)
       {

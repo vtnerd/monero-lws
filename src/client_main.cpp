@@ -259,7 +259,7 @@ namespace
     catch (const std::exception& e)
     {
       self.shutdown();
-      MERROR(e.what());
+      MERROR("Client shutdown with error " << e.what());
     }
     catch (...)
     {
@@ -375,7 +375,7 @@ int main(int argc, char** argv)
   }
   catch (std::exception const& e)
   {
-    MERROR(e.what());
+    MERROR("Client shutdown with error " << e.what());
     return EXIT_FAILURE;
   }
   catch (...)
