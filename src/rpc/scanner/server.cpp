@@ -147,6 +147,8 @@ namespace lws { namespace rpc { namespace scanner
       if (msg.users.empty())
         return true;
 
+      MINFO("Client (" << self->remote_endpoint() << ") processed "
+        << msg.blocks.size() << " block(s) against " << msg.users.size() << " account(s)");
       server::store(self->parent_, std::move(msg.users), std::move(msg.blocks));
       return true;  
     }
