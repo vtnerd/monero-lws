@@ -73,6 +73,7 @@
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "lws"
+#define MINIMUM_BLOCK_DEPTH 16
 
 namespace lws
 {
@@ -1044,25 +1045,94 @@ namespace lws
         boost::thread::attributes attrs;
         attrs.set_stack_size(THREAD_STACK_SIZE);
 
-        std::sort(users.begin(), users.end(), by_height{});
-
         MINFO("Starting scan loops on " << thread_count << " thread(s) with " << users.size() << " account(s)");
 
-        for (std::size_t i = 0; i < queues.size(); ++i)
+        if (opts.block_depth_threading)
         {
-          queues[i] = std::make_shared<rpc::scanner::queue>();
-
-          // this can create threads with no active accounts, they just wait
-          const std::size_t count = users.size() / (queues.size() - i);
-          std::vector<lws::account> thread_users{
-            std::make_move_iterator(users.end() - count), std::make_move_iterator(users.end())
+          // Get current blockchain height
+          const db::block_id current_height = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_last_block()).id;
+          
+          // Calculate blockdepth for each account and create pairs
+          struct account_depth {
+            std::size_t index;
+            std::uint64_t blockdepth;
           };
-          users.erase(users.end() - count, users.end());
+          std::vector<account_depth> account_depths;
+          account_depths.reserve(users.size());
+          
+          std::uint64_t total_blockdepth = 0;
+          for (std::size_t i = 0; i < users.size(); ++i)
+          {
+            const std::uint64_t raw_blockdepth = std::uint64_t(current_height) - std::uint64_t(users[i].scan_height());
+            const std::uint64_t blockdepth = std::max(raw_blockdepth, std::uint64_t(MINIMUM_BLOCK_DEPTH));
+            account_depths.push_back(account_depth{i, blockdepth});
+            total_blockdepth += blockdepth;
+          }
+          
+          // Sort by blockdepth (smallest first)
+          std::sort(account_depths.begin(), account_depths.end(),
+            [](const account_depth& a, const account_depth& b) {
+              return a.blockdepth < b.blockdepth;
+            });
+          
+          // Calculate target blockdepth per thread
+          const std::uint64_t blockdepth_per_thread = total_blockdepth / thread_count;
+          
+          MINFO("Using block-depth threading: total_blockdepth=" << total_blockdepth 
+                << ", blockdepth_per_thread=" << blockdepth_per_thread);
+          
+          // Prepare thread assignment data structure
+          std::vector<std::vector<lws::account>> thread_assignments(thread_count);
+          
+          // Assign accounts to threads based on cumulative blockdepth
+          std::size_t current_thread = 0;
+          std::uint64_t current_thread_depth = 0;
+          
+          for (const auto& ad : account_depths)
+          {
+            // If adding this account would exceed the target and we're not on the last thread
+            if (current_thread_depth >= blockdepth_per_thread && current_thread < thread_count - 1)
+            {
+              ++current_thread;
+              current_thread_depth = 0;
+            }
+            
+            thread_assignments[current_thread].push_back(std::move(users[ad.index]));
+            current_thread_depth += ad.blockdepth;
+          }
+          
+          // Create threads with assigned accounts
+          for (std::size_t i = 0; i < queues.size(); ++i)
+          {
+            queues[i] = std::make_shared<rpc::scanner::queue>();
 
-          auto data = std::make_shared<thread_data>(
-            MONERO_UNWRAP(ctx.connect()), disk.clone(), std::move(thread_users), queues[i], opts
-          );
-          threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i));
+            auto data = std::make_shared<thread_data>(
+              MONERO_UNWRAP(ctx.connect()), disk.clone(), std::move(thread_assignments[i]), queues[i], opts
+            );
+            threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i));
+          }
+        }
+        else
+        {
+          // Original algorithm: sort by height and divide evenly by count
+          std::sort(users.begin(), users.end(), by_height{});
+
+          for (std::size_t i = 0; i < queues.size(); ++i)
+          {
+            queues[i] = std::make_shared<rpc::scanner::queue>();
+
+            // this can create threads with no active accounts, they just wait
+            const std::size_t count = users.size() / (queues.size() - i);
+            std::vector<lws::account> thread_users{
+              std::make_move_iterator(users.end() - count), std::make_move_iterator(users.end())
+            };
+            users.erase(users.end() - count, users.end());
+
+            auto data = std::make_shared<thread_data>(
+              MONERO_UNWRAP(ctx.connect()), disk.clone(), std::move(thread_users), queues[i], opts
+            );
+            threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i));
+          }
         }
 
         users.clear();

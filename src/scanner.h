@@ -48,6 +48,7 @@ namespace lws
     std::uint32_t max_subaddresses;
     bool untrusted_daemon;
     bool regtest;
+    bool block_depth_threading;
   };
 
   //! Used in `scan_loop` by server
