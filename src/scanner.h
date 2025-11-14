@@ -117,7 +117,7 @@ namespace lws
       \throw std::exception on hard errors (shutdown) conditions
       \return True iff `queue` indicates thread now has zero accounts. False
         indicates a soft, typically recoverable error. */
-    static bool loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, bool leader_thread);
+    static bool loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const size_t thread_n);
     
     //! Use `client` to sync blockchain data, and \return client if successful.
     expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false, const bool regtest = false);
