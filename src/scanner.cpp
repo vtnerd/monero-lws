@@ -652,14 +652,24 @@ namespace lws
           }
 
           users.clear();
+          MINFO("Thread " << thread_n << " has gone idle, waiting for work");
           auto status = queue->wait_for_accounts();
           if (status.replace)
+          {
             users = std::move(*status.replace);
-          users.insert(
-            users.end(),
-            std::make_move_iterator(status.push.begin()),
-            std::make_move_iterator(status.push.end())
-          );
+            MINFO("Thread " << thread_n << " received " << users.size() << " replacement account(s), starting work");
+          }
+          if (!status.push.empty())
+          {
+            MINFO("Thread " << thread_n << " received " << status.push.size() << " new account(s)");
+            users.insert(
+              users.end(),
+              std::make_move_iterator(status.push.begin()),
+              std::make_move_iterator(status.push.end())
+            );
+            if (!status.replace)
+              MINFO("Thread " << thread_n << " now has " << users.size() << " total account(s), starting work");
+          }
         }
       }
       catch (std::exception const& e)
