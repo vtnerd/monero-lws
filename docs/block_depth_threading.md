@@ -90,14 +90,13 @@ With 4 threads and 20 accounts with varying sync states:
 - Thread 3: P, Q, R, S, T (2,100 blocks) ⏱⏱⏱⏱ takes much longer
 - **Problem**: Despite equal account count (5 per thread), massive workload imbalance - thread 3 has 26x more work than thread 0
 
-**New Algorithm** (by depth, balanced workload with overallocation):
+**New Algorithm** (by depth, balanced workload with alternating over/under allocation):
 - Total: 3,728 blocks, target: 932 blocks/thread
-- Thread 0: A, B, C, D, E, F, G, H, I, J, K, L, M, N (1,128 blocks) - adds accounts until depth >= 932, then moves to next thread
-- Thread 1: O, P, Q (1,100 blocks) - adds accounts until depth >= 932, then moves to next thread
-- Thread 2: R, S (1,000 blocks) - adds accounts until depth >= 932, then moves to next thread
-- Thread 3: T (500 blocks) - final thread receives remaining account
-- **Result**: All 4 threads utilized with better balance (500-1,128 vs 80-2,100 blocks), synced accounts efficiently grouped
-
+- Thread 0: (even, over-allocate): A, B, C, D, E, F, G, H, I, J, K, L, M, N (1,128 blocks)
+- Thread 1: (odd, under-allocate): O, P (600 blocks)
+- Thread 2: (even, over-allocate): Q, R (1,000 blocks)
+- Thread 3: (odd, under-allocate): S, T (1,000 blocks)
+- **Result**: All 4 threads utilized with better balance (600-1,128 vs 80-2,100 blocks), synced accounts efficiently grouped
 
 ## Benefits
 

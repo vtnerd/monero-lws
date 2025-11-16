@@ -1100,8 +1100,26 @@ namespace lws
           
           for (const auto& ad : account_depths)
           {
-            // If adding this account would exceed the target and we're not on the last thread
-            if (current_thread_depth >= blockdepth_per_thread && current_thread < thread_count - 1)
+            // Alternate between over-allocating and under-allocating threads
+            // Even threads (0, 2, 4...): over-allocate - move to next when current depth reaches target
+            // Odd threads (1, 3, 5...): under-allocate - move to next when adding next account would exceed target
+            bool should_move_to_next_thread = false;
+            
+            if (current_thread < thread_count - 1)
+            {
+              if (current_thread % 2 == 0)
+              {
+                // Even thread: over-allocate (move when current depth >= target)
+                should_move_to_next_thread = (current_thread_depth >= blockdepth_per_thread);
+              }
+              else
+              {
+                // Odd thread: under-allocate (move when adding this account would exceed target)
+                should_move_to_next_thread = (current_thread_depth + ad.blockdepth > blockdepth_per_thread);
+              }
+            }
+            
+            if (should_move_to_next_thread)
             {
               ++current_thread;
               current_thread_depth = 0;
