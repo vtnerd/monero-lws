@@ -73,7 +73,6 @@
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "lws"
-#define MINIMUM_BLOCK_DEPTH 16
 
 namespace lws
 {
@@ -1074,7 +1073,7 @@ namespace lws
           for (std::size_t i = 0; i < users.size(); ++i)
           {
             const std::uint64_t raw_blockdepth = std::uint64_t(current_height) - std::uint64_t(users[i].scan_height());
-            const std::uint64_t blockdepth = std::max(raw_blockdepth, std::uint64_t(MINIMUM_BLOCK_DEPTH));
+            const std::uint64_t blockdepth = std::max(raw_blockdepth, opts.min_block_depth);
             account_depths.push_back(account_depth{i, blockdepth});
             total_blockdepth += blockdepth;
           }
@@ -1089,7 +1088,8 @@ namespace lws
           const std::uint64_t blockdepth_per_thread = total_blockdepth / thread_count;
           
           MINFO("Using block-depth threading: total_blockdepth=" << total_blockdepth 
-                << ", blockdepth_per_thread=" << blockdepth_per_thread);
+                << ", blockdepth_per_thread=" << blockdepth_per_thread
+                << ", min_block_depth=" << opts.min_block_depth);
           
           // Prepare thread assignment data structure
           std::vector<std::vector<lws::account>> thread_assignments(thread_count);

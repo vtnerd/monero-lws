@@ -246,7 +246,7 @@ namespace
 
         if (!users.empty())
         {
-          static constexpr const lws::scanner_options opts{false, false, false};
+          static constexpr const lws::scanner_options opts{false, false, false, false, lws::MINIMUM_BLOCK_DEPTH};
 
           auto new_client = MONERO_UNWRAP(zclient.clone());
           MONERO_UNWRAP(new_client.watch_scan_signals());

@@ -14,7 +14,26 @@ This imbalance causes threads with mostly synced addresses to finish quickly and
 
 ## Configuration
 
-Enable with `--block-depth-threading` (default: false)
+- `--block-depth-threading`: Enable block depth threading algorithm (default: false)
+- `--min-block-depth`: Minimum block depth value for workload calculations (default: 16)
+
+## Usage
+
+Enable block depth threading with default settings:
+```bash
+monero-lws-daemon --block-depth-threading [other options]
+```
+
+Enable with custom minimum block depth:
+```bash
+monero-lws-daemon --block-depth-threading --min-block-depth=32 [other options]
+```
+
+Or in config file:
+```
+block-depth-threading=true
+min-block-depth=32
+```
 
 ## Algorithm
 
@@ -23,10 +42,25 @@ Enable with `--block-depth-threading` (default: false)
 For each address, the **block depth** is calculated as the number of blocks remaining to be scanned:
 
 ```
-blockdepth = current_blockchain_height - address_scan_height
+blockdepth = max(current_blockchain_height - address_scan_height, min_block_depth)
 ```
 
-Addresses with blockdepth less than 16 are assigned the minimum value of 16 to prevent edge cases where fully synced addresses would have zero blockdepth.
+Where `min_block_depth` is the value specified by `--min-block-depth` (default: 16).
+
+Addresses with blockdepth less than the minimum are assigned the minimum value. This prevents edge cases where fully synced addresses would have zero blockdepth, which could cause:
+- Division by zero or near-zero values in workload calculations
+- Degenerate cases where many fully-synced accounts get assigned together
+- Poor workload distribution when most accounts are fully synced
+
+### Minimum Block Depth
+
+The `--min-block-depth` flag sets the minimum block depth value used in workload calculations. This ensures that even fully synced accounts contribute meaningfully to workload balancing.
+
+**Default value**: 16 blocks
+
+**Example**: With `--min-block-depth=16`, an account at the current blockchain height (0 blocks remaining) is treated as having 16 blocks remaining for workload distribution purposes.
+
+**When to adjust**: You may want to increase this value if you have many fully synced accounts and want them to contribute more to workload balancing, or decrease it if you want more precise distribution for nearly-synced accounts.
 
 ### Thread Assignment
 
