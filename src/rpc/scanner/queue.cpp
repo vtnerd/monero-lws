@@ -25,8 +25,10 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "db/data.h"
 #include "queue.h"
 
+#include <algorithm>  // std::min_element
 #include "db/account.h"
 
 namespace lws { namespace rpc { namespace scanner 
@@ -43,7 +45,7 @@ namespace lws { namespace rpc { namespace scanner
   }
 
   queue::queue()
-    : replace_(), push_(), user_count_(0), sync_(), poll_(), stop_(false)
+    : replace_(), push_(), user_count_(0), current_min_height_(db::block_id(0)), sync_(), poll_(), stop_(false)
   {}
 
   queue::~queue()
@@ -62,6 +64,19 @@ namespace lws { namespace rpc { namespace scanner
   {
     const boost::lock_guard<boost::mutex> lock{sync_};
     return user_count_;
+  }
+
+  db::block_id queue::current_min_height()
+  {
+    const boost::lock_guard<boost::mutex> lock{sync_};
+    return current_min_height_;
+  }
+
+  void queue::update_min_height(db::block_id height)
+  {
+    const boost::lock_guard<boost::mutex> lock{sync_};
+    if (height > current_min_height_)
+      current_min_height_ = height;
   }
 
   queue::status queue::get_accounts()
@@ -85,6 +100,20 @@ namespace lws { namespace rpc { namespace scanner
       replace_ = std::move(users);
       user_count_ = replace_->size();
       push_.clear();
+      // Update min height based on the oldest account in the replacement set
+      if (!replace_->empty())
+      {
+        current_min_height_ = std::min_element(
+          replace_->begin(), replace_->end(),
+          [](const lws::account& a, const lws::account& b) {
+            return a.scan_height() < b.scan_height();
+          }
+        )->scan_height();
+      }
+      else
+      {
+        current_min_height_ = db::block_id(0);
+      }
     }
     poll_.notify_all();
   }

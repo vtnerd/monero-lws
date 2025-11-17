@@ -986,6 +986,18 @@ namespace lws
 
           for (account& user : users)
             user.updated(db::block_id(fetched->start_height));
+          
+          // Update queue with current minimum scan height (oldest account determines thread progress)
+          if (!users.empty())
+          {
+            const db::block_id min_height = std::min_element(
+              users.begin(), users.end(),
+              [](const account& a, const account& b) {
+                return a.scan_height() < b.scan_height();
+              }
+            )->scan_height();
+            queue.update_min_height(min_height);
+          }
         }
       }
 
@@ -1290,7 +1302,8 @@ namespace lws
           MONERO_UNWRAP(ctx.connect()),
           queues,
           std::move(active),
-          self.webhooks_.ssl_context()
+          self.webhooks_.ssl_context(),
+          opts.balance_new_addresses
         );
 
         rpc::scanner::server::start_user_checking(server);

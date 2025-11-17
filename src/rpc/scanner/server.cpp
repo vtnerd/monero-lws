@@ -32,6 +32,7 @@
 #include <boost/asio/dispatch.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/numeric/conversion/cast.hpp>
+#include <limits>
 #include <sodium/utils.h>
 #include <sodium/randombytes.h>
 #include <vector>
@@ -287,39 +288,97 @@ namespace lws { namespace rpc { namespace scanner
         return;
       }
 
-      self_->next_thread_ %= total_threads;
-      while (!new_accounts.empty())
+      if (self_->balance_new_addresses_ && !self_->local_.empty())
       {
-        if (self_->next_thread_ < self_->local_.size())
+        // New algorithm: Assign new accounts to thread with highest blockheight not above account height
+        // Only supports local scanning for now since remote clients can't share their scan heights.
+        while (!new_accounts.empty())
         {
-          self_->local_[self_->next_thread_]->push_accounts(
+          const db::block_id account_height = new_accounts.back().scan_height();
+          std::size_t best_thread = 0;
+          db::block_id best_height = db::block_id(0);
+          std::size_t best_count = std::numeric_limits<std::size_t>::max();
+          bool found_below_or_equal = false;
+          
+          // Check local threads
+          for (std::size_t i = 0; i < self_->local_.size(); ++i)
+          {
+            const db::block_id height = self_->local_[i]->current_min_height();
+            const std::size_t count = self_->local_[i]->user_count();
+            
+            if (height <= account_height)
+            {
+              // Prefer thread with highest height <= account_height, or if tied, fewer addresses
+              if (!found_below_or_equal || height > best_height || (height == best_height && count < best_count))
+              {
+                found_below_or_equal = true;
+                best_thread = i;
+                best_height = height;
+                best_count = count;
+              }
+            }
+            else
+            {
+              // Thread is above account height - only consider if no thread below/equal found yet
+              if (!found_below_or_equal)
+              {
+                // Prefer thread with lowest height, or if tied, fewer addresses
+                if (best_height == db::block_id(0) || height < best_height || (height == best_height && count < best_count))
+                {
+                  best_thread = i;
+                  best_height = height;
+                  best_count = count;
+                }
+              }
+            }
+          }
+          
+          MINFO("Thread " << best_thread << " at height " << std::uint64_t(best_height) 
+                << " received new account at height " << std::uint64_t(account_height));
+          self_->local_[best_thread]->push_accounts(
             std::make_move_iterator(new_accounts.end() - 1),
             std::make_move_iterator(new_accounts.end())
           );
           new_accounts.erase(new_accounts.end() - 1);
-          ++self_->next_thread_;
         }
-        else
+      }
+      else
+      {
+        // Original round-robin algorithm
+        self_->next_thread_ %= total_threads;
+        while (!new_accounts.empty())
         {
-          std::size_t j = 0;
-          for (auto offset = self_->local_.size(); j < remotes.size(); ++j)
+          if (self_->next_thread_ < self_->local_.size())
           {
-            if (self_->next_thread_ <= offset)
-              break;
-            offset += remotes[j]->threads_;
+            self_->local_[self_->next_thread_]->push_accounts(
+              std::make_move_iterator(new_accounts.end() - 1),
+              std::make_move_iterator(new_accounts.end())
+            );
+            new_accounts.erase(new_accounts.end() - 1);
+            ++self_->next_thread_;
+          }
+          else
+          {
+            std::size_t j = 0;
+            for (auto offset = self_->local_.size(); j < remotes.size(); ++j)
+            {
+              if (self_->next_thread_ <= offset)
+                break;
+              offset += remotes[j]->threads_;
+            }
+
+            const auto user_count = std::min(new_accounts.size(), remotes[j]->threads_);
+            std::vector<lws::account> next{
+              std::make_move_iterator(new_accounts.end() - user_count),
+              std::make_move_iterator(new_accounts.end())
+            };
+            new_accounts.erase(new_accounts.end() - user_count);
+            write_command(remotes[j], push_accounts{std::move(next)});
+            self_->next_thread_ += remotes[j]->threads_;
           }
 
-          const auto user_count = std::min(new_accounts.size(), remotes[j]->threads_);
-          std::vector<lws::account> next{
-            std::make_move_iterator(new_accounts.end() - user_count),
-            std::make_move_iterator(new_accounts.end())
-          };
-          new_accounts.erase(new_accounts.end() - user_count);
-          write_command(remotes[j], push_accounts{std::move(next)});
-          self_->next_thread_ += remotes[j]->threads_;
+          self_->next_thread_ %= total_threads;
         }
-
-        self_->next_thread_ %= total_threads;
       }
       reader->finish_read();
       self_->accounts_cur_ = current_users.give_cursor();
@@ -460,7 +519,7 @@ namespace lws { namespace rpc { namespace scanner
     };
   }
 
-  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl)
+  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl, bool balance_new_addresses)
     : strand_(io),
       check_timer_(io),
       acceptor_(io),
@@ -474,7 +533,8 @@ namespace lws { namespace rpc { namespace scanner
       next_thread_(0),
       pass_hashed_(),
       pass_salt_(),
-      stop_(false)
+      stop_(false),
+      balance_new_addresses_(balance_new_addresses)
   {
     std::sort(active_.begin(), active_.end());
     for (const auto& local : local_)

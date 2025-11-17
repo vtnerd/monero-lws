@@ -54,6 +54,7 @@ namespace lws
     double split_sync_threads;
     std::uint64_t split_sync_depth;
     std::uint64_t min_block_depth;
+    bool balance_new_addresses;
   };
 
   //! Used in `scan_loop` by server
