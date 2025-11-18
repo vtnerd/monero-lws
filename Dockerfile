@@ -23,6 +23,7 @@ RUN apt-get install --no-install-recommends -y \
     libldns-dev \
     liblzma-dev \
     libprotobuf-dev \
+    librabbitmq-dev \
     libsodium-dev \
     libssl-dev \
     libudev-dev \
@@ -114,7 +115,7 @@ ARG NPROC
 RUN set -ex \
     && git submodule init && git submodule update \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D BUILD_TESTS=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
+    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
     && make -j${NPROC:-$(nproc)} \
     && ./tests/unit/monero-lws-unit
 
