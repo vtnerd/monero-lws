@@ -356,7 +356,7 @@ namespace db
       "outputs_v1_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
     };
     constexpr const lmdb::basic_table<account_id, v2::output> outputs_v2{
-      "outputs_v2_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
+      "outputs_v2_by_account_id,block_id,tx_hash,output_id", MDB_DUPSORT, &output_compare
     };
     constexpr const lmdb::basic_table<account_id, output> outputs{
       "outputs_v3_by_account_id,block_id,tx_hash,output_id", (MDB_CREATE | MDB_DUPSORT), &output_compare
