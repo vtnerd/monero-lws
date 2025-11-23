@@ -34,6 +34,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
 #include <cassert>
+#include <cmath>
 #include <chrono>
 #include <cstring>
 #include <functional>
@@ -1064,7 +1065,8 @@ namespace lws
           // Calculate blockdepth for each account and create pairs
           struct account_depth {
             std::size_t index;
-            std::uint64_t blockdepth;
+            std::uint64_t blockdepth;  // Adjusted blockdepth (with min_block_depth applied) for workload calculations
+            std::uint64_t raw_blockdepth;  // True blockdepth for split-sync classification
           };
           std::vector<account_depth> account_depths;
           account_depths.reserve(users.size());
@@ -1074,59 +1076,128 @@ namespace lws
           {
             const std::uint64_t raw_blockdepth = std::uint64_t(current_height) - std::uint64_t(users[i].scan_height());
             const std::uint64_t blockdepth = std::max(raw_blockdepth, opts.min_block_depth);
-            account_depths.push_back(account_depth{i, blockdepth});
+            account_depths.push_back(account_depth{i, blockdepth, raw_blockdepth});
             total_blockdepth += blockdepth;
           }
           
-          // Sort by blockdepth (smallest first)
+          // Sort by raw_blockdepth (smallest first) to group accounts by true block depth
           std::sort(account_depths.begin(), account_depths.end(),
             [](const account_depth& a, const account_depth& b) {
-              return a.blockdepth < b.blockdepth;
+              return a.raw_blockdepth < b.raw_blockdepth;
             });
-          
-          // Calculate target blockdepth per thread
-          const std::uint64_t blockdepth_per_thread = total_blockdepth / thread_count;
-          
-          MINFO("Using block-depth threading: total_blockdepth=" << total_blockdepth 
-                << ", blockdepth_per_thread=" << blockdepth_per_thread
-                << ", min_block_depth=" << opts.min_block_depth);
           
           // Prepare thread assignment data structure
           std::vector<std::vector<lws::account>> thread_assignments(thread_count);
           
-          // Assign accounts to threads based on cumulative blockdepth
-          std::size_t current_thread = 0;
-          std::uint64_t current_thread_depth = 0;
+          // Initialize for standard block-depth-threading (all accounts, all threads)
+          std::vector<account_depth> accounts_to_assign = account_depths;
+          std::size_t start_thread = 0;
+          std::size_t num_threads_for_assignment = thread_count;
           
-          for (const auto& ad : account_depths)
+          // If split-sync is enabled, separate and assign synced accounts first
+          if (opts.split_sync_threads > 0.0)
           {
-            // Alternate between over-allocating and under-allocating threads
-            // Even threads (0, 2, 4...): over-allocate - move to next when current depth reaches target
-            // Odd threads (1, 3, 5...): under-allocate - move to next when adding next account would exceed target
-            bool should_move_to_next_thread = false;
+            // Separate synced and unsynced accounts
+            std::vector<account_depth> synced_accounts;
+            std::vector<account_depth> unsynced_accounts;
+            synced_accounts.reserve(account_depths.size());
+            unsynced_accounts.reserve(account_depths.size());
             
-            if (current_thread < thread_count - 1)
+            for (const auto& ad : account_depths)
             {
-              if (current_thread % 2 == 0)
-              {
-                // Even thread: over-allocate (move when current depth >= target)
-                should_move_to_next_thread = (current_thread_depth >= blockdepth_per_thread);
-              }
+              if (ad.raw_blockdepth <= opts.split_sync_depth)
+                synced_accounts.push_back(ad);
               else
-              {
-                // Odd thread: under-allocate (move when adding this account would exceed target)
-                should_move_to_next_thread = (current_thread_depth + ad.blockdepth > blockdepth_per_thread);
-              }
+                unsynced_accounts.push_back(ad);
             }
             
-            if (should_move_to_next_thread)
+            // Handle case: no synced accounts - use all threads for unsynced
+            if (synced_accounts.empty())
             {
-              ++current_thread;
-              current_thread_depth = 0;
+              MINFO("No synced accounts, using all threads for unsynced accounts");
+              accounts_to_assign = std::move(unsynced_accounts);
             }
+            else
+            {
+              // Calculate number of threads for synced accounts (rounded up)
+              const std::size_t num_synced_threads = std::max(std::size_t(1), 
+                static_cast<std::size_t>(std::ceil(opts.split_sync_threads * thread_count)));
+              
+              // Distribute synced accounts using round-robin
+              // Use only as many threads as we have synced accounts (if fewer)
+              const std::size_t actual_synced_threads = std::min(num_synced_threads, synced_accounts.size());
+              
+              for (std::size_t i = 0; i < synced_accounts.size(); ++i)
+              {
+                const std::size_t thread_idx = i % actual_synced_threads;
+                thread_assignments[thread_idx].push_back(std::move(users[synced_accounts[i].index]));
+              }
+              
+              // Remaining accounts (unsynced) will be assigned using block-depth-threading
+              accounts_to_assign = std::move(unsynced_accounts);
+              start_thread = num_synced_threads;
+              num_threads_for_assignment = thread_count - num_synced_threads;
+              
+              MINFO("Using split-sync threading: total_threads=" << thread_count
+                    << ", synced_threads=" << num_synced_threads
+                    << ", unsynced_threads=" << num_threads_for_assignment
+                    << ", split_sync_depth=" << opts.split_sync_depth
+                    << ", synced_accounts=" << synced_accounts.size()
+                    << ", unsynced_accounts=" << accounts_to_assign.size());
+            }
+          }
+          else
+          {
+            MINFO("Using block-depth threading: total_blockdepth=" << total_blockdepth 
+                  << ", min_block_depth=" << opts.min_block_depth);
+          }
+          
+          // Distribute remaining accounts using block-depth-threading
+          if (!accounts_to_assign.empty() && num_threads_for_assignment > 0)
+          {
+            // Calculate total blockdepth for accounts to assign
+            std::uint64_t assignment_total_blockdepth = 0;
+            for (const auto& ad : accounts_to_assign)
+              assignment_total_blockdepth += ad.blockdepth;
             
-            thread_assignments[current_thread].push_back(std::move(users[ad.index]));
-            current_thread_depth += ad.blockdepth;
+            const std::uint64_t blockdepth_per_thread = assignment_total_blockdepth / num_threads_for_assignment;
+            
+            // Assign accounts to threads based on cumulative blockdepth
+            std::size_t current_thread = start_thread;
+            std::uint64_t current_thread_depth = 0;
+            const std::size_t last_thread = start_thread + num_threads_for_assignment - 1;
+            
+            for (const auto& ad : accounts_to_assign)
+            {
+              // Alternate between over-allocating and under-allocating threads
+              // Even threads (0, 2, 4...): over-allocate - move to next when current depth reaches target
+              // Odd threads (1, 3, 5...): under-allocate - move to next when adding next account would exceed target
+              bool should_move_to_next_thread = false;
+              
+              if (current_thread < last_thread)
+              {
+                const std::size_t relative_thread = current_thread - start_thread;
+                if (relative_thread % 2 == 0)
+                {
+                  // Even thread: over-allocate (move when current depth >= target)
+                  should_move_to_next_thread = (current_thread_depth >= blockdepth_per_thread);
+                }
+                else
+                {
+                  // Odd thread: under-allocate (move when adding this account would exceed target)
+                  should_move_to_next_thread = (current_thread_depth + ad.blockdepth > blockdepth_per_thread);
+                }
+                
+                if (should_move_to_next_thread)
+                {
+                  ++current_thread;
+                  current_thread_depth = 0;
+                }
+              }
+              
+              thread_assignments[current_thread].push_back(std::move(users[ad.index]));
+              current_thread_depth += ad.blockdepth;
+            }
           }
           
           // Create threads with assigned accounts
