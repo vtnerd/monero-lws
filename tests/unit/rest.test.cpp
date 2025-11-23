@@ -164,7 +164,6 @@ namespace
 LWS_CASE("rest_server")
 {
   lws::db::account_address account_address{};
-  lws::db::account_address account{};
   carrot_account account_incoming{};
   crypto::secret_key view{};
   crypto::generate_keys(account_address.spend_public, view);
@@ -174,13 +173,13 @@ LWS_CASE("rest_server")
   {
     lws::db::account temp{};
     crypto::public_key temp2{};
-    temp.address = account;
+    temp.address = account_address;
     std::memcpy(std::addressof(temp.key), std::addressof(unwrap(unwrap(view))), sizeof(temp.key));
     account_incoming.account = lws::carrot_account{temp};
     crypto::generate_keys(temp2, account_incoming.generate_address);
   }
   const std::string generatekey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(account_incoming.generate_address))));
-  const user_account account_legacy{account, view};
+  const user_account account_legacy{account_address, view};
 
   SETUP("Database and login")
   {
