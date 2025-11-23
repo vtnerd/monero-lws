@@ -1071,7 +1071,13 @@ namespace db
     MDB_val key = lmdb::to_val(id);
     MDB_val value = lmdb::to_val(address);
 
-    MLWS_LMDB_CHECK(mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH));
+    const int err = mdb_cursor_get(cur.get(), &key, &value, MDB_GET_BOTH);
+    if (err)
+    {
+      if (err != MDB_NOTFOUND)
+        return log_lmdb_error(err, __LINE__, __FILE__);
+      return {lmdb::error(err)}; // do not log MDB_NOTFOUND; expected
+    }
     return subaddress_indexes.get_value<MONERO_FIELD(subaddress_map, index)>(value);
   }
 
