@@ -61,6 +61,8 @@ namespace lws
         return "Invalid blockchain height";
       case error::bad_url:
         return "Invlaid URL";
+      case error::bad_verb:
+        return "Incorrect HTTP verb provided";
       case error::bad_webhook:
         return "Invalid webhook request";
       case error::blockchain_reorg:

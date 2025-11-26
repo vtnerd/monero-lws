@@ -44,6 +44,7 @@ namespace lws
     bad_daemon_response,        //!< RPC Response from daemon was invalid
     bad_height,                 //!< Invalid blockchain height
     bad_url,                    //!< Invalid URL
+    bad_verb,                   //!< Bad HTTP verb for endpoint
     bad_webhook,                //!< Invalid webhook request
     blockchain_reorg,           //!< Blockchain reorg after fetching/scanning block(s)
     configuration,              //!< Process configuration invalid

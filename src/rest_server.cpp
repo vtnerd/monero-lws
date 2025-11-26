@@ -159,10 +159,11 @@ namespace lws
     struct connection_data
     {
       rest_server_data* const global; //!< Valid for lifetime of server
+      boost::beast::http::verb last_verb; 
       bool passed_login; //!< True iff a login via viewkey was successful
 
       explicit connection_data(rest_server_data* global) noexcept
-        : global(global), passed_login(false)
+        : global(global), last_verb(boost::beast::http::verb::unknown), passed_login(false)
       {}
 
       //! \return Next request timeout, based on login status
@@ -300,7 +301,7 @@ namespace lws
       using response = epee::byte_slice; // sometimes async
       using async_response = rpc::daemon_status_response;
 
-      static expect<response> handle(const request&, const connection_data& data, std::function<async_complete>&& resume)
+      static expect<response> handle(request, const connection_data& data, std::function<async_complete>&& resume)
       {
         using info_rpc = cryptonote::rpc::GetInfo;
 
@@ -1303,6 +1304,33 @@ namespace lws
       }
     };
 
+    struct get_version
+    {
+      using request = rpc::get_version_request;
+      using response = rpc::get_version_response;
+
+      static expect<response> handle(request, const connection_data& data, std::function<async_complete>&&)
+      {
+        lws::db::block_id height{};
+        {
+          auto reader = data.global->disk.start_read();
+          if (reader)
+          {
+            auto db_height = reader->get_last_block();
+            if (db_height)
+              height = db_height->id;
+            else
+              MWARNING("Failed to get DB height: " << db_height.error().message());
+          }
+          else
+            MWARNING("Failed to start db reader: " << reader.error().message());
+        }
+
+        // response constructor fills remaining fields
+        return response{height, data.global->options.max_subaddresses};
+      }
+    };
+
     struct import_request
     {
       using request = rpc::import_request;
@@ -1710,11 +1738,16 @@ namespace lws
         throw std::logic_error{"async REST handler not setup properly"};
       if (std::is_same<epee::byte_slice, response>() && !resume)
         throw std::logic_error{"async REST handler not setup properly"};
-
+ 
       request req{};
-      std::error_code error = wire::json::from_bytes(std::move(root), req);
-      if (error)
-        return error;
+      if (!std::is_empty<request>())
+      {
+        if (data.last_verb != boost::beast::http::verb::post)
+          return {error::bad_verb};
+        std::error_code error = wire::json::from_bytes(std::move(root), req);
+        if (error)
+          return error;
+      }
 
       expect<response> resp = E::handle(std::move(req), data, std::move(resume));
       if (!resp)
@@ -1744,6 +1777,9 @@ namespace lws
     expect<epee::byte_slice> call_admin(std::string&& root, connection_data& data, std::function<async_complete>&&)
     {
       using request = typename E::request;
+
+      if (data.last_verb != boost::beast::http::verb::post)
+        return {error::bad_verb};
       
       admin<request> req{};
       {
@@ -1804,6 +1840,7 @@ namespace lws
       {"/get_subaddrs",          call<get_subaddrs>,       2 * 1024, false},
       {"/get_txt_records",       nullptr,                         0, false},
       {"/get_unspent_outs",      call<get_unspent_outs>,   2 * 1024,  true},
+      {"/get_version",           call<get_version>,            1024, false},
       {"/import_wallet_request", call<import_request>,     2 * 1024, false},
       {"/login",                 call<login>,              2 * 1024, false},
       {"/provision_subaddrs",    call<provision_subaddrs>, 2 * 1024, false},
@@ -2010,6 +2047,8 @@ namespace lws
       assert(strand_.running_in_this_thread());
       if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount)
         return bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
+      else if (error == lws::error::bad_verb)
+        return bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
       else if (error == lws::error::account_not_found || error == lws::error::duplicate_request)
         return bad_request(boost::beast::http::status::forbidden, std::forward<F>(resume));
       else if (error == lws::error::max_subaddresses)
@@ -2119,7 +2158,8 @@ namespace lws
         return self_->bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
       }
 
-      if (self_->parser_->get().method() != boost::beast::http::verb::post)
+      const boost::beast::http::verb verb = self_->parser_->get().method();
+      if (verb != boost::beast::http::verb::post && verb != boost::beast::http::verb::get)
         return self_->bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
 
       std::function<async_complete> resumer;
@@ -2143,6 +2183,7 @@ namespace lws
       }
 
       MDEBUG("Running REST handler " << handler->name << " on " << self_.get());
+      self_->data_.last_verb = verb;
       auto body = handler->run(std::move(self_->parser_->get()).body(), self_->data_, std::move(resumer));
       if (!body)
         return self_->bad_request(body.error(), std::forward<F>(resume));
