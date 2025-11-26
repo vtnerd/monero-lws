@@ -37,10 +37,12 @@
 #include "config.h"
 #include "db/string.h"
 #include "error.h"
+#include "lws_version.h"
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
+#include "version.h"           // monero/src
 #include "wire.h"
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
@@ -359,6 +361,36 @@ namespace lws
       WIRE_FIELD_COPY(amount),
       wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand))),
       WIRE_FIELD(fees)
+    );
+  }
+
+  rpc::get_version_response::get_version_response(const db::block_id height, const std::uint32_t max_subaddresses)
+    : server_type(lws::version::name),
+      server_version(lws::version::id),
+      last_git_commit_hash(lws::version::commit),
+      last_git_commit_date(lws::version::date),
+      git_branch_name(lws::version::branch),
+      monero_version_full(MONERO_VERSION_FULL),
+      blockchain_height(height),
+      api(lws::version::api::combined),
+      max_subaddresses(max_subaddresses),
+      network(lws::rpc::network_type(lws::config::network)),
+      testnet(config::network == cryptonote::TESTNET) 
+  {}
+  void rpc::write_bytes(wire::json_writer& dest, const get_version_response& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(server_type),
+      WIRE_FIELD(server_version),
+      WIRE_FIELD(last_git_commit_hash),
+      WIRE_FIELD(last_git_commit_date),
+      WIRE_FIELD(git_branch_name),
+      WIRE_FIELD(monero_version_full),
+      WIRE_FIELD_COPY(blockchain_height),
+      WIRE_FIELD(api),
+      WIRE_FIELD_COPY(max_subaddresses),
+      wire::field("network_type", self.network),
+      WIRE_FIELD_COPY(testnet)
     );
   }
 
