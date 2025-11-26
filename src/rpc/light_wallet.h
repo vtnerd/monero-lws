@@ -224,6 +224,35 @@ namespace rpc
   void write_bytes(wire::json_writer&, const get_subaddrs_response&);
 
 
+  struct get_version_request
+  {
+    get_version_request() = delete;
+  };
+  inline void read_bytes(const wire::reader&, const get_version_request&)
+  {}
+
+  struct get_version_response
+  {
+    //! Defaults to current network in unavailable state
+    get_version_response(lws::db::block_id height, std::uint32_t max_subaddresses);
+
+   
+    const std::string server_type;
+    const std::string server_version;
+    const std::string last_git_commit_hash;
+    const std::string last_git_commit_date;
+    const std::string git_branch_name;
+    const std::string monero_version_full;
+
+    const db::block_id blockchain_height;
+    const std::uint32_t api;
+    const std::uint32_t max_subaddresses;
+    const network_type network;
+    const bool testnet; 
+  };
+  void write_bytes(wire::json_writer&, const get_version_response&);
+
+
   struct import_request
   {
     import_request() = delete;
