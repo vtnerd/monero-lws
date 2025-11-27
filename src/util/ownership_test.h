@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019, The Monero Project
+// Copyright (c) 2018-2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,62 +27,55 @@
 
 #pragma once
 
-#include <boost/thread/thread.hpp>
-#include <cstdint>
-#include <list>
-#include <memory>
-#include <string>
-#include <vector>
+#include <functional>
+#include <optional>
 
+#include "cryptonote_basic/cryptonote_basic.h"
+#include "db/account.h"
 #include "db/storage.h"
-#include "net/net_ssl.h"
-#include "rpc/client.h"
 #include "span.h"
 
 namespace lws
 {
-  class mempool;
-  struct rest_server_data;
-  class rest_server
-  {
-    struct internal;
-    template<typename> struct connection;
-    template<typename> struct handler_loop;
-    template<typename> struct accept_loop;
-
-    std::unique_ptr<rest_server_data> global_;
-    std::list<internal> ports_;
-    std::vector<boost::thread> workers_;
-
-    void run_io();
-
+  class ownership_test {
   public:
-    struct configuration
-    {
-      epee::net_utils::ssl_authentication_t auth;
-      std::vector<std::string> access_controls;
-      std::size_t threads;
-      std::uint32_t max_subaddresses;
-      epee::net_utils::ssl_verification_t webhook_verify;
-      bool allow_external;
-      bool disable_admin_auth;
-      bool auto_accept_creation;
+    using spend_action = std::function<void(account&, db::spend&&)>;
+    using output_action = std::function<void(account&, db::output&&)>;
+
+    ownership_test(spend_action, output_action);
+
+    ownership_test(const ownership_test&) = delete;
+    ownership_test(ownership_test&&) = default;
+
+    ownership_test& operator=(const ownership_test&) = delete;
+    ownership_test& operator=(ownership_test&&) = default;
+
+    /*! Tests the transaction against out accounts,
+      and invokes callbacks for matching inputs or outputs.
+      @param height mined height
+      @param timestamp mined block timestamp
+      @param out_ids maps vout indices to global utxo indexes
+    */
+    void operator()(
+      epee::span<account> users,
+      const crypto::hash& tx_hash,
+      const cryptonote::transaction& tx,
+      db::block_id height,
+      std::uint64_t timestamp,
+      const std::vector<std::uint64_t>& out_ids
+    );
+
+    void enable_subaddresses(const db::storage& disk);
+    void disable_subaddresses();
+
+  private:
+    spend_action on_spend;
+    output_action on_output;
+
+    struct detail{
+      db::storage_reader reader;
+      db::cursor::subaddress_indexes cur;
     };
-
-    explicit rest_server(
-      epee::span<const std::string> addresses,
-      std::vector<std::string> admin,
-      db::storage disk,
-      rpc::client client,
-      lws::mempool& mempool,
-      configuration config);
-
-    rest_server(rest_server&&) = delete;
-    rest_server(rest_server const&) = delete;
-
-    ~rest_server() noexcept;
-
-    rest_server& operator=(rest_server&&) = delete;
-    rest_server& operator=(rest_server const&) = delete;
+    std::optional<detail> subaddress;
   };
-}
+} // namespace lws

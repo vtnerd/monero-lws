@@ -33,6 +33,7 @@
 #include <boost/thread/thread.hpp>
 #include <chrono>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -44,6 +45,7 @@
 #include "cryptonote_config.h"   // monero/src/
 #include "db/storage.h"
 #include "error.h"
+#include "mempool.h"
 #include "options.h"
 #include "rest_server.h"
 #include "scanner.h"
@@ -309,14 +311,24 @@ namespace
     lws::scanner scanner{disk.clone(), prog.rest_config.webhook_verify};
 
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
+
+    lws::mempool mempool{};
     if (!sub_address.empty())
+    {
       MINFO("Using monerod ZMQ sub at " << sub_address);
+      MONERO_UNWRAP(mempool.start(ctx));
+    }
 
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
     const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
     lws::rest_server server{
-      epee::to_span(prog.rest_servers), prog.admin_rest_servers, std::move(disk), std::move(client), std::move(prog.rest_config)
+      epee::to_span(prog.rest_servers),
+      prog.admin_rest_servers,
+      std::move(disk),
+      std::move(client),
+      mempool,
+      std::move(prog.rest_config)
     };
     for (const std::string& address : prog.rest_servers)
       MINFO("Listening for REST clients at " << address);
@@ -331,6 +343,8 @@ namespace
       std::move(prog.lws_server_pass),
       lws::scanner_options{enable_subaddresses, prog.untrusted_daemon, prog.regtest}
     );
+
+    mempool.stop();
   }
 } // anonymous
 

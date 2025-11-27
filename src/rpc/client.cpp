@@ -481,6 +481,33 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
+  expect<std::pair<client::topic, std::string>> client::wait_for_pub(std::chrono::seconds timeout)
+  {
+    MONERO_PRECOND(daemon_sub != nullptr);
+    assert(signal_sub != nullptr);
+
+    expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, timeout);
+    if (!ready)
+      return ready.error();
+
+    auto pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+    if (!pub)
+      return pub.error();
+
+    if (boost::string_ref{*pub}.starts_with(minimal_chain_topic))
+    {
+      pub->erase(0, sizeof(minimal_chain_topic));
+      return {{topic::block, std::move(*pub)}};
+    }
+    if (boost::string_ref{*pub}.starts_with(full_txpool_topic))
+    {
+      pub->erase(0, sizeof(full_txpool_topic));
+      return {{topic::txpool, std::move(*pub)}};
+    }
+
+    return {lws::error::bad_daemon_response};
+  }
+
   expect<net::zmq::async_client> client::make_async_client(boost::asio::io_context& io) const
   {
     MONERO_PRECOND(ctx != nullptr);

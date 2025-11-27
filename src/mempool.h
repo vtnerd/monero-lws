@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019, The Monero Project
+// Copyright (c) 2024, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,62 +27,57 @@
 
 #pragma once
 
-#include <boost/thread/thread.hpp>
-#include <cstdint>
-#include <list>
+#include <atomic>
 #include <memory>
-#include <string>
+#include <mutex>
+#include <thread>
 #include <vector>
 
-#include "db/storage.h"
-#include "net/net_ssl.h"
+#include "db/fwd.h"
+#include "cryptonote_basic/cryptonote_basic.h" // external/monero/src
 #include "rpc/client.h"
-#include "span.h"
 
 namespace lws
 {
-  class mempool;
-  struct rest_server_data;
-  class rest_server
+  /*!
+    Thread-safe mempool cache using copy-on-write snapshots.
+
+    Writers clone the current snapshot, apply their mutation, and then replace
+    the shared pointer. Readers clone the shared pointer under a short lock and
+    can iterate the snapshot without additional synchronisation.
+  */
+  class mempool
   {
-    struct internal;
-    template<typename> struct connection;
-    template<typename> struct handler_loop;
-    template<typename> struct accept_loop;
-
-    std::unique_ptr<rest_server_data> global_;
-    std::list<internal> ports_;
-    std::vector<boost::thread> workers_;
-
-    void run_io();
-
   public:
-    struct configuration
-    {
-      epee::net_utils::ssl_authentication_t auth;
-      std::vector<std::string> access_controls;
-      std::size_t threads;
-      std::uint32_t max_subaddresses;
-      epee::net_utils::ssl_verification_t webhook_verify;
-      bool allow_external;
-      bool disable_admin_auth;
-      bool auto_accept_creation;
-    };
+    using txs = std::vector<std::shared_ptr<const cryptonote::transaction>>;
 
-    explicit rest_server(
-      epee::span<const std::string> addresses,
-      std::vector<std::string> admin,
-      db::storage disk,
-      rpc::client client,
-      lws::mempool& mempool,
-      configuration config);
+    mempool();
+    ~mempool();
 
-    rest_server(rest_server&&) = delete;
-    rest_server(rest_server const&) = delete;
+    //! \return Snapshot of current mempool state. Thread-safe.
+    std::shared_ptr<txs> get() const;
 
-    ~rest_server() noexcept;
+    expect<void> start(rpc::context& context);
+    void stop();
 
-    rest_server& operator=(rest_server&&) = delete;
-    rest_server& operator=(rest_server const&) = delete;
+  private:
+    struct thread_detail;
+
+    static crypto::hash get_hash(cryptonote::transaction const& tx);
+
+    mutable std::mutex mutex_;
+    std::shared_ptr<txs> current_;
+
+    std::unique_ptr<std::thread> thread_;
+    std::unique_ptr<thread_detail> updater_;
   };
-}
+
+  struct found_pool_tx {
+    crypto::hash hash;
+    std::vector<db::spend> spends;
+    std::vector<db::output> outputs;
+  };
+
+  std::vector<found_pool_tx> scan_txpool(mempool& pool, lws::account& user);
+
+} // namespace lws

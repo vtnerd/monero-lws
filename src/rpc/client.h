@@ -130,6 +130,7 @@ namespace rpc
 
     //! Wait for new block announce or internal timeout.
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
+    expect<std::pair<topic, std::string>> wait_for_pub(std::chrono::seconds timeout = std::chrono::seconds{5});
 
     //! \return A JSON message for RPC request `M`.
     template<typename M>
