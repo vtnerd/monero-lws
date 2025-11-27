@@ -15,6 +15,7 @@ RUN apt-get update \
 RUN apt-get install --no-install-recommends -y \
     build-essential \
     ca-certificates \
+    cargo \
     ccache \
     cmake \
     doxygen \
@@ -104,7 +105,7 @@ RUN git clone --recursive \
         *) echo "Dockerfile does not support this platform"; exit 1 ;; \
     esac \
     # Build only monerod binary using number of available threads
-    && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon lmdb_lib multisig
+    && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon lmdb_lib multisig wallet
 
 # Switch to monero-lws source directory
 WORKDIR /monero-lws
