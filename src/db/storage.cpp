@@ -2947,6 +2947,7 @@ namespace db
           auto old_dict = subaddress_ranges.get_value(value);
           if (!old_dict)
             return old_dict.error();
+          mdb_cursor_del(ranges_cur.get(), 0); // updated at end
 
           auto& old_range = old_dict->second.get_container();
           const auto& new_range = major_entry.second.get_container();
@@ -3015,7 +3016,9 @@ namespace db
 
             value = lmdb::to_val(new_value);
 
-            MONERO_LMDB_CHECK(mdb_cursor_put(indexes_cur.get(), &key, &value, 0));
+            const int err = mdb_cursor_put(indexes_cur.get(), &key, &value, MDB_NODUPDATA);
+            if (err && err != MDB_KEYEXIST)
+              return {lmdb::error(err)};
           }
         }
 
@@ -3024,7 +3027,7 @@ namespace db
         if (!value_bytes)
           return value_bytes.error();
         value = MDB_val{value_bytes->size(), const_cast<void*>(static_cast<const void*>(value_bytes->data()))};
-        MONERO_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, 0));
+        MONERO_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, MDB_NODUPDATA));
       }
 
       return {std::move(out)};
