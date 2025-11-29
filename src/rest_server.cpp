@@ -190,10 +190,24 @@ namespace lws
     }
 
     //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
+    //! Also updates access time and sets account to active state.
     expect<std::pair<db::account, db::storage_reader>> open_account(const rpc::account_credentials& creds, db::storage disk)
     {
       if (!key_check(creds))
         return {lws::error::bad_view_key};
+
+      // Update access time and set account to active
+      auto update_result = disk.update_access_time(creds.address);
+      if (!update_result && update_result != lws::error::account_not_found)
+        return update_result.error();
+
+      if (update_result)
+      {
+        epee::span<const lws::db::account_address> address_span(&creds.address, 1);
+        auto change_status_result = disk.change_status(db::account_status::active, address_span);
+        if (!change_status_result)
+          return change_status_result.error();
+      }
 
       auto reader = disk.start_read();
       if (!reader)
