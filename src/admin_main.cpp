@@ -36,6 +36,7 @@
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -196,6 +197,145 @@ namespace
     reader.json_debug(out, prog.show_sensitive);
   }
 
+  // Helper struct for output serialization
+  struct output_info
+  {
+    lws::db::output output;
+    boost::optional<lws::db::spend> spent_by;
+  };
+
+  void write_bytes(wire::json_writer& dest, const output_info& self)
+  {
+    const auto& o = self.output;
+    wire::object(dest,
+      wire::field("tx_hash", std::cref(o.link.tx_hash)),
+      wire::field("height", o.link.height),
+      wire::field("timestamp", o.timestamp),
+      wire::field("amount", o.spend_meta.amount),
+      wire::field("output_index", o.spend_meta.index),
+      wire::field("tx_public_key", std::cref(o.spend_meta.tx_public)),
+      wire::field("unlock_time", o.unlock_time),
+      wire::field("fee", o.fee),
+      wire::field("recipient_major", o.recipient.maj_i),
+      wire::field("recipient_minor", o.recipient.min_i),
+      wire::field("spent", self.spent_by.has_value())
+    );
+    if (self.spent_by)
+    {
+      wire::object(dest,
+        wire::field("spent_tx_hash", std::cref(self.spent_by->link.tx_hash)),
+        wire::field("spent_height", self.spent_by->link.height),
+        wire::field("spent_timestamp", self.spent_by->timestamp),
+        wire::field("key_image", std::cref(self.spent_by->image))
+      );
+    }
+  }
+
+  void get_account_info(program prog, std::ostream& out)
+  {
+    if (prog.arguments.size() != 1)
+      throw std::runtime_error{"get_account_info requires exactly 1 argument (base58 address)"};
+
+    const lws::db::account_address address = lws::db::address_string(prog.arguments[0]).value();
+
+    auto reader = MONERO_UNWRAP(prog.disk.start_read());
+
+    // Get basic account info
+    const auto account_result = reader.get_account(address);
+    if (!account_result)
+    {
+      // Check if there's a pending request
+      const auto create_req = reader.get_request(lws::db::request::create, address);
+      const auto import_req = reader.get_request(lws::db::request::import_scan, address);
+
+      wire::json_stream_writer json{out};
+      wire::object(json,
+        wire::field("address", lws::db::address_string(address)),
+        wire::field("found", false),
+        wire::field("pending_create_request", create_req.has_value()),
+        wire::field("pending_import_request", import_req.has_value())
+      );
+      json.finish();
+      return;
+    }
+
+    const lws::db::account_status status = account_result->first;
+    const lws::db::account& account = account_result->second;
+
+    // Build a map of output_id -> spend for quick lookup
+    std::map<lws::db::output_id, lws::db::spend> spend_map;
+    auto spends = reader.get_spends(account.id);
+    if (spends)
+    {
+      for (const auto& spend : spends->make_range())
+        spend_map[spend.source] = spend;
+    }
+
+    // Build output list with spend info
+    std::vector<output_info> output_list;
+    std::uint64_t total_received = 0;
+    std::uint64_t total_spent = 0;
+
+    auto outputs = reader.get_outputs(account.id);
+    if (outputs)
+    {
+      for (const auto& output : outputs->make_range())
+      {
+        output_info info{output, boost::none};
+        total_received += output.spend_meta.amount;
+
+        auto spend_it = spend_map.find(output.spend_meta.id);
+        if (spend_it != spend_map.end())
+        {
+          info.spent_by = spend_it->second;
+          total_spent += output.spend_meta.amount;
+        }
+        output_list.push_back(std::move(info));
+      }
+    }
+
+    // Get subaddresses
+    auto subaddrs = reader.get_subaddresses(account.id);
+    std::size_t subaddress_count = 0;
+    if (subaddrs)
+    {
+      for (const auto& dict : *subaddrs)
+      {
+        for (const auto& range : dict.second)
+          subaddress_count += (std::uint32_t(range.second) - std::uint32_t(range.first) + 1);
+      }
+    }
+
+    // Check for pending import request
+    const auto import_req = reader.get_request(lws::db::request::import_scan, address);
+
+    wire::json_stream_writer json{out};
+    wire::object(json,
+      wire::field("address", lws::db::address_string(address)),
+      wire::field("found", true),
+      wire::field("status", status),
+      wire::field("account_id", account.id),
+      wire::field("scan_height", account.scan_height),
+      wire::field("start_height", account.start_height),
+      wire::field("access_time", account.access),
+      wire::field("creation_time", account.creation),
+      wire::field("output_count", output_list.size()),
+      wire::field("total_received", total_received),
+      wire::field("spend_count", spend_map.size()),
+      wire::field("total_spent", total_spent),
+      wire::field("balance", total_received - total_spent),
+      wire::field("subaddress_count", subaddress_count),
+      wire::field("pending_import_request", import_req.has_value()),
+      wire::field("flags", account.flags),
+      wire::field("outputs", wire::array(output_list))
+    );
+
+    if (prog.show_sensitive)
+      wire::object(json, wire::field("view_key", std::cref(account.key)));
+
+    json.finish();
+  }
+
   void list_accounts(program prog, std::ostream& out)
   {
     if (!prog.arguments.empty())
@@ -285,17 +425,18 @@ namespace
 
   static constexpr const command commands[] =
   {
-    {"accept_requests",       &accept_requests, "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
-    {"add_account",           &add_account,     "<base58 address> <view key hex>"},
-    {"create_admin",          &create_admin,    ""},
-    {"debug_database",        &debug_database,  ""},
-    {"list_accounts",         &list_accounts,   ""},
-    {"list_admin",            &list_admin,      ""},
-    {"list_requests",         &list_requests,   ""},
-    {"modify_account_status", &modify_account,  "<\"active\"|\"inactive\"|\"hidden\"> <base58 address> [base 58 address]..."},
-    {"reject_requests",       &reject_requests, "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
-    {"rescan",                &rescan,          "<height> <base58 address> [base 58 address]..."},
-    {"rollback",              &rollback,        "<height>"}
+    {"accept_requests",       &accept_requests,   "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
+    {"add_account",           &add_account,       "<base58 address> <view key hex>"},
+    {"create_admin",          &create_admin,      ""},
+    {"debug_database",        &debug_database,    ""},
+    {"get_account_info",      &get_account_info,  "<base58 address>"},
+    {"list_accounts",         &list_accounts,     ""},
+    {"list_admin",            &list_admin,        ""},
+    {"list_requests",         &list_requests,     ""},
+    {"modify_account_status", &modify_account,    "<\"active\"|\"inactive\"|\"hidden\"> <base58 address> [base 58 address]..."},
+    {"reject_requests",       &reject_requests,   "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
+    {"rescan",                &rescan,            "<height> <base58 address> [base 58 address]..."},
+    {"rollback",              &rollback,          "<height>"}
   };
 
   void print_help(std::ostream& out)
