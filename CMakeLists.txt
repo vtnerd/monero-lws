@@ -26,7 +26,7 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.5.0)
 project(monero-lws)
 
 enable_language(CXX)
@@ -128,7 +128,7 @@ load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
   SODIUM_LIBRARY
 )
 
-if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}(/src/cryptonote_protocol)"))
+if (NOT (monero_monero_SOURCE_DIR MATCHES "${MONERO_SOURCE_DIR}"))
   message(FATAL_ERROR "Invalid Monero source dir - does not appear to match source used for build directory")
 endif()
 
@@ -158,7 +158,7 @@ if(STATIC)
   set(Boost_USE_STATIC_LIBS ON)
   set(Boost_USE_STATIC_RUNTIME ON)
 endif()
-find_package(Boost 1.58 QUIET REQUIRED COMPONENTS chrono filesystem program_options regex serialization system thread)
+find_package(Boost 1.69 QUIET REQUIRED COMPONENTS chrono filesystem program_options regex serialization thread)
 
 if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
   message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
@@ -178,6 +178,13 @@ set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
 set(LMDB_LIB_PATH "monero::lmdb")
 set(ZMQ_LIB "${monero_ZMQ_LIB}")
 
+# Ubuntu 22.04 calls this protokit instead of protolib
+find_library(PROTOKIT_LIBRARY protokit)
+
+# Ubuntu 22.04 needs these for static builds
+find_library(BSD_LIBRARY bsd)
+find_library(MD_LIBRARY md)
+
 if(NOT ZMQ_LIB)
   message(FATAL_ERROR "Could not find required libzmq")
 endif()
@@ -195,6 +202,15 @@ if(monero_PROTOLIB_LIBRARY)
 endif()
 if(monero_SODIUM_LIBRARY)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_SODIUM_LIBRARY}")
+endif()
+if (PROTOKIT_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${PROTOKIT_LIBRARY}")
+endif()
+if (BSD_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${BSD_LIBRARY}")
+endif()
+if (MD_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${MD_LIBRARY}")
 endif()
 
 if(STATIC AND NOT IOS)

@@ -2077,7 +2077,7 @@ namespace db
   {
     //! \return Success, even if `address` was not found (designed for
     expect<void>
-    change_height(MDB_cursor& accounts_cur, MDB_cursor& accounts_ba_cur, MDB_cursor& accounts_bh_cur, block_id height, account_address const& address)
+    change_height(MDB_cursor& accounts_cur, MDB_cursor& accounts_ba_cur, MDB_cursor& accounts_bh_cur, MDB_cursor& outputs_cur, MDB_cursor& spends_cur, MDB_cursor& images_cur, block_id height, account_address const& address)
     {
       MDB_val key = lmdb::to_val(by_address_version);
       MDB_val value = lmdb::to_val(address);
@@ -2123,6 +2123,9 @@ namespace db
         mdb_cursor_put(&accounts_bh_cur, &key, &value, MDB_NODUPDATA)
       );
 
+      MONERO_CHECK(rollback_outputs(user->id, height, outputs_cur));
+      MONERO_CHECK(rollback_spends(user->id, height, spends_cur, images_cur));
+
       return success();
     }
   }
@@ -2157,15 +2160,21 @@ namespace db
       cursor::accounts accounts_cur;
       cursor::accounts_by_address accounts_ba_cur;
       cursor::accounts_by_height accounts_bh_cur;
+      cursor::outputs outputs_cur;
+      cursor::spends spends_cur;
+      cursor::images images_cur;
 
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts, accounts_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
       MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_bh, accounts_bh_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.outputs, outputs_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.spends, spends_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.images, images_cur));
 
       for (account_address const& address : addresses)
       {
         const expect<void> changed = change_height(
-          *accounts_cur, *accounts_ba_cur, *accounts_bh_cur, height, address
+          *accounts_cur, *accounts_ba_cur, *accounts_bh_cur, *outputs_cur, *spends_cur, *images_cur, height, address
         );
         if (changed)
           updated.push_back(address);
@@ -2398,11 +2407,17 @@ namespace db
       cursor::accounts accounts_ba_cur;
       cursor::accounts accounts_bh_cur;
       cursor::requests requests_cur;
+      cursor::outputs outputs_cur;
+      cursor::spends spends_cur;
+      cursor::images images_cur;
 
       MONERO_CHECK(check_cursor(txn, tables.accounts, accounts_cur));
       MONERO_CHECK(check_cursor(txn, tables.accounts_ba, accounts_ba_cur));
       MONERO_CHECK(check_cursor(txn, tables.accounts_bh, accounts_bh_cur));
       MONERO_CHECK(check_cursor(txn, tables.requests, requests_cur));
+      MONERO_CHECK(check_cursor(txn, tables.outputs, outputs_cur));
+      MONERO_CHECK(check_cursor(txn, tables.spends, spends_cur));
+      MONERO_CHECK(check_cursor(txn, tables.images, images_cur));
 
       const request req = request::import_scan;
       for (account_address const& address : addresses)
@@ -2422,7 +2437,7 @@ namespace db
           return new_height.error();
 
         const expect<void> changed = change_height(
-          *accounts_cur, *accounts_ba_cur, *accounts_bh_cur, *new_height, address
+          *accounts_cur, *accounts_ba_cur, *accounts_bh_cur, *outputs_cur, *spends_cur, *images_cur, *new_height, address
         );
         if (changed)
           updated.push_back(address);
@@ -2932,6 +2947,7 @@ namespace db
           auto old_dict = subaddress_ranges.get_value(value);
           if (!old_dict)
             return old_dict.error();
+          mdb_cursor_del(ranges_cur.get(), 0); // updated at end
 
           auto& old_range = old_dict->second.get_container();
           const auto& new_range = major_entry.second.get_container();
@@ -3000,7 +3016,9 @@ namespace db
 
             value = lmdb::to_val(new_value);
 
-            MONERO_LMDB_CHECK(mdb_cursor_put(indexes_cur.get(), &key, &value, 0));
+            const int err = mdb_cursor_put(indexes_cur.get(), &key, &value, MDB_NODUPDATA);
+            if (err && err != MDB_KEYEXIST)
+              return {lmdb::error(err)};
           }
         }
 
@@ -3009,7 +3027,7 @@ namespace db
         if (!value_bytes)
           return value_bytes.error();
         value = MDB_val{value_bytes->size(), const_cast<void*>(static_cast<const void*>(value_bytes->data()))};
-        MONERO_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, 0));
+        MONERO_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, MDB_NODUPDATA));
       }
 
       return {std::move(out)};

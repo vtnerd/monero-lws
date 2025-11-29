@@ -75,6 +75,9 @@ namespace db
   };
   WIRE_AS_INTEGER(block_id);
 
+  inline constexpr std::uint64_t to_uint(const block_id src) noexcept
+  { return std::uint64_t(src); }
+
   //! References a global output number, as determined by the public chain
   struct output_id
   {

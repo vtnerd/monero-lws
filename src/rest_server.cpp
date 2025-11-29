@@ -69,6 +69,9 @@ namespace lws
     namespace http = epee::net_utils::http;
     constexpr const std::chrono::seconds reconnect_backoff{10};
 
+    constexpr const unsigned max_ring_size = 20;
+    constexpr const unsigned max_rings = 150;
+
     expect<rpc::client*> thread_client(const rpc::client& gclient, const bool reset = false)
     {
       struct tclient
@@ -136,11 +139,13 @@ namespace lws
       {}
     };
 
-    bool is_locked(std::uint64_t unlock_time, db::block_id last) noexcept
+    bool is_locked(std::uint64_t unlock_time, db::block_id last, db::block_id tx_height) noexcept
     {
       if (unlock_time > CRYPTONOTE_MAX_BLOCK_NUMBER)
-        return std::chrono::seconds{unlock_time} > std::chrono::system_clock::now().time_since_epoch();
-      return db::block_id(unlock_time) > last;
+        return std::chrono::seconds{unlock_time} > std::chrono::system_clock::now().time_since_epoch() + std::chrono::seconds{CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_SECONDS_V2};
+      if (unlock_time > to_uint(last) - 1 + CRYPTONOTE_LOCKED_TX_ALLOWED_DELTA_BLOCKS)
+        return true;
+      return to_uint(tx_height) + CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > to_uint(last);
     }
 
     std::vector<db::output::spend_meta_>::const_iterator
@@ -258,7 +263,7 @@ namespace lws
             metas.insert(find_metadata(metas, meta.id), meta);
 
           resp.total_received = rpc::safe_uint64(std::uint64_t(resp.total_received) + meta.amount);
-          if (is_locked(output.get_value<MONERO_FIELD(db::output, unlock_time)>(), last->id))
+          if (is_locked(output.get_value<MONERO_FIELD(db::output, unlock_time)>(), last->id, output.get_value<MONERO_FIELD(db::output, link)>().height))
             resp.locked_funds = rpc::safe_uint64(std::uint64_t(resp.locked_funds) + meta.amount);
         }
 
@@ -421,7 +426,7 @@ namespace lws
 
         std::vector<std::uint64_t> amounts = std::move(req.amounts.values);
 
-        if (50 < req.count || 20 < amounts.size())
+        if (max_ring_size < req.count || max_rings < req.amounts.values.size())
           return {lws::error::exceeded_rest_request_limit};
 
         const expect<rpc::client*> tclient = thread_client(gclient);
@@ -635,7 +640,8 @@ namespace lws
         const std::uint64_t per_byte_fee =
           resp->estimated_base_fee / resp->size_scale;
 
-        return response{per_byte_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), std::move(req.creds.key)};
+        return response{per_byte_fee, resp->fee_mask, rpc::safe_uint64(received), std::move(unspent), resp->fees, std::move(req.creds.key)};
+
       }
     };
 

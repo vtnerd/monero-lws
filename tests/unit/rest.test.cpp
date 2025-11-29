@@ -73,29 +73,35 @@ namespace
     return epee::byte_slice{
       std::string{
         "{\"jsonrpc\":2.0,\"id\":0,\"result\":{"
-          "\"estimated_base_fee\":10000,\"fee_mask\":1000,\"size_scale\":256,\"hard_fork_version\":16"
+          "\"estimated_base_fee\":10000,\"fee_mask\":1000,\"size_scale\":256,\"hard_fork_version\":16,\"fees\":[40,41]"
         "}}"
       }
     };
   }
 
-  rct_bytes get_rct_bytes(const crypto::secret_key& user_key, const crypto::public_key& tx_public, const rct::key& ringct_mask, const std::uint64_t amount, const std::uint32_t index)
+  rct_bytes get_rct_bytes(const crypto::secret_key& user_key, const crypto::public_key& tx_public, const rct::key& ringct_mask, const std::uint64_t amount, const std::uint32_t index, bool coinbase)
   {
     rct_bytes out{};
 
-    crypto::key_derivation derived;
-    if (!crypto::generate_key_derivation(tx_public, user_key, derived))
-      MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
+    if (!coinbase)
+    {
+      crypto::key_derivation derived;
+      if (!crypto::generate_key_derivation(tx_public, user_key, derived))
+        MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
 
-    crypto::secret_key scalar;
-    rct::ecdhTuple encrypted{ringct_mask, rct::d2h(amount)};
+      crypto::secret_key scalar;
+      rct::ecdhTuple encrypted{ringct_mask, rct::d2h(amount)};
 
-    crypto::derivation_to_scalar(derived, index, scalar);
-    rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
+      crypto::derivation_to_scalar(derived, index, scalar);
+      rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
 
-    out.commitment = rct::commit(amount, ringct_mask);
-    out.mask = encrypted.mask;
-    out.amount = encrypted.amount;
+      out.commitment = rct::commit(amount, ringct_mask);
+      out.mask = encrypted.mask;
+      out.amount = encrypted.amount;
+    }
+    else
+      out.mask = rct::identity();
+
     return out;
   }
 }
@@ -184,7 +190,7 @@ LWS_CASE("rest_server")
 
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
-      EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\"}");
+      EXPECT(response == "{\"per_byte_fee\":39,\"fee_mask\":1000,\"amount\":\"0\",\"fees\":[40,41]}");
     }
 
     SECTION("One Receive, Zero Spends")
@@ -289,7 +295,7 @@ LWS_CASE("rest_server")
       boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
       const join on_scope_exit{server_thread};
 
-      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2);
+      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
       EXPECT(response ==
@@ -309,7 +315,7 @@ LWS_CASE("rest_server")
           "\"height\":4000,"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
-        "]}"
+        "],\"fees\":[40,41]}"
       );
     }
 
@@ -446,7 +452,7 @@ LWS_CASE("rest_server")
       boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
       const join on_scope_exit{server_thread};
 
-      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2);
+      const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
       EXPECT(response ==
@@ -467,7 +473,7 @@ LWS_CASE("rest_server")
           "\"spend_key_images\":[\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\"],"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
-        "]}"
+        "],\"fees\":[40,41]}"
       );
     }
 
