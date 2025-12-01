@@ -71,7 +71,7 @@ set(monero-lws-common_headers config.h error.h fwd.h)
 add_library(monero-lws-common ${monero-lws-common_sources} ${monero-lws-common_headers})
 target_link_libraries(monero-lws-common monero::libraries)
 
-add_library(monero-lws-daemon-common rest_server.cpp scanner.cpp)
+add_library(monero-lws-daemon-common rest_server.cpp scanner.cpp mempool.cpp)
 target_include_directories(monero-lws-daemon-common PUBLIC ${ZMQ_INCLUDE_PATH})
 target_link_libraries(monero-lws-daemon-common
   PUBLIC
