@@ -397,6 +397,7 @@ namespace db
 
       MDB_val key{};
       MDB_val value{};
+      std::string key_bytes;
       int err = mdb_cursor_get(old_cur.get(), &key, &value, MDB_FIRST);
       for (;;)
       {
@@ -414,6 +415,9 @@ namespace db
         static_assert(sizeof(Y) >= sizeof(X), "unexpected sizeof");
         if (sizeof(X) != value.mv_size)
           return {lmdb::error(MDB_CORRUPTED)};
+
+        key_bytes.assign(reinterpret_cast<const char*>(key.mv_data), key.mv_size);
+        key.mv_data = reinterpret_cast<void*>(key_bytes.data());
 
         Y transition{};
         std::memcpy(std::addressof(transition), value.mv_data, value.mv_size);
@@ -455,6 +459,7 @@ namespace db
           block_id(points.begin()->first), points.begin()->second
         };
 
+        key = lmdb::to_val(blocks_version);
         MDB_val value = lmdb::to_val(checkpoint);
         err = mdb_cursor_put(cur.get(), &key, &value, MDB_NODUPDATA);
         if (err)
@@ -466,6 +471,7 @@ namespace db
             block_id(points.rbegin()->first), points.rbegin()->second
           };
 
+          key = lmdb::to_val(blocks_version);
           value = lmdb::to_val(checkpoint);
           err = mdb_cursor_put(cur.get(), &key, &value, MDB_NODUPDATA);
           if (err)
@@ -501,6 +507,7 @@ namespace db
         // new database
         block_pow checkpoint{block_id(0), 0u, block_difficulty{0u, 1u}};
         MDB_val value = lmdb::to_val(checkpoint);
+        key = lmdb::to_val(pows_version);
         err = mdb_cursor_put(cur.get(), &key, &value, MDB_NODUPDATA);
         if (err)
           MONERO_THROW(lmdb::error(err), "Unable to add hash to local blockchain");
@@ -1569,6 +1576,7 @@ namespace db
         user->scan_height = block_id(new_height);
         user->start_height = std::min(user->scan_height, user->start_height);
 
+        key = lmdb::to_val(lookup->status);
         value = lmdb::to_val(*user);
         MLWS_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_CURRENT));
 
@@ -1928,6 +1936,7 @@ namespace db
         return user.error();
 
       user->access = *current_time;
+      key = lmdb::to_val(lookup->status);
       value = lmdb::to_val(*user);
       MLWS_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_CURRENT));
       return success();
@@ -1971,6 +1980,7 @@ namespace db
         {
           by_address->lookup.status = status;
 
+          key = lmdb::to_val(by_address_version);
           value = lmdb::to_val(*by_address);
           MLWS_LMDB_CHECK(mdb_cursor_put(accounts_ba_cur.get(), &key, &value, MDB_CURRENT));
 
@@ -1992,6 +2002,7 @@ namespace db
           value = lmdb::to_val(user->id);
           MLWS_LMDB_CHECK(mdb_cursor_get(accounts_bh_cur.get(), &key, &value, MDB_GET_BOTH));
 
+          key = lmdb::to_val(user->scan_height);
           value = lmdb::to_val(by_address->lookup);
           MLWS_LMDB_CHECK(mdb_cursor_put(accounts_bh_cur.get(), &key, &value, MDB_CURRENT));
         }
@@ -2136,6 +2147,7 @@ namespace db
       user->scan_height = std::min(height, user->scan_height);
       user->start_height = std::min(height, user->start_height);
 
+      key = lmdb::to_val(lookup->status);
       value = lmdb::to_val(*user);
       MLWS_LMDB_CHECK(
         mdb_cursor_put(&accounts_cur, &key, &value, MDB_CURRENT)
@@ -2873,6 +2885,7 @@ namespace db
         const block_id existing_height = existing->scan_height;
 
         existing->scan_height = block_id(last_update);
+        key = lmdb::to_val(status_key);
         value = lmdb::to_val(*existing);
         MLWS_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_CURRENT));
 
@@ -3049,6 +3062,7 @@ namespace db
             new_value.index = address_index{major_entry.first, minor_index(minor)};
             new_value.subaddress = new_value.index.get_spend_public(address, view_key);
 
+            key = lmdb::to_val(id);
             value = lmdb::to_val(new_value);
 
             const int err = mdb_cursor_put(indexes_cur.get(), &key, &value, MDB_NODUPDATA);
@@ -3061,6 +3075,7 @@ namespace db
           subaddress_ranges.make_value(major_entry.first, new_dict);
         if (!value_bytes)
           return value_bytes.error();
+        key = lmdb::to_val(id);
         value = MDB_val{value_bytes->size(), const_cast<void*>(static_cast<const void*>(value_bytes->data()))};
         MLWS_LMDB_CHECK(mdb_cursor_put(ranges_cur.get(), &key, &value, MDB_NODUPDATA));
       }
