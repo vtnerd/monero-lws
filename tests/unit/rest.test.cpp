@@ -29,6 +29,7 @@
 
 #include <optional>
 #include "db/data.h"
+#include "db/print.test.h"
 #include "db/storage.test.h"
 #include "db/string.h"
 #include "error.h"
@@ -151,7 +152,7 @@ LWS_CASE("rest_server")
     std::string message =
       "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"create_account\":true,\"generated_locally\":true}";
     std::string response = invoke(client, "/login", message);
-    EXPECT(response == "{\"new_address\":true,\"generated_locally\":true}");
+    EXPECT(response == "{\"new_address\":true,\"generated_locally\":true,\"lookahead\":{\"maj_i\":0,\"min_i\":0}}");
 
     auto account = get_account();
     EXPECT(account.id == lws::db::account_id(1));
@@ -219,10 +220,20 @@ LWS_CASE("rest_server")
         "{\"import_fee\":\"0\","
         "\"status\":\"Accepted, waiting for approval\","
         "\"new_request\":true,"
-        "\"request_fulfilled\":false}"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
       );
 
-      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}));
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 0));
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Approved\","
+        "\"new_request\":false,"
+        "\"request_fulfilled\":true,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
+      );
+
       response = invoke(client, "/get_address_info", message);
       EXPECT(response ==
         "{\"locked_funds\":\"0\","
@@ -235,6 +246,167 @@ LWS_CASE("rest_server")
         "\"blockchain_height\":" + scan_height + "}"
       );
     }
+
+    SECTION("Import with lookahead")
+    {
+      EXPECT(account.start_height != lws::db::block_id(0));
+
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\", \"lookahead\":{\"maj_i\":2,\"min_i\":3}}";
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Accepted, waiting for approval\","
+        "\"new_request\":true,"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
+      );
+
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Waiting for Approval\","
+        "\"new_request\":false,"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
+      );
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const std::vector<lws::db::subaddress_dict> expected_range{};
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+      }
+
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 6));
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Approved\","
+        "\"new_request\":false,"
+        "\"request_fulfilled\":true,"
+        "\"lookahead\":{\"maj_i\":2,\"min_i\":3}}"
+      );
+
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":0,"
+        "\"scanned_block_height\":0,"
+        "\"start_height\":0,"
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"lookahead\":{\"maj_i\":2,\"min_i\":3}}"
+      );
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const auto account = MONERO_UNWRAP(reader.get_account(lws::db::account_status::active, lws::db::account_id(1)));
+        const lws::db::address_index lookahead{lws::db::major_index(2), lws::db::minor_index(3)};
+        EXPECT(account.lookahead == lookahead);
+        EXPECT(account.lookahead_fail == lws::db::block_id(0));
+      
+        const std::vector<lws::db::subaddress_dict> expected_range{
+          {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(2)}}}},
+          {lws::db::major_index(1), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(2)}}}},
+        };
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+      }
+    }
+
+    SECTION("Import with lookahead failure")
+    {
+      EXPECT(account.start_height != lws::db::block_id(0));
+
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":" + scan_height + "," +
+        "\"scanned_block_height\":" + scan_height + ","
+        "\"start_height\":" + start_height + ","
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + "}"
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\", \"lookahead\":{\"maj_i\":2,\"min_i\":3}}";
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Accepted, waiting for approval\","
+        "\"new_request\":true,"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
+      );
+
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Waiting for Approval\","
+        "\"new_request\":false,"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":0,\"min_i\":0}}"
+      );
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const std::vector<lws::db::subaddress_dict> expected_range{};
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+      }
+
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 5));
+      response = invoke(client, "/import_wallet_request", message);
+      EXPECT(response ==
+        "{\"import_fee\":\"0\","
+        "\"status\":\"Accepted, waiting for approval\","
+        "\"new_request\":true,"
+        "\"request_fulfilled\":false,"
+        "\"lookahead\":{\"maj_i\":2,\"min_i\":3}}"
+      );
+
+      response = invoke(client, "/get_address_info", message);
+      EXPECT(response ==
+        "{\"locked_funds\":\"0\","
+        "\"total_received\":\"0\","
+        "\"total_sent\":\"0\","
+        "\"scanned_height\":0,"
+        "\"scanned_block_height\":0,"
+        "\"start_height\":0,"
+        "\"transaction_height\":" + scan_height + ","
+        "\"blockchain_height\":" + scan_height + ","
+        "\"lookahead_fail\":1,"
+        "\"lookahead\":{\"maj_i\":2,\"min_i\":3}}"
+      );
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const auto account = MONERO_UNWRAP(reader.get_account(lws::db::account_status::active, lws::db::account_id(1)));
+        const lws::db::address_index lookahead{lws::db::major_index(2), lws::db::minor_index(3)};
+        EXPECT(account.lookahead == lookahead);
+        EXPECT(account.lookahead_fail == lws::db::block_id(1));
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))).empty());
+      }
+    }
+
 
     SECTION("One Receive, Zero Spends")
     {

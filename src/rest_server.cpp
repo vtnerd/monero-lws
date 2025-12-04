@@ -97,6 +97,7 @@ namespace lws
     const epee::net_utils::ssl_verification_t webhook_verify;
     const bool disable_admin_auth;
     const bool auto_accept_creation;
+    const bool auto_accept_import;
   };
 
   struct rest_server_data
@@ -263,6 +264,19 @@ namespace lws
       if (is_hidden(user->first))
         return {lws::error::account_not_found};
       return {std::make_pair(user->second, std::move(*reader))};
+    }
+
+    bool check_lookahead(connection_data& data, const db::address_index lookahead)
+    {
+      const auto minor = to_uint(lookahead.min_i);
+      if (minor)
+      {
+        const auto major = to_uint(lookahead.maj_i);
+        if (std::numeric_limits<std::uint32_t>::max() < major / minor)
+          return false;
+        return major * minor <= data.global->options.max_subaddresses;
+      }
+      return true;
     }
 
     //! For endpoints that _sometimes_ generate async responses
@@ -521,6 +535,8 @@ namespace lws
         resp.scanned_height = std::uint64_t(user->first.scan_height);
         resp.scanned_block_height = resp.scanned_height;
         resp.start_height = std::uint64_t(user->first.start_height);
+        resp.lookahead_fail = to_uint(user->first.lookahead_fail);
+        resp.lookahead = user->first.lookahead;
 
         std::vector<db::output::spend_meta_> metas{};
         metas.reserve(outputs->count());
@@ -595,6 +611,8 @@ namespace lws
         resp.start_height = std::uint64_t(user->first.start_height);
         resp.blockchain_height = std::uint64_t(last->id);
         resp.transaction_height = resp.blockchain_height;
+        resp.lookahead_fail = to_uint(user->first.lookahead_fail);
+        resp.lookahead = user->first.lookahead;
 
         // merge input and output info into a single set of txes.
 
@@ -1115,6 +1133,7 @@ namespace lws
             per_byte_fee,
             rpc->fee_mask,
             rpc::safe_uint64(received),
+            to_uint(user->first.lookahead_fail),
             std::move(unspent),
             rpc->fees,
             std::move(req.creds.key)
@@ -1340,13 +1359,28 @@ namespace lws
       {
         bool new_request = false;
         bool fulfilled = false;
+        db::address_index lookahead{};
         {
           auto user = open_account(req.creds, data.global->disk.clone());
           if (!user)
             return user.error();
 
           data.passed_login = true;
-          if (user->first.start_height <= db::block_id(req.from_height))
+          if (!check_lookahead(data, req.lookahead))
+            return {lws::error::max_subaddresses};
+
+          const auto expanded_depth = [&req] (const auto& record)
+          { return db::block_id(req.from_height) < record.start_height; };
+
+          const auto change_lookahead = [&req] (const auto& record)
+          {
+            return record.lookahead.maj_i != req.lookahead.maj_i ||
+              record.lookahead.min_i != req.lookahead.min_i;
+          };
+
+          lookahead = user->first.lookahead;
+          const bool lookahead_fail = user->first.lookahead_fail != db::block_id(0);
+          if (!expanded_depth(user->first) && !change_lookahead(user->first) && !lookahead_fail)
             fulfilled = true;
           else
           {
@@ -1358,17 +1392,48 @@ namespace lws
               if (info != lmdb::error(MDB_NOTFOUND))
                 return info.error();
 
-              new_request = true;
+              // Shrink immediately if possible
+              if (!lookahead_fail && req.lookahead.maj_i <= user->first.lookahead.maj_i && req.lookahead.min_i <= user->first.lookahead.min_i)
+              {
+                fulfilled = !expanded_depth(user->first);
+                new_request = !fulfilled;
+                // if not same
+                if (user->first.lookahead.maj_i != req.lookahead.maj_i && user->first.lookahead.min_i != req.lookahead.min_i)
+                {
+                  MONERO_CHECK(data.global->disk.clone().shrink_lookahead(req.creds.address, req.lookahead));
+                  lookahead = req.lookahead;
+                }
+              }
+              else
+                new_request = true;
             }
           }
         } // close reader
 
         if (new_request)
-          MONERO_CHECK(data.global->disk.clone().import_request(req.creds.address, db::block_id(req.from_height)));
+        {
+          auto disk = data.global->disk.clone();
+          MONERO_CHECK(disk.import_request(req.creds.address, db::block_id(req.from_height), req.lookahead));
+
+          if (data.global->options.auto_accept_import)
+          {
+            const auto accepted = disk.accept_requests(db::request::import_scan, {std::addressof(req.creds.address), 1}, data.global->options.max_subaddresses);
+            if (!accepted)
+            {
+              MERROR("Failed to import account " << db::address_string(req.creds.address) << ": " << accepted.error());
+              lookahead = {};
+            }
+            else
+            {
+              lookahead = req.lookahead;
+              fulfilled = true;
+            }
+          }
+        }
 
         const char* status = new_request ?
           "Accepted, waiting for approval" : (fulfilled ? "Approved" : "Waiting for Approval");
-        return response{rpc::safe_uint64(0), status, new_request, fulfilled};
+        return response{rpc::safe_uint64(0), status, lookahead, new_request, fulfilled};
       }
     };
 
@@ -1398,24 +1463,33 @@ namespace lws
 
             // Do not count a request for account creation as login
             data.passed_login = true;
-            return response{false, bool(account->second.flags & db::account_generated_locally)};
+            return response{false, bool(account->second.flags & db::account_generated_locally), account->second.lookahead};
           }
           else if (!req.create_account || account != lws::error::account_not_found)
             return account.error();
         }
 
+        if (!check_lookahead(data, req.lookahead))
+          return {lws::error::max_subaddresses};
+
         const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
-        const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags);
+        const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags, req.lookahead);
         if (!hooks)
           return hooks.error();
 
         if (data.global->options.auto_accept_creation)
         {
-          data.passed_login = true;
-          const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1});
+          const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1}, data.global->options.max_subaddresses);
           if (!accepted)
+          {
             MERROR("Failed to move account " << db::address_string(req.creds.address) << " to available state: " << accepted.error());
+            req.lookahead = {};
+          }
+          else
+            data.passed_login = true;
         }
+        else
+          req.lookahead = {};
 
         if (!hooks->empty())
         {
@@ -1427,7 +1501,7 @@ namespace lws
           );
         }
 
-        return response{true, req.generated_locally};
+        return response{true, req.generated_locally, req.lookahead};
       }
     };
 
@@ -1788,6 +1862,7 @@ namespace lws
           return error;
       }
 
+      rpc::add_values(req.params, data.global->options); // add max_subaddresses
       db::storage disk = data.global->disk.clone();
       if (!data.global->options.disable_admin_auth)
       {
@@ -2307,7 +2382,7 @@ namespace lws
   }
 
   rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation})),
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation, config.auto_accept_import})),
       ports_(),
       workers_()
   {
