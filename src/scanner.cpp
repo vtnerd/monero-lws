@@ -1411,7 +1411,7 @@ namespace lws
       if (!client)
         client = MONERO_UNWRAP(ctx.connect());
 
-      expect<rpc::client> synced = sync(std::move(client), opts.untrusted_daemon);
+      expect<rpc::client> synced = sync(std::move(client), opts.untrusted_daemon, opts.regtest);
       if (!synced)
       {
         if (!synced.matches(std::errc::timed_out))
