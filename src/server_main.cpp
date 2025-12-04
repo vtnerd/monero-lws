@@ -86,6 +86,7 @@ namespace
     const command_line::arg_descriptor<bool> untrusted_daemon;
     const command_line::arg_descriptor<bool> regtest;
     const command_line::arg_descriptor<bool> version;
+    const command_line::arg_descriptor<bool> auto_accept_import;
 
     static std::string get_default_zmq()
     {
@@ -135,6 +136,7 @@ namespace
       , untrusted_daemon{"untrusted-daemon", "Perform (expensive) chain-verification and PoW checks", false}
       , regtest{"regtest", "Run in a regression testing mode", false}
       , version{"version", "Display version and quit", false}
+      , auto_accept_import{"auto-accept-import", "Account import requests are automatically accepted", false}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -172,6 +174,7 @@ namespace
       command_line::add_arg(description, untrusted_daemon);
       command_line::add_arg(description, regtest);
       command_line::add_arg(description, version);
+      command_line::add_arg(description, auto_accept_import);
     }
   };
 
@@ -274,7 +277,8 @@ namespace
         webhook_verify,
         command_line::get_arg(args, opts.external_bind),
         command_line::get_arg(args, opts.disable_admin_auth),
-        command_line::get_arg(args, opts.auto_accept_creation)
+        command_line::get_arg(args, opts.auto_accept_creation),
+        command_line::get_arg(args, opts.auto_accept_import)
       },
       command_line::get_arg(args, opts.daemon_rpc),
       command_line::get_arg(args, opts.daemon_sub),
@@ -332,7 +336,6 @@ namespace
 
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 
-    const auto enable_subaddresses = bool(prog.rest_config.max_subaddresses);
     lws::rest_server server{
       epee::to_span(prog.rest_servers), prog.admin_rest_servers, std::move(disk), std::move(client), std::move(prog.rest_config)
     };
@@ -347,7 +350,7 @@ namespace
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),
-      lws::scanner_options{enable_subaddresses, prog.untrusted_daemon, prog.regtest}
+      lws::scanner_options{prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest}
     );
   }
 } // anonymous

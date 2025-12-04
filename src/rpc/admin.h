@@ -40,7 +40,7 @@
 namespace lws
 {
 namespace rpc
-{
+{ 
   struct add_account_req
   {
     db::account_address address;
@@ -52,6 +52,7 @@ namespace rpc
   struct address_requests
   {
     std::vector<db::account_address> addresses;
+    std::uint32_t max_subaddresses;
     db::request type;
   };
   void read_bytes(wire::reader&, address_requests&);
@@ -100,6 +101,16 @@ namespace rpc
     std::vector<boost::uuids::uuid> event_ids;
   };
   void read_bytes(wire::reader&, webhook_delete_uuid_req&);
+
+
+  // Hack for passing max_subaddresses via cli option
+  template<typename T, typename U>
+  inline void add_values(const T&, const U&) noexcept
+  {}
+
+  template<typename T>
+  inline void add_values(address_requests& out, const T& src) noexcept
+  { out.max_subaddresses = src.max_subaddresses; }
 
 
   struct accept_requests_

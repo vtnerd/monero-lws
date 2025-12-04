@@ -134,9 +134,15 @@ namespace db
   enum class major_index : std::uint32_t { primary = 0 };
   WIRE_AS_INTEGER(major_index);
 
+  inline constexpr std::uint32_t to_uint(const major_index src) noexcept
+  { return std::uint32_t(src); }
+
   //! Minor index of a subaddress
   enum class minor_index : std::uint32_t { primary = 0 };
   WIRE_AS_INTEGER(minor_index);
+
+  inline constexpr std::uint32_t to_uint(const minor_index src) noexcept
+  { return std::uint32_t(src); }
 
   //! Range within a major index
   using index_range = std::array<minor_index, 2>;
@@ -185,8 +191,10 @@ namespace db
     account_time creation;  //!< Time account first appeared in database.
     account_flags flags;    //!< Additional account info bitmask.
     char reserved[3];
+    address_index lookahead;
+    block_id lookahead_fail;
   };
-  static_assert(sizeof(account) == (4 * 2) + 64 + 32 + (8 * 2) + (4 * 2), "padding in account");
+  static_assert(sizeof(account) == (4 * 2) + 64 + 32 + (8 * 2) + (4 * 2) + (4 * 2) + 8, "padding in account");
   void write_bytes(wire::writer&, const account&, bool show_key = false);
 
   //! Used with quick and full sync mode
@@ -331,8 +339,9 @@ namespace db
     account_time creation;        //!< Time the request was created.
     account_flags creation_flags; //!< Generated locally?
     char reserved[3];
+    address_index lookahead;      //!< Desired subaddress lookahead
   };
-  static_assert(sizeof(request_info) == 64 + 32 + 8 + (4 * 2), "padding in request_info");
+  static_assert(sizeof(request_info) == 64 + 32 + 8 + (4 * 2) + (4*2), "padding in request_info");
   void write_bytes(wire::writer& dest, const request_info& self, bool show_key = false);
 
   enum class webhook_type : std::uint8_t
@@ -427,6 +436,10 @@ namespace db
   inline constexpr bool operator==(address_index const& left, address_index const& right) noexcept
   {
     return left.maj_i == right.maj_i && left.min_i == right.min_i;
+  }
+  inline constexpr bool operator!=(address_index const& left, address_index const& right) noexcept
+  {
+    return left.maj_i != right.maj_i || left.min_i != right.min_i;
   }
 
   inline constexpr bool operator<(address_index const& left, address_index const& right) noexcept

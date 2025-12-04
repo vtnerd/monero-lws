@@ -45,7 +45,7 @@ namespace lws
 {
   struct scanner_options
   {
-    bool enable_subaddresses;
+    std::uint32_t max_subaddresses;
     bool untrusted_daemon;
     bool regtest;
   };
