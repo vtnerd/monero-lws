@@ -303,6 +303,8 @@ namespace cryptonote
 
   static void read_bytes(wire::json_reader& source, block& self)
   {
+    std::optional<std::uint8_t> n_tree_layers;
+    std::optional<crypto::ec_point> tree_root;
     using min_hash_size = wire::min_element_sizeof<crypto::hash>;
     self.tx_hashes.reserve(default_transaction_count);
     wire::object(source,
@@ -312,8 +314,17 @@ namespace cryptonote
       WIRE_FIELD(miner_tx),
       WIRE_FIELD_ARRAY(tx_hashes, min_hash_size),
       WIRE_FIELD(prev_id),
-      WIRE_FIELD(nonce)
+      WIRE_FIELD(nonce),
+      wire::optional_field("fcmp_pp_n_tree_layers", std::ref(n_tree_layers)),
+      wire::optional_field("fcmp_pp_tree_root", std::ref(tree_root))
     );
+    if (self.major_version >= HF_VERSION_FCMP_PLUS_PLUS)
+    {
+      if (!n_tree_layers || !tree_root)
+        WIRE_DLOG_THROW(wire::error::schema::binary, "Expected fcmp++ elements");
+      self.fcmp_pp_n_tree_layers = *n_tree_layers;
+      self.fcmp_pp_tree_root = *tree_root;
+    }
   }
 
   static void read_bytes(wire::json_reader& source, std::vector<transaction>& self)
