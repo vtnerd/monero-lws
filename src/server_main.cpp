@@ -44,6 +44,7 @@
 #include "cryptonote_config.h"   // monero/src/
 #include "db/storage.h"
 #include "error.h"
+#include "lws_version.h"
 #include "options.h"
 #include "rest_server.h"
 #include "scanner.h"
@@ -84,6 +85,7 @@ namespace
     const command_line::arg_descriptor<bool> auto_accept_creation;
     const command_line::arg_descriptor<bool> untrusted_daemon;
     const command_line::arg_descriptor<bool> regtest;
+    const command_line::arg_descriptor<bool> version;
 
     static std::string get_default_zmq()
     {
@@ -132,6 +134,7 @@ namespace
       , auto_accept_creation{"auto-accept-creation", "New account creation requests are automatically accepted", false}
       , untrusted_daemon{"untrusted-daemon", "Perform (expensive) chain-verification and PoW checks", false}
       , regtest{"regtest", "Run in a regression testing mode", false}
+      , version{"version", "Display version and quit", false}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -168,6 +171,7 @@ namespace
       command_line::add_arg(description, auto_accept_creation);
       command_line::add_arg(description, untrusted_daemon);
       command_line::add_arg(description, regtest);
+      command_line::add_arg(description, version);
     }
   };
 
@@ -191,11 +195,17 @@ namespace
     bool regtest;
   };
 
+  void print_version(std::ostream& out)
+  {
+    std::cout << lws::version::name << " version " << lws::version::id << " commit " << lws::version::commit << std::endl;;
+  }
+
   void print_help(std::ostream& out)
   {
     boost::program_options::options_description description{"Options"};
     options{}.prepare(description);
 
+    print_version(out);
     out << "Usage: [options]" << std::endl;
     out << description;
   }
@@ -231,6 +241,12 @@ namespace
     if (command_line::get_arg(args, command_line::arg_help))
     {
       print_help(std::cout);
+      return boost::none;
+    }
+
+    if (command_line::get_arg(args, opts.version))
+    {
+      print_version(std::cout);
       return boost::none;
     }
 
@@ -299,6 +315,8 @@ namespace
 
   void run(program prog)
   {
+    MINFO(lws::version::name << " version " << lws::version::id << " commit " << lws::version::commit);
+
     auto sub_address = prog.daemon_sub;
 
     boost::filesystem::create_directories(prog.db_path);

@@ -28,6 +28,35 @@
 
 include_directories(.)
 
+find_package(Git)
+
+set(MLWS_COMMIT_BRANCH "")
+set(MLWS_COMMIT_DATE "")
+set(MLWS_COMMIT_HASH "")
+if (GIT_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE MLWS_COMMIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --abbrev-ref HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE MLWS_COMMIT_BRANCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" log -1 "--date=format:\"%Y/%m/%d %T\"" "--format=\"%ad\""
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE MLWS_COMMIT_DATE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+endif ()
+
+configure_file(lws_version.h.in "${CMAKE_BINARY_DIR}/generated_include/lws_version.h")
+include_directories("${CMAKE_BINARY_DIR}/generated_include")
+
 add_subdirectory(lmdb)
 add_subdirectory(wire)
 add_subdirectory(db)
