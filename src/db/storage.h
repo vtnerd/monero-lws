@@ -255,17 +255,20 @@ namespace db
       rescan(block_id height, epee::span<const account_address> addresses);
 
     //! Add an account for later approval. For use with the login endpoint.
-    expect<std::vector<webhook_new_account>> creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags) noexcept;
+    expect<std::vector<webhook_new_account>> creation_request(account_address const& address, crypto::secret_key const& key, account_flags flags, address_index lookahead) noexcept;
 
     /*!
       Request lock height of an existing account. No effect if the `start_height`
       is already older.
     */
-    expect<void> import_request(account_address const& address, block_id height) noexcept;
+    expect<void> import_request(account_address const& address, block_id height, address_index lookahead) noexcept;
+
+    //! Shrink but not expand lookahead for `address`.
+    expect<void> shrink_lookahead(account_address const& address, const address_index& lookahead) noexcept; 
 
     //! Accept requests by `addresses` of type `req`. \return Accepted addresses.
     expect<std::vector<account_address>>
-      accept_requests(request req, epee::span<const account_address> addresses);
+      accept_requests(request req, epee::span<const account_address> addresses, std::uint32_t max_subaddresses);
 
     //! Reject requests by `addresses` of type `req`. \return Rejected addresses.
     expect<std::vector<account_address>>
@@ -310,6 +313,11 @@ namespace db
       */
     expect<std::vector<subaddress_dict>>
       upsert_subaddresses(account_id id, std::optional<crypto::secret_key> address_key, std::vector<subaddress_dict> subaddrs, std::uint32_t max_subaddresses);
+
+    /*! Update lookahead where `match` was a matching subaddress on-chain.
+      \return The number of new subaddresses added via lookahead, or -1 if
+        `max_subaddresses was reached. */
+    expect<std::int64_t> update_lookahead(const account_address& address, block_id height, address_index match, std::uint32_t max_subaddresses);
 
     /*!
       Add webhook to be tracked in the database. The webhook will "call"

@@ -294,19 +294,46 @@ namespace lws
     struct subaddress_reader
     {
       expect<db::storage_reader> reader;
+      std::optional<db::storage> disk;
       db::cursor::subaddress_indexes cur;
+      const std::uint32_t max_subaddresses;
 
-      subaddress_reader(std::optional<db::storage> const& disk, const bool enable_subaddresses)
-        : reader(common_error::kInvalidArgument), cur(nullptr)
+      subaddress_reader(std::optional<db::storage> const& disk_in, const std::uint32_t max_subaddresses)
+        : reader(common_error::kInvalidArgument), disk(), cur(nullptr), max_subaddresses(max_subaddresses)
       {
-        if (disk && enable_subaddresses)
-        {
+        if (disk_in)
+          disk = disk_in->clone();
+
+        if (max_subaddresses)
+          update_reader();
+      }
+
+      void update_reader()
+      {
+        if (disk)
           reader = disk->start_read();
-          if (!reader)
-            MERROR("Subadress lookup failure: " << reader.error().message());
-        }
+        if (!reader)
+          MERROR("Subadress lookup failure: " << reader.error().message());
       }
     };
+
+    void update_lookahead(const account& user, subaddress_reader& reader, const db::address_index& match, const db::block_id height)
+    {
+      if (!reader.disk)
+        throw std::runtime_error{"Bad DB handle in scanner"};
+
+      auto upserted = reader.disk->update_lookahead(user.db_address(), height, match, reader.max_subaddresses);
+      if (upserted)
+      {
+        if (0 < *upserted)
+          reader.update_reader(); // update reader after upsert added new addresses
+        else if (*upserted < 0)
+          upserted = {error::max_subaddresses};
+      }
+
+      if (!upserted)
+        MWARNING("Failed to update lookahead for " << user.address() << ": " << upserted.error());
+    }
 
     void scan_transaction_base(
       epee::span<lws::account> users,
@@ -632,6 +659,8 @@ namespace lws
                   MERROR("Failure when doing subaddress search: " << match.error().message());
                 continue; // to next available active_derived
               }
+
+              update_lookahead(user, reader, *match, height);
               found_pub = true;
               account_index = *match;
               break; // additional_derivations loop
@@ -768,7 +797,7 @@ namespace lws
       const auto time =
         boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
-      subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.enable_subaddresses};
+      subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.max_subaddresses};
       send_webhook sender{disk, client, self};
       for (const auto& tx : parsed->txes)
         scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
@@ -1019,7 +1048,7 @@ namespace lws
             );
           }
 
-          subaddress_reader reader{disk, opts.enable_subaddresses};
+          subaddress_reader reader{disk, opts.max_subaddresses};
           db::block_difficulty::unsigned_int diff{};
           const db::block_id initial_height = db::block_id(fetched->start_height);
           for (auto block_data : boost::combine(blocks, indices))
@@ -1509,7 +1538,7 @@ namespace lws
   {
     if (has_shutdown())
       MONERO_THROW(common_error::kInvalidArgument, "this has shutdown");
-    if (!lws_server_addr.empty() && (opts.enable_subaddresses || opts.untrusted_daemon))
+    if (!lws_server_addr.empty() && (opts.max_subaddresses || opts.untrusted_daemon))
       MONERO_THROW(error::configuration, "Cannot use remote scanner with subaddresses or untrusted daemon");
 
     if (lws_server_addr.empty())
@@ -1601,7 +1630,7 @@ namespace lws
       if (!client)
         client = MONERO_UNWRAP(ctx.connect());
 
-      expect<rpc::client> synced = sync(std::move(client), opts.untrusted_daemon);
+      expect<rpc::client> synced = sync(std::move(client), opts.untrusted_daemon, opts.regtest);
       if (!synced)
       {
         if (!synced.matches(std::errc::timed_out))

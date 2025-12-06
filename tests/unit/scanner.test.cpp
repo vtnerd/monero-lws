@@ -47,6 +47,7 @@
 #include "cryptonote_config.h"        // monero/src
 #include "cryptonote_core/cryptonote_tx_utils.h"      // monero/src
 #include "db/chain.test.h"
+#include "db/print.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
 #include "fcmp_pp/curve_trees.h"     // monero/src
@@ -175,7 +176,7 @@ namespace
     { pub_keys.push_back(val.key); }
   };
 
-  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, std::vector<cryptonote::tx_destination_entry>& destinations, const std::uint32_t ring_base, const bool use_view_tag)
+  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, std::vector<cryptonote::tx_destination_entry> destinations, const std::uint32_t ring_base, const bool use_view_tag)
   {
     static constexpr std::uint64_t input_amount = 20000;
     static constexpr std::uint64_t output_amount = 8000;
@@ -199,6 +200,9 @@ namespace
       ++index;
       subaddresses[destination.addr.m_spend_public_key] = {0, index};
     }
+
+    if (2 < destinations.size())
+      destinations.erase(destinations.begin() + 1, destinations.end() - 1);
 
     std::vector<cryptonote::tx_source_entry> sources;
     sources.emplace_back();
@@ -681,7 +685,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
     keys_subaddr2.m_account_address = hw.get_subaddress(keys, cryptonote::subaddress_index{0, 2});
 
     const auto sub1_secret = hw.get_subaddress_secret_key(keys.m_view_secret_key, cryptonote::subaddress_index{0, 1});
-    const auto sub2_secret = hw.get_subaddress_secret_key(keys.m_view_secret_key, cryptonote::subaddress_index{0, 1});
+    const auto sub2_secret = hw.get_subaddress_secret_key(keys.m_view_secret_key, cryptonote::subaddress_index{0, 2});
 
     sc_add(to_bytes(keys_subaddr1.m_spend_secret_key), to_bytes(sub1_secret), to_bytes(keys.m_spend_secret_key));
     sc_add(to_bytes(keys_subaddr1.m_view_secret_key), to_bytes(keys_subaddr1.m_spend_secret_key), to_bytes(keys.m_view_secret_key));
@@ -817,10 +821,20 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
       }
     }
 
-    SECTION("lws::scanner::run")
+    SECTION("lws::scanner::run (with upsert)")
     {
       const lws::db::block_id legacy_block_id = add(last_block.id, 2);
       const lws::db::block_id carrot_block_id = add(legacy_block_id, 2);
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+      }
 
       const auto tree = fcmp_pp::curve_trees::curve_trees_v1();
       tree_cache cache(tree); 
@@ -1163,7 +1177,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
-        static constexpr const lws::scanner_options opts{true, false};
+        static constexpr const lws::scanner_options opts{1, false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
@@ -1374,7 +1388,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
-              537600000, // fee
+              574400000, // fee
               lws::db::address_index{},
               tx7.carrot.at(carrot3_change_index).enote.tx_first_key_image,
               tx7.carrot.at(carrot3_change_index).enote.anchor_enc
@@ -1384,7 +1398,6 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
 
         verify_outputs(lws::db::account_id(1), 8, expected_account1);
       }
-
       { 
         const expected_map expected_account3{
           {
@@ -1460,7 +1473,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
-              537600000, // fee
+              574400000, // fee
               lws::db::address_index{},
               tx7.carrot.at(carrot3_index1).enote.tx_first_key_image,
               tx7.carrot.at(carrot3_index1).enote.anchor_enc
@@ -1486,7 +1499,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
-              537600000, // fee
+              574400000, // fee
               {lws::db::major_index(0), lws::db::minor_index(2)},
               tx7.carrot.at(carrot3_index1).enote.tx_first_key_image,
               tx7.carrot.at(carrot3_index1).enote.anchor_enc
@@ -1512,7 +1525,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
-              537600000, // fee
+              574400000, // fee
               lws::db::address_index{},
               tx7.carrot.at(carrot3_index2).enote.tx_first_key_image,
               tx7.carrot.at(carrot3_index2).enote.anchor_enc
@@ -1538,131 +1551,420 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
               {},
               lws::db::pack(lws::db::extra::ringct_output, 8),
               {},
-              537600000, // fee
+              574400000, // fee
               {lws::db::major_index(0), lws::db::minor_index(2)},
               tx7.carrot.at(carrot3_index2).enote.tx_first_key_image,
               tx7.carrot.at(carrot3_index2).enote.anchor_enc
             }
           }
         };
-
         verify_outputs(lws::db::account_id(3), 5, expected_account3);
       }
+    } //SECTION (lws::scanner::run (with upsert))
 
-      auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
-      EXPECT(spends.count() == 6);
-      auto spend_it = spends.make_iterator();
-      EXPECT(!spend_it.is_end());
+    SECTION("lws::scanner::run (with lookahead)")
+    {
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = keys.m_account_address;
 
-      auto real_spend = *spend_it;
-      EXPECT(real_spend.link.height == legacy_block_id);
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
-      lws::db::output_id expected_out{0, 100};
-      EXPECT(real_spend.source == expected_out);
-      EXPECT(real_spend.mixin_count == 15);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      std::vector<epee::byte_slice> messages{};
+      transaction tx = make_miner_tx(lest_env, last_block.id, account, false);
+      EXPECT(tx.pub_keys.size() == 1);
+      EXPECT(tx.spend_publics.size() == 1);
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+      transaction tx2 = make_tx(lest_env, keys, destinations, 20, true);
+      EXPECT(tx2.pub_keys.size() == 1);
+      EXPECT(tx2.spend_publics.size() == 1);
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == legacy_block_id);
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
-      expected_out = lws::db::output_id{0, 101};
-      EXPECT(real_spend.source == expected_out);
-      EXPECT(real_spend.mixin_count == 15);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      transaction tx3 = make_tx(lest_env, keys, destinations, 86, false);
+      EXPECT(tx3.pub_keys.size() == 1);
+      EXPECT(tx3.spend_publics.size() == 1);
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+      destinations.emplace_back();
+      destinations.back().amount = 2000;
+      destinations.back().addr = keys_subaddr1.m_account_address;
+      destinations.back().is_subaddress = true;
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == carrot1_block_id);
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx5.tx));
-      EXPECT(real_spend.source == lws::db::output_id::unknown_spend());
-      EXPECT(real_spend.mixin_count == lws::db::carrot_external);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      transaction tx4 = make_tx(lest_env, keys, destinations, 50, false);
+      EXPECT(tx4.pub_keys.size() == 1);
+      EXPECT(tx4.spend_publics.size() == 2);
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+      destinations.emplace_back();
+      destinations.back().amount = 1000;
+      destinations.back().addr = keys_subaddr2.m_account_address;
+      destinations.back().is_subaddress = true;
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == increment(carrot1_block_id));
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx5.tx));
-      EXPECT(real_spend.source == lws::db::output_id::unknown_spend());
-      EXPECT(real_spend.mixin_count == lws::db::carrot_external);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      transaction tx5 = make_tx(lest_env, keys, destinations, 146, true);
+      EXPECT(tx5.pub_keys.size() == 1);
+      EXPECT(tx5.spend_publics.size() == 2);
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+      cryptonote::rpc::GetBlocksFast::Response bmessage{};
+      bmessage.start_height = std::uint64_t(last_block.id) + 1;
+      bmessage.current_height = bmessage.start_height + 1;
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx = tx.tx;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx2.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx3.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx4.tx));
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx5.tx));
+      bmessage.blocks.back().transactions.push_back(tx2.tx);
+      bmessage.blocks.back().transactions.push_back(tx3.tx);
+      bmessage.blocks.back().transactions.push_back(tx4.tx);
+      bmessage.blocks.back().transactions.push_back(tx5.tx);
+      bmessage.output_indices.emplace_back();
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(100);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(101);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(102);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(200);
+      bmessage.output_indices.back().back().push_back(201);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(300);
+      bmessage.output_indices.back().back().push_back(301);
+      bmessage.blocks.push_back(bmessage.blocks.back());
+      bmessage.output_indices.push_back(bmessage.output_indices.back());
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == carrot3_block_id);
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx7.tx));
-      EXPECT(real_spend.source == lws::db::output_id::unknown_spend());
-      EXPECT(real_spend.mixin_count == lws::db::carrot_external);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      std::vector<crypto::hash> hashes{
+        last_block.hash,
+        cryptonote::get_block_hash(bmessage.blocks.back().block),
+      };
+      {
+        cryptonote::rpc::GetHashesFast::Response hmessage{};
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+        hmessage.start_height = std::uint64_t(last_block.id);
+        hmessage.hashes = hashes;
+        hmessage.current_height = hmessage.start_height + hashes.size() - 1;
+        messages.push_back(daemon_response(hmessage));
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == increment(carrot3_block_id));
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx7.tx));
-      EXPECT(real_spend.source == lws::db::output_id::unknown_spend());
-      EXPECT(real_spend.mixin_count == lws::db::carrot_external);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+        hmessage.start_height = hmessage.current_height;
+        hmessage.hashes.front() = hmessage.hashes.back();
+        hmessage.hashes.resize(1);
+        messages.push_back(daemon_response(hmessage));
 
-      ++spend_it;
-      EXPECT(spend_it.is_end());
+        {
+          lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
+          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+          const join on_scope_exit{server_thread};
+          EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
+          lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
+        }
+      }
 
-      spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(3)));
-      EXPECT(spends.count() == 2);
-      spend_it = spends.make_iterator();
-      EXPECT(!spend_it.is_end());
+      EXPECT(db.add_account(account, keys.m_view_secret_key));
+      EXPECT(db.add_account(account2, keys2.m_view_secret_key));
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == carrot2_block_id);
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx6.tx));
-      expected_out = lws::db::output_id{0, std::uint64_t(301 + carrot1_index)};
-      EXPECT(real_spend.source == expected_out);
-      EXPECT(real_spend.mixin_count == lws::db::carrot_internal);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const std::vector<lws::db::subaddress_dict> expected_range{};
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+      }
 
-      ++spend_it;
-      EXPECT(!spend_it.is_end());
+      const lws::db::block_id user_height =
+        MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(lws::db::account_status::active, lws::db::account_id(1))).scan_height;
 
-      real_spend = *spend_it;
-      EXPECT(real_spend.link.height == increment(carrot2_block_id));
-      EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx6.tx));
-      expected_out = lws::db::output_id{0, std::uint64_t(301 + carrot1_index)};
-      EXPECT(real_spend.source == expected_out);
-      EXPECT(real_spend.mixin_count == lws::db::carrot_internal);
-      EXPECT(real_spend.length == 0);
-      EXPECT(real_spend.payment_id == crypto::hash{});
-      EXPECT(real_spend.sender == lws::db::address_index{});
+      EXPECT(db.import_request(account, user_height, {lws::db::major_index(1), lws::db::minor_index(2)}));
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account), 1}, 2));
 
-      ++spend_it;
-      EXPECT(spend_it.is_end());
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const std::vector<lws::db::subaddress_dict> expected_range{
+          {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(1)}}}}
+        };
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+      }
 
-      EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
-      EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
+      messages.clear();
+      messages.push_back(daemon_response(bmessage));
+      bmessage.start_height = bmessage.current_height;
+      bmessage.blocks.resize(1);
+      bmessage.output_indices.resize(1);
+      messages.push_back(daemon_response(bmessage));
+      {
+        static constexpr const lws::scanner_options opts{10, false};
+        lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
+        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+        const join on_scope_exit{server_thread};
+        scanner.run(std::move(rpc), 1, {}, {}, opts);
+      }
 
-    } //SECTION (lws::scanner::run)
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
+      lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
+
+      const lws::db::block_id new_last_block_id = lws::db::block_id(std::uint64_t(last_block.id) + 2);
+      EXPECT(get_account().scan_height == new_last_block_id);
+      {
+        const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
+          {
+            {lws::db::output_id{0, 100}, 35184372088830}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx.tx),
+              tx.spend_publics.at(0),
+              rct::commit(35184372088830, rct::identity()),
+              {},
+              lws::db::pack(lws::db::extra(lws::db::extra::coinbase_output | lws::db::extra::ringct_output), 0),
+              {},
+              0, // fee
+              lws::db::address_index{}
+            },
+          },
+          {
+            {lws::db::output_id{0, 101}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx2.tx),
+              tx2.spend_publics.at(0),
+              tx2.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000, // fee
+              lws::db::address_index{}
+            },
+          },
+	        {
+            {lws::db::output_id{0, 102}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx3.tx),
+              tx3.spend_publics.at(0),
+              tx3.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000, // fee
+              lws::db::address_index{}
+            },
+          },
+          {
+            {lws::db::output_id{0, 200}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(0),
+              tx4.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 201}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(1),
+              tx4.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 200}, 2000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(0),
+              tx4.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
+            }
+          },
+          {
+            {lws::db::output_id{0, 201}, 2000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(1),
+              tx4.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
+            }
+          },
+          {
+            {lws::db::output_id{0, 300}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 300}, 8000, 15, 0, tx5.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.spend_publics.at(0),
+              tx5.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              11000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 301}, 8000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 301}, 8000, 15, 1, tx5.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.spend_publics.at(1),
+              tx5.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              11000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 300}, 1000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 300}, 1000, 15, 0, tx5.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.spend_publics.at(0),
+              tx5.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              11000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(2)}
+            }
+          },
+          {
+            {lws::db::output_id{0, 301}, 1000}, lws::db::output{
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 301}, 1000, 15, 1, tx5.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.spend_publics.at(1),
+              tx5.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              11000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(2)}
+            }
+          }
+        };
+        auto reader = MONERO_UNWRAP(db.start_read());
+        auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
+        EXPECT(outputs.count() == 6);
+        auto output_it = outputs.make_iterator();
+        for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
+        {
+          auto real_output = *output_it;
+          const auto expected_output =
+            expected.find(std::make_pair(real_output.spend_meta.id, real_output.spend_meta.amount));
+          EXPECT(expected_output != expected.end());
+
+          EXPECT(real_output.link.height == expected_output->second.link.height);
+          EXPECT(real_output.link.tx_hash == expected_output->second.link.tx_hash);
+          EXPECT(real_output.spend_meta.id == expected_output->second.spend_meta.id);
+          EXPECT(real_output.spend_meta.amount == expected_output->second.spend_meta.amount);
+          EXPECT(real_output.spend_meta.mixin_count == expected_output->second.spend_meta.mixin_count);
+          EXPECT(real_output.spend_meta.index == expected_output->second.spend_meta.index);
+          EXPECT(real_output.tx_prefix_hash == expected_output->second.tx_prefix_hash);
+          EXPECT(real_output.spend_meta.tx_public == expected_output->second.spend_meta.tx_public);
+          EXPECT(real_output.pub == expected_output->second.pub);
+          EXPECT(rct::commit(real_output.spend_meta.amount, real_output.ringct_mask) == expected_output->second.ringct_mask);
+          EXPECT(real_output.extra == expected_output->second.extra);
+          if (unpack(expected_output->second.extra).second == 8)
+            EXPECT(real_output.payment_id.short_ == expected_output->second.payment_id.short_);
+          EXPECT(real_output.fee == expected_output->second.fee);
+          EXPECT(real_output.recipient == expected_output->second.recipient);
+        }
+
+        auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
+        EXPECT(spends.count() == 2);
+        auto spend_it = spends.make_iterator();
+        EXPECT(!spend_it.is_end());
+
+        auto real_spend = *spend_it;
+        EXPECT(real_spend.link.height == new_last_block_id);
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
+        lws::db::output_id expected_out{0, 100};
+        EXPECT(real_spend.source == expected_out);
+        EXPECT(real_spend.mixin_count == 15);
+        EXPECT(real_spend.length == 0);
+        EXPECT(real_spend.payment_id == crypto::hash{});
+        EXPECT(real_spend.sender == lws::db::address_index{});
+
+        ++spend_it;
+        EXPECT(!spend_it.is_end());
+
+        real_spend = *spend_it;
+        EXPECT(real_spend.link.height == new_last_block_id);
+        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
+        expected_out = lws::db::output_id{0, 101};
+        EXPECT(real_spend.source == expected_out);
+        EXPECT(real_spend.mixin_count == 15);
+        EXPECT(real_spend.length == 0);
+        EXPECT(real_spend.payment_id == crypto::hash{});
+        EXPECT(real_spend.sender == lws::db::address_index{});
+
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
+        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
+
+        {
+          const std::vector<lws::db::subaddress_dict> expected_range{
+            {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(2)}}}}
+          };
+          EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
+        }
+      }
+    } //SECTION (lws::scanner::run (lookahead))
   } // SETUP
 } // LWS_CASE
 

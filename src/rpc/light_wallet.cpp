@@ -279,8 +279,10 @@ namespace lws
       WIRE_FIELD_COPY(start_height),
       WIRE_FIELD_COPY(transaction_height),
       WIRE_FIELD_COPY(blockchain_height),
+      WIRE_FIELD_DEFAULTED(lookahead_fail, unsigned(0)),
       WIRE_FIELD(spent_outputs),
-      WIRE_OPTIONAL_FIELD(rates)
+      WIRE_OPTIONAL_FIELD(rates),
+      WIRE_FIELD_DEFAULTED(lookahead, db::address_index{})
     );
   }
 
@@ -330,6 +332,8 @@ namespace lws
       WIRE_FIELD_COPY(start_height),
       WIRE_FIELD_COPY(transaction_height),
       WIRE_FIELD_COPY(blockchain_height),
+      WIRE_FIELD_DEFAULTED(lookahead_fail, unsigned(0)),
+      WIRE_FIELD_DEFAULTED(lookahead, db::address_index{}),
       wire::optional_field("transactions", wire::array(boost::adaptors::index(self.transactions)))
     );
   }
@@ -371,6 +375,7 @@ namespace lws
       WIRE_FIELD_COPY(per_byte_fee),
       WIRE_FIELD_COPY(fee_mask),
       WIRE_FIELD_COPY(amount),
+      WIRE_FIELD_DEFAULTED(lookahead_fail, unsigned(0)),
       wire::optional_field("outputs", wire::array(boost::adaptors::transform(self.outputs, expand))),
       WIRE_FIELD(fees)
     );
@@ -412,7 +417,8 @@ namespace lws
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
-      WIRE_FIELD_DEFAULTED(from_height, unsigned(0))
+      WIRE_FIELD_DEFAULTED(from_height, unsigned(0)),
+      WIRE_FIELD_DEFAULTED(lookahead, db::address_index{})
     );
     convert_address(address, self.creds.address);
   }
@@ -423,7 +429,8 @@ namespace lws
       WIRE_FIELD_COPY(import_fee),
       WIRE_FIELD(status),
       WIRE_FIELD_COPY(new_request),
-      WIRE_FIELD_COPY(request_fulfilled)
+      WIRE_FIELD_COPY(request_fulfilled),
+      WIRE_FIELD_COPY(lookahead)
     );
   }
 
@@ -436,6 +443,7 @@ namespace lws
       wire::field("address", std::ref(address)),
       wire::optional_field("view_key", std::ref(view_key)),
       wire::optional_field("balance_key", std::ref(balance_key)),
+      WIRE_FIELD_DEFAULTED(lookahead, db::address_index{}),
       WIRE_FIELD(create_account),
       WIRE_FIELD(generated_locally)
     );
@@ -454,7 +462,11 @@ namespace lws
   }
   void rpc::write_bytes(wire::json_writer& dest, const login_response self)
   {
-    wire::object(dest, WIRE_FIELD_COPY(new_address), WIRE_FIELD_COPY(generated_locally));
+    wire::object(dest,
+      WIRE_FIELD_COPY(new_address),
+      WIRE_FIELD_COPY(generated_locally),
+      WIRE_FIELD_COPY(lookahead)
+    );
   }
 
   void rpc::read_bytes(wire::json_reader& source, provision_subaddrs_request& self)
