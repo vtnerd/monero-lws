@@ -150,7 +150,7 @@ LWS_CASE("lws::db::storage")
       const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
       const crypto::key_image image = crypto::rand<crypto::key_image>();
 
-      lws::account real_account{account, {}, {}};
+      lws::account real_account{account, {}, {}, {}};
       real_account.add_out(
         lws::db::output{
           link,

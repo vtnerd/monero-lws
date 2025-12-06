@@ -32,11 +32,11 @@
 #include <cstdint>
 #include "carrot_core/account_secrets.h"
 #include "crypto/crypto.h" // monero/src
+#include "db/carrot.h"
 #include "db/data.h"
 #include "db/storage.h"
 #include "db/storage.test.h"
 #include "error.h"
-#include "util/account.h"
 #include "wire/error.h"
 
 namespace
@@ -53,7 +53,7 @@ namespace
 
   struct carrot_account
   {
-    lws::carrot_account account;
+    lws::carrot::account account;
     crypto::secret_key generate_address;
 
     carrot_account()
@@ -466,16 +466,16 @@ LWS_CASE("db::storage::upsert_subaddresses incoming-only carrot")
     crypto::secret_key image{};
 
     crypto::generate_keys(details.address.spend_public, master);
-    carrot::make_carrot_provespend_key(master, prove);
-    carrot::make_carrot_viewbalance_secret(master, balance);
-    carrot::make_carrot_generateimage_key(balance, image);
-    carrot::make_carrot_spend_pubkey(image, prove, details.address.spend_public);
-    carrot::make_carrot_viewincoming_key(balance, incoming);
-    carrot::make_carrot_generateaddress_secret(balance, user.generate_address);
+    ::carrot::make_carrot_provespend_key(master, prove);
+    ::carrot::make_carrot_viewbalance_secret(master, balance);
+    ::carrot::make_carrot_generateimage_key(balance, image);
+    ::carrot::make_carrot_spend_pubkey(image, prove, details.address.spend_public);
+    ::carrot::make_carrot_viewincoming_key(balance, incoming);
+    ::carrot::make_carrot_generateaddress_secret(balance, user.generate_address);
     EXPECT(crypto::secret_key_to_public_key(incoming, details.address.view_public));
     std::memcpy(std::addressof(details.key), std::addressof(unwrap(unwrap(incoming))), sizeof(details.key));
 
-    user.account = lws::carrot_account{details};
+    user.account = lws::carrot::account{details};
   }
 
   SETUP("One Account DB")
@@ -844,7 +844,7 @@ LWS_CASE("db::storage::upsert_subaddresses balance-key carrot")
     std::memcpy(std::addressof(details.key), std::addressof(unwrap(unwrap(balance))), sizeof(details.key));
 
     details.flags = lws::db::account_flags::view_balance_key;
-    user.account = lws::carrot_account{details};
+    user.account = lws::carrot::account{details};
   }
 
   SETUP("One Account DB")

@@ -32,10 +32,10 @@
 #include "carrot_core/account_secrets.h"
 #include "common/error.h"
 #include "common/expect.h"
+#include "db/carrot.h"
 #include "db/data.h"
 #include "db/string.h"
 #include "error.h"
-#include "util/transactions.h"
 #include "wire/adapted/crypto.h"
 #include "wire/adapted/pair.h"
 #include "wire/adapted/tuple.h"
@@ -101,7 +101,7 @@ namespace lws
       );
 
       if (type == account::key_type::balance)
-        carrot::make_carrot_viewincoming_key(balance_key, view_key);
+        ::carrot::make_carrot_viewincoming_key(balance_key, view_key);
     }
 
     void read_bytes(wire::msgpack_reader& source)
@@ -321,7 +321,7 @@ namespace lws
   {
     if (!immutable_ || type() != key_type::balance)
       return std::nullopt;
-    return ::lws::get_image(out, immutable_->pubs, immutable_->balance_key);
+    return carrot::get_image(out, immutable_->pubs, immutable_->balance_key);
   }
 } // lws
 

@@ -32,11 +32,11 @@
 #include "carrot_core/destination.h"         // monero/src
 #include "carrot_core/device_ram_borrowed.h" // monero/src
 #include "cryptonote_config.h" // monero/src
+#include "db/carrot.h"
 #include "db/string.h"
 #include "int-util.h"          // monero/contribe/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "ringct/rctTypes.h"   // monero/src
-#include "util/account.h"
 #include "wire.h"
 #include "wire/adapted/array.h"
 #include "wire/adapted/crypto.h"
@@ -166,14 +166,14 @@ namespace db
     return rct::rct2pk(rct::addKeys(rct::pk2rct(base.spend_public), rct::pk2rct(M)));
   }
 
-  crypto::public_key address_index::get_spend_public(carrot_account const& base, crypto::secret_key const& address) const
+  crypto::public_key address_index::get_spend_public(carrot::account const& base, crypto::secret_key const& address) const
   {
     if (is_zero())
       return base.spend;
 
-    carrot::CarrotDestinationV1 out{};
-    const carrot::generate_address_secret_ram_borrowed_device address_device{address};
-    carrot::make_carrot_subaddress_v1(
+    ::carrot::CarrotDestinationV1 out{};
+    const ::carrot::generate_address_secret_ram_borrowed_device address_device{address};
+    ::carrot::make_carrot_subaddress_v1(
       base.spend, base.view, address_device, std::uint32_t(maj_i), std::uint32_t(min_i), out
     );
     return out.address_spend_pubkey; 

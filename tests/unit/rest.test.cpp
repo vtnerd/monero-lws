@@ -28,6 +28,7 @@
 #include "framework.test.h"
 
 #include <optional>
+#include "db/carrot.h"
 #include "db/data.h"
 #include "db/print.test.h"
 #include "db/storage.test.h"
@@ -37,7 +38,6 @@
 #include "net/http_client.h"
 #include "rest_server.h"
 #include "scanner.test.h"
-#include "util/account.h"
 
 namespace
 {
@@ -72,7 +72,7 @@ namespace
 
   struct carrot_account
   {
-    lws::carrot_account account;
+    lws::carrot::account account;
     crypto::secret_key generate_address;
 
     carrot_account()
@@ -176,7 +176,7 @@ LWS_CASE("rest_server")
     crypto::public_key temp2{};
     temp.address = account_address;
     std::memcpy(std::addressof(temp.key), std::addressof(unwrap(unwrap(view))), sizeof(temp.key));
-    account_incoming.account = lws::carrot_account{temp};
+    account_incoming.account = lws::carrot::account{temp};
     crypto::generate_keys(temp2, account_incoming.generate_address);
   }
   const std::string generatekey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(account_incoming.generate_address))));

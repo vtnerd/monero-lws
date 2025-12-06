@@ -456,9 +456,9 @@ namespace lws
     self.balance_key = bool(balance_key);
     convert_address(address, self.creds.address);
     if (view_key)
-      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*view_key), sizeof(view_key));
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*view_key), sizeof(*view_key));
     else
-      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*balance_key), sizeof(balance_key));
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*balance_key), sizeof(*balance_key));
   }
   void rpc::write_bytes(wire::json_writer& dest, const login_response self)
   {

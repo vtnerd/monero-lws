@@ -258,7 +258,7 @@ namespace lws
         return key_check(creds);
 
       crypto::secret_key view_key{};
-      carrot::make_carrot_viewincoming_key(creds.key, view_key);
+      ::carrot::make_carrot_viewincoming_key(creds.key, view_key);
       return key_check(creds.address.view_public, view_key);
     }
 

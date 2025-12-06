@@ -38,11 +38,11 @@
 #include <utility>
 #include <vector>
 
+#include "db/fwd.h"
 #include "carrot_core/core_types.h"
 #include "crypto/crypto.h"
 #include "lmdb/util.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
-#include "util/fwd.h"
 #include "wire/fwd.h"
 #include "wire/json/fwd.h"
 #include "wire/msgpack/fwd.h"
@@ -178,7 +178,7 @@ namespace db
     minor_index min_i;
 
     crypto::public_key get_spend_public(account_address const& base, crypto::secret_key const& view) const;
-    crypto::public_key get_spend_public(carrot_account const& base, crypto::secret_key const& address) const;
+    crypto::public_key get_spend_public(carrot::account const& base, crypto::secret_key const& address) const;
     constexpr bool is_zero() const noexcept
     {
       return maj_i == major_index::primary && min_i == minor_index::primary;
@@ -338,7 +338,7 @@ namespace db
     std::uint64_t fee;       //!< Total fee for transaction
     address_index recipient;
     crypto::key_image first_image; //!< First in tx
-    carrot::encrypted_janus_anchor_t anchor; //!< Useful for carrot spending
+    ::carrot::encrypted_janus_anchor_t anchor; //!< Useful for carrot spending
 
     constexpr bool is_carrot() const noexcept { return spend_meta.is_carrot(); }
   };
