@@ -33,6 +33,11 @@ namespace lws
 {
   class account;
 
+namespace carrot
+{
+  struct account;
+}
+
 namespace db
 {
   enum account_flags : std::uint8_t;
