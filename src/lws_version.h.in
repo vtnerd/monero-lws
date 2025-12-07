@@ -33,7 +33,7 @@ namespace lws { namespace version
   constexpr const char branch[] = "@MLWS_COMMIT_BRANCH@";
   constexpr const char commit[] = "@MLWS_COMMIT_HASH@";
   constexpr const char date[] = "@MLWS_COMMIT_DATE@";
-  constexpr const char id[] = "0.4-alpha";
+  constexpr const char id[] = "1.0-alpha";
   constexpr const char name[] = "monero-lws";
 
   // openmonero is currently on 1.6 and we have multiple additions since then
