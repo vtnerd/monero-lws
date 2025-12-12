@@ -156,6 +156,14 @@ namespace rpc
   };
   void write_bytes(wire::json_writer&, const get_address_info_response&);
 
+  struct get_address_txs_request
+  {
+    get_address_txs_request() = delete;
+    boost::optional<std::uint64_t> since_tx_id;
+    boost::optional<std::string> since_tx_block_hash;
+    account_credentials creds;
+  };
+  void read_bytes(wire::json_reader&, get_address_txs_request&);
 
   struct get_address_txs_response
   {
@@ -168,6 +176,7 @@ namespace rpc
       std::uint64_t spent;
     };
 
+    std::uint64_t since_tx_id;
     safe_uint64 total_received;
     std::uint64_t scanned_height;
     std::uint64_t scanned_block_height;

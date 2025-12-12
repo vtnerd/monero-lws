@@ -336,6 +336,7 @@ namespace lws
       const db::block_id height,
       const std::uint64_t timestamp,
       crypto::hash const& tx_hash,
+      crypto::hash const& block_hash,
       cryptonote::transaction const& tx,
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader,
@@ -422,7 +423,7 @@ namespace lws
               spend_action(
                 user,
                 db::spend{
-                  db::transaction_link{height, tx_hash},
+                  db::transaction_link{height, tx_hash, block_hash},
                   in_data->k_image,
                   db::output_id{in_data->amount, goffset},
                   timestamp,
@@ -551,7 +552,7 @@ namespace lws
             reader.reader,
             user,
             db::output{
-              db::transaction_link{height, tx_hash},
+              db::transaction_link{height, tx_hash, block_hash},
               db::output::spend_meta_{
                 db::output_id{tx.version < 2 ? out.amount : 0, out_ids.at(index)},
                 amount,
@@ -583,11 +584,12 @@ namespace lws
       const db::block_id height,
       const std::uint64_t timestamp,
       crypto::hash const& tx_hash,
+      crypto::hash const& block_hash,
       cryptonote::transaction const& tx,
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader)
     {
-      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{});
+      scan_transaction_base(users, height, timestamp, tx_hash, block_hash, tx, out_ids, reader, add_spend{}, add_output{});
     }
 
     void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, scanner_sync& self, rpc::client& client, const scanner_options& opts)
@@ -610,7 +612,7 @@ namespace lws
       subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.max_subaddresses};
       send_webhook sender{disk, client, self};
       for (const auto& tx : parsed->txes)
-        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
+        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
@@ -884,6 +886,7 @@ namespace lws
               db::block_id(fetched->start_height),
               block.timestamp,
               miner_tx_hash,
+              cryptonote::get_block_hash(block),
               block.miner_tx,
               *(indices.begin()),
               reader
@@ -936,6 +939,7 @@ namespace lws
                 db::block_id(fetched->start_height),
                 block.timestamp,
                 boost::get<0>(tx_data),
+                cryptonote::get_block_hash(block),
                 boost::get<1>(tx_data),
                 boost::get<2>(tx_data),
                 reader
