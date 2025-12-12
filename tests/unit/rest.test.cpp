@@ -176,7 +176,8 @@ LWS_CASE("rest_server")
 
       response = invoke(client, "/get_address_txs", message);
       EXPECT(response ==
-        "{\"total_received\":\"0\","
+        "{\"since_tx_id\":0,"
+        "\"total_received\":\"0\","
         "\"scanned_height\":" + scan_height + "," +
         "\"scanned_block_height\":" + scan_height + ","
         "\"start_height\":" + start_height + ","
@@ -415,7 +416,7 @@ LWS_CASE("rest_server")
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
 
       const lws::db::transaction_link link{
-        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+        lws::db::block_id(4000), crypto::rand<crypto::hash>(), crypto::rand<crypto::hash>()
       };
       const crypto::public_key tx_public = []() {
         crypto::secret_key secret;
@@ -482,7 +483,8 @@ LWS_CASE("rest_server")
 
       response = invoke(client, "/get_address_txs", message);
       EXPECT(response ==
-        "{\"total_received\":\"40000\","
+        "{\"since_tx_id\":0,"
+        "\"total_received\":\"40000\","
         "\"scanned_height\":" + scan_height + "," +
         "\"scanned_block_height\":" + scan_height + ","
         "\"start_height\":" + start_height + ","
@@ -491,6 +493,7 @@ LWS_CASE("rest_server")
         "\"transactions\":["
           "{\"id\":0,"
           "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"block_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.block_hash)) + "\","
           "\"timestamp\":\"1970-01-01T01:56:40Z\","
           "\"total_received\":\"40000\","
           "\"total_sent\":\"0\","
@@ -541,7 +544,7 @@ LWS_CASE("rest_server")
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
 
       const lws::db::transaction_link link{
-        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+        lws::db::block_id(4000), crypto::rand<crypto::hash>(), crypto::rand<crypto::hash>()
       };
       const crypto::public_key tx_public = []() {
         crypto::secret_key secret;
@@ -631,7 +634,8 @@ LWS_CASE("rest_server")
 
       response = invoke(client, "/get_address_txs", message);
       EXPECT(response ==
-        "{\"total_received\":\"40000\","
+        "{\"since_tx_id\":0,"
+        "\"total_received\":\"40000\","
         "\"scanned_height\":" + scan_height + "," +
         "\"scanned_block_height\":" + scan_height + ","
         "\"start_height\":" + start_height + ","
@@ -640,6 +644,7 @@ LWS_CASE("rest_server")
         "\"transactions\":["
           "{\"id\":0,"
           "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
+          "\"block_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.block_hash)) + "\","
           "\"timestamp\":\"1970-01-01T01:56:40Z\","
           "\"total_received\":\"40000\","
           "\"total_sent\":\"40000\","
