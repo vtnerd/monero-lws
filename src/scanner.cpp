@@ -1269,7 +1269,7 @@ namespace lws
           rpc::scanner::server::start_acceptor(server, lws_server_addr, std::move(lws_server_pass));
 
         // This is a hack to prevent racy shutdown
-        boost::asio::post(self.io_, [&self] () { if (self.has_shutdown()) self.shutdown(); });
+        boost::asio::post(self.io_, [&self] () { if (!self.is_running()) self.stop(); });
 
         // Blocks until sigint, local scanner issue, storage issue, or exception
         self.io_.restart();
