@@ -2372,7 +2372,7 @@ namespace db
               const auto this_minor = add_and_clamp(minor - 1, to_uint(receipient->min_i));
 
               // Quick Sanity Check before vector expansion
-              if (std::numeric_limits<std::uint32_t>::max() < needed / minor)
+              if (minor && std::numeric_limits<std::uint32_t>::max() < needed / minor)
                 return {error::max_subaddresses};
               if (max_subaddresses < needed * minor)
                 return {error::max_subaddresses};
