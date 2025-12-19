@@ -315,6 +315,9 @@ namespace lws
 
     void update_lookahead(const account& user, subaddress_reader& reader, const db::address_index& match, const db::block_id height)
     {
+      if (match.is_zero())
+        return; // keep subaddress disabled servers quick
+
       if (!reader.disk)
         throw std::runtime_error{"Bad DB handle in scanner"};
 
