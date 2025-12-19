@@ -185,7 +185,7 @@ else () # NOT MONERO_BUILD_DIR
   endif ()
 
   include(FetchContent)
-  FetchContent_Declare(monero SOURCE_DIR "${MONERO_SOURCE_DIR}")
+  FetchContent_Declare(monero SOURCE_DIR "${MONERO_SOURCE_DIR}" EXCLUDE_FROM_ALL)
 
   if (NOT monero_POPULATED)
     FetchContent_MakeAvailable(monero)
