@@ -239,8 +239,9 @@ namespace db
   //! `output`s and `spend`s are sorted by these fields to make merging easier.
   struct transaction_link
   {
-    block_id height;      //!< Block height containing transaction
-    crypto::hash tx_hash; //!< Hash of the transaction
+    block_id height;         //!< Block height containing transaction
+    crypto::hash tx_hash;    //!< Hash of the transaction
+    crypto::hash block_hash; //!< Hash of the block
   };
 
   //! Additional flags stored in `output`s.
@@ -299,7 +300,7 @@ namespace db
     address_index recipient;
   };
   static_assert(
-    sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
+    sizeof(output) == 8 + 32 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8 + 2 * 4,
     "padding in output"
   );
   WIRE_DECLARE_OBJECT(output);
@@ -319,7 +320,7 @@ namespace db
     crypto::hash payment_id;  //!< Unencrypted only, can't decrypt spend
     address_index sender;
   };
-  static_assert(sizeof(spend) == 8 + 32 * 2 + 8 * 4 + 4 + 3 + 1 + 32 + 2 * 4, "padding in spend");
+  static_assert(sizeof(spend) == 8 + 32 + 32 * 2 + 8 * 4 + 4 + 3 + 1 + 32 + 2 * 4, "padding in spend");
   WIRE_DECLARE_OBJECT(spend);
 
   //! Key image and info needed to retrieve primary `spend` data.

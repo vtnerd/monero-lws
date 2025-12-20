@@ -88,6 +88,7 @@
 #include "util/source_location.h"
 #include "wire/adapted/crypto.h"
 #include "wire/json.h"
+#include "string_tools.h"
 
 namespace lws
 {
@@ -583,12 +584,12 @@ namespace lws
 
     struct get_address_txs
     {
-      using request = rpc::account_credentials;
+      using request = rpc::get_address_txs_request;
       using response = rpc::get_address_txs_response;
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = open_account(req.creds, data.global->disk.clone());
         if (!user)
           return user.error();
 
@@ -605,6 +606,8 @@ namespace lws
         if (!last)
           return last.error();
 
+        uint64_t since_tx_id = req.since_tx_id != boost::none ? req.since_tx_id.get() : 0;
+        const std::string since_tx_block_hash = req.since_tx_block_hash != boost::none ? req.since_tx_block_hash.get() : "";
         response resp{};
         resp.scanned_height = std::uint64_t(user->first.scan_height);
         resp.scanned_block_height = resp.scanned_height;
@@ -613,11 +616,14 @@ namespace lws
         resp.transaction_height = resp.blockchain_height;
         resp.lookahead_fail = to_uint(user->first.lookahead_fail);
         resp.lookahead = user->first.lookahead;
+        resp.since_tx_id = 0;
 
         // merge input and output info into a single set of txes.
 
         auto output = outputs->make_iterator();
         auto spend = spends->make_iterator();
+        uint64_t tx_id = 0;
+        bool return_all = false;
 
         std::vector<db::output::spend_meta_> metas{};
 
@@ -687,6 +693,7 @@ namespace lws
               resp.transactions.back().spends.push_back({*meta, *spend});
               resp.transactions.back().info.link.height = resp.transactions.back().spends.back().possible_spend.link.height;
               resp.transactions.back().info.link.tx_hash = resp.transactions.back().spends.back().possible_spend.link.tx_hash;
+              resp.transactions.back().info.link.block_hash = resp.transactions.back().spends.back().possible_spend.link.block_hash;
               resp.transactions.back().info.spend_meta.mixin_count =
                 resp.transactions.back().spends.back().possible_spend.mixin_count;
               resp.transactions.back().info.timestamp = resp.transactions.back().spends.back().possible_spend.timestamp;
@@ -696,11 +703,22 @@ namespace lws
               resp.transactions.back().spends.push_back({*meta, *spend});
 
             resp.transactions.back().spent += meta->amount;
-
+            
             ++spend;
             if (!spend.is_end())
               next_spend = spend.get_value<MONERO_FIELD(db::spend, link)>();
           }
+
+          std::string block_hash = epee::string_tools::pod_to_hex(resp.transactions.back().info.link.block_hash);
+          if (tx_id == since_tx_id && since_tx_block_hash != block_hash)
+            return_all = true;
+          
+          ++tx_id;
+        }
+
+        if (!return_all) {
+          resp.transactions.erase(resp.transactions.begin(), resp.transactions.begin() + since_tx_id);
+          resp.since_tx_id = since_tx_id;
         }
 
         return resp;
