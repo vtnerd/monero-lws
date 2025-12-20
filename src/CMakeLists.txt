@@ -57,19 +57,19 @@ endif ()
 configure_file(lws_version.h.in "${CMAKE_BINARY_DIR}/generated_include/lws_version.h")
 include_directories("${CMAKE_BINARY_DIR}/generated_include")
 
-add_subdirectory(lmdb)
-add_subdirectory(wire)
-add_subdirectory(db)
-add_subdirectory(net)
-add_subdirectory(rpc)
-add_subdirectory(util)
-
 # For both the server and admin utility.
 set(monero-lws-common_sources config.cpp error.cpp)
 set(monero-lws-common_headers config.h error.h fwd.h)
 
 add_library(monero-lws-common ${monero-lws-common_sources} ${monero-lws-common_headers})
 target_link_libraries(monero-lws-common monero::libraries)
+
+add_subdirectory(lmdb)
+add_subdirectory(wire)
+add_subdirectory(db)
+add_subdirectory(net)
+add_subdirectory(rpc)
+add_subdirectory(util)
 
 add_library(monero-lws-daemon-common rest_server.cpp scanner.cpp)
 target_include_directories(monero-lws-daemon-common PUBLIC ${ZMQ_INCLUDE_PATH})

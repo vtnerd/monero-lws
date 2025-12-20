@@ -29,7 +29,19 @@
 #include "framework.test.h"
 
 #include <boost/thread.hpp>
+#include <tuple>
 
+#include "carrot_core/account_secrets.h"
+#include "carrot_core/device_ram_borrowed.h"          // monero/src
+#include "carrot_core/enote_utils.h"                  // monero/src
+#include "carrot_impl/address_device_ram_borrowed.h"  // monero/src
+#include "carrot_impl/format_utils.h"                 // monero/src
+#include "carrot_impl/key_image_device_composed.h"    // monero/src
+#include "carrot_impl/output_opening_types.h"         // monero/src
+#include "carrot_impl/tx_builder_inputs.h"            // monero/src
+#include "carrot_impl/tx_builder_outputs.h"           // monero/src
+#include "carrot_impl/tx_proposal_utils.h"            // monero/src
+#include "common/apply_permutation.h" // monero/src
 #include "cryptonote_basic/account.h" // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "cryptonote_config.h"        // monero/src
@@ -38,17 +50,25 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
+#include "fcmp_pp/curve_trees.h"     // monero/src
+#include "fcmp_pp/prove.h"           // monero/src
+#include "fcmp_pp/tree_cache.h"      // monero/src
 #include "hardforks/hardforks.h"     // monero/src
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
 #include "scanner.h"
+#include "wallet/tx_builder.h"       // monero/src
 #include "wire/error.h"
 #include "wire/json/write.h"
 
 namespace
 {
+  using tree_cache = fcmp_pp::curve_trees::TreeCacheV1;
+  using curve_tree = fcmp_pp::curve_trees::CurveTreesV1;
+
   constexpr const std::chrono::seconds message_timeout{3};
+  constexpr const std::uint64_t fee_weight = 80000;
 
   template<typename T>
   struct json_rpc_response
@@ -94,6 +114,7 @@ namespace
     std::vector<crypto::secret_key> additional_keys;
     std::vector<crypto::public_key> pub_keys;
     std::vector<crypto::public_key> spend_publics;
+    std::vector<carrot::RCTOutputEnoteProposal> carrot;
   };
 
   transaction make_miner_tx(lest::env& lest_env, lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags)
@@ -133,6 +154,11 @@ namespace
     tx.tx.unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
 
     return tx;
+  }
+
+  transaction make_miner_tx(lest::env& lest_env, const lws::db::block_id height)
+  {
+    return make_miner_tx(lest_env, height, lws::db::account_address{}, true);
   }
 
   struct get_spend_public
@@ -228,6 +254,339 @@ namespace
     return out;
   }
 
+  fcmp_pp::curve_trees::OutputPair make_output_pair(const lws::db::output& source, const bool mask = false)
+  {
+    return {
+      source.pub,
+      mask ? source.ringct_mask : rct::commit(source.spend_meta.amount, source.ringct_mask)
+    };
+  }
+
+  fcmp_pp::curve_trees::OutputPair make_output_pair(const cryptonote::transaction& tx, const std::size_t index)
+  {
+    crypto::public_key pub{};
+    cryptonote::get_output_public_key(tx.vout.at(index), pub);
+    const bool is_miner = tx.vin.at(0).type() == typeid(cryptonote::txin_gen);
+    const std::uint64_t amount = tx.vout.at(index).amount;
+    return {
+      pub, is_miner ? rct::commit(amount, rct::identity()) : tx.rct_signatures.outPk.at(index).mask
+    };
+  }
+
+  carrot::CarrotSelectedInput make_carrot_input(const carrot::view_incoming_key_device& incoming, const lws::db::output& source, const carrot::AddressDeriveType type)
+  {
+    if (source.is_carrot())
+    {
+      mx25519_pubkey shared{};
+      carrot::view_tag_t tag{};
+      const bool is_coinbase = lws::db::unpack(source.extra).first & lws::db::coinbase_output; 
+      const mx25519_pubkey de = carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public);
+      const carrot::input_context_t context =
+        is_coinbase ?
+          carrot::make_carrot_input_context_coinbase(std::uint64_t(source.link.height)) :
+          carrot::make_carrot_input_context(source.first_image);
+
+      if (!incoming.view_key_scalar_mult_x25519(carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public), shared))
+        throw std::runtime_error{"Failed to generate x25519"};
+
+      carrot::make_carrot_view_tag(shared.data, context, source.pub, tag);
+
+      std::optional<carrot::encrypted_payment_id_t> epid;
+      if (lws::db::unpack(source.extra).second == 8)
+      {
+        crypto::hash ctx{};
+        carrot::payment_id_t upid{};
+
+        static_assert(sizeof(upid) == sizeof(source.payment_id.short_));
+        std::memcpy(std::addressof(upid), std::addressof(source.payment_id.short_), sizeof(upid));
+        carrot::make_carrot_sender_receiver_secret(shared.data, de, context, ctx);
+        epid.emplace(carrot::encrypt_legacy_payment_id(upid, ctx, source.pub));
+      }
+
+      return {
+        source.spend_meta.amount,
+        carrot::CarrotOutputOpeningHintV2{
+          source.pub,
+          source.ringct_mask,
+          source.anchor,
+          tag,
+          carrot::raw_byte_convert<mx25519_pubkey>(source.spend_meta.tx_public),
+          source.first_image,
+          source.spend_meta.amount,
+          epid,
+          carrot::subaddress_index_extended{
+            std::uint32_t(source.recipient.maj_i),
+            std::uint32_t(source.recipient.min_i),
+            type
+          }
+        }
+      };
+    }
+    // else not carrot
+    return {
+      source.spend_meta.amount,
+      carrot::LegacyOutputOpeningHintV1{
+        source.pub,
+        source.spend_meta.tx_public,
+        carrot::subaddress_index{
+          std::uint32_t(source.recipient.maj_i),
+          std::uint32_t(source.recipient.min_i)
+        },
+        source.spend_meta.amount,
+        rct::identity(),
+        source.spend_meta.index
+      }
+    };
+  }
+
+  carrot::CarrotDestinationV1 to_carrot_dest(const lws::db::account_address& dest, const carrot::payment_id_t& pid = {})
+  {
+    return {dest.spend_public, dest.view_public, false, pid};
+  }
+
+  carrot::CarrotDestinationV1 to_carrot_dest(const cryptonote::account_keys& dest, const carrot::subaddress_index& sub = {})
+  {
+    crypto::secret_key incoming{};
+    crypto::secret_key address{};
+    carrot::CarrotDestinationV1 out{};
+
+    carrot::make_carrot_generateaddress_secret(dest.m_view_secret_key, address);
+    const carrot::generate_address_secret_ram_borrowed_device address_device{address};
+
+    const auto& account = dest.m_account_address;
+    carrot::make_carrot_subaddress_v1(
+      account.m_spend_public_key, account.m_view_public_key, address_device, sub.major, sub.minor, out
+    );
+
+    return out;
+  }
+
+  transaction make_carrot_tx(
+    lest::env& lest_env,
+    const cryptonote::account_keys& keys,
+    const std::vector<carrot::CarrotDestinationV1>& dests,
+    const tree_cache& cache,
+    const curve_tree& tree,
+    const std::vector<lws::db::output>& sources,
+    const carrot::AddressDeriveType type = carrot::AddressDeriveType::PreCarrot
+  )
+  {
+    struct select_inputs
+    {
+      std::vector<carrot::CarrotSelectedInput> sources;
+
+      void operator()(
+        const boost::multiprecision::uint128_t&,
+        const std::map<std::size_t, rct::xmr_amount>&,
+        std::size_t,
+        std::size_t,
+        std::vector<carrot::CarrotSelectedInput>& out)
+      {
+        out = sources;
+      }
+    };
+
+    crypto::secret_key prove_key{};
+    crypto::secret_key image_key{};
+    crypto::secret_key address_key{};
+    crypto::secret_key incoming_key{};
+    crypto::public_key view_address{};
+
+    std::shared_ptr<carrot::generate_address_secret_device> generate_address_device;
+    std::shared_ptr<carrot::generate_image_key_device> generate_image_device;
+    std::shared_ptr<carrot::view_incoming_key_device> incoming_device;
+    std::shared_ptr<carrot::view_balance_secret_device> balance_device;
+    if (type == carrot::AddressDeriveType::Carrot)
+    {
+      carrot::make_carrot_provespend_key(keys.m_spend_secret_key, prove_key);
+      carrot::make_carrot_generateimage_key(keys.m_view_secret_key, image_key);
+      carrot::make_carrot_generateaddress_secret(keys.m_view_secret_key, address_key);
+      carrot::make_carrot_viewincoming_key(keys.m_view_secret_key, incoming_key);
+      EXPECT(crypto::secret_key_to_public_key(incoming_key, view_address));
+
+      generate_address_device = std::make_shared<carrot::generate_address_secret_ram_borrowed_device>(address_key);
+      generate_image_device = std::make_shared<::carrot::generate_image_key_ram_borrowed_device>(image_key);
+      incoming_device = std::make_shared<carrot::view_incoming_key_ram_borrowed_device>(incoming_key);
+      balance_device = std::make_shared<::carrot::view_balance_secret_ram_borrowed_device>(keys.m_view_secret_key);
+    }
+
+    std::shared_ptr<carrot::cryptonote_hierarchy_address_device> cryptonote_device;
+    std::shared_ptr<carrot::carrot_hierarchy_address_device> carrot_device;
+    std::shared_ptr<carrot::key_image_device> image_device;
+    if (type == carrot::AddressDeriveType::PreCarrot)
+    {
+      generate_image_device = std::make_shared<::carrot::generate_image_key_ram_borrowed_device>(keys.m_spend_secret_key);
+      const auto view_device = std::make_shared<carrot::cryptonote_view_incoming_key_ram_borrowed_device>(keys.m_view_secret_key);
+      incoming_device = view_device;
+      cryptonote_device = std::make_shared<carrot::cryptonote_hierarchy_address_device>(
+        view_device, keys.m_account_address.m_spend_public_key
+      );
+    }
+    else
+    {
+      carrot_device = std::make_shared<carrot::carrot_hierarchy_address_device>(
+        generate_address_device, keys.m_account_address.m_spend_public_key, view_address
+      );
+    }
+
+    std::vector<carrot::CarrotSelectedInput> sources_real;
+    for (const auto& source : sources)
+      sources_real.push_back(make_carrot_input(*incoming_device, source, type));
+
+    rct::xmr_amount amount = 0;
+    for (const auto& source : sources)
+      amount += source.spend_meta.amount;
+    amount /= (dests.size() + 1);
+
+    std::vector<carrot::CarrotPaymentProposalV1> payments;
+    for (const auto& dest : dests)
+      payments.push_back({dest, amount, carrot::gen_janus_anchor()});
+
+    carrot::CarrotTransactionProposalV1 proposal;
+    carrot::make_carrot_transaction_proposal_v1_transfer(
+      payments,
+      {},
+      fee_weight,
+      {},
+      select_inputs{sources_real},
+      keys.m_account_address.m_spend_public_key,
+      carrot::subaddress_index_extended{{}, type},
+      {},
+      {},
+      proposal
+    );
+
+    crypto::hash tx_hash{};
+    carrot::encrypted_payment_id_t enc_pid{};
+    std::vector<crypto::key_image> images;
+    std::vector<fcmp_pp::FcmpPpSalProof> proofs;
+    std::vector<FcmpRerandomizedOutputCompressed> rerandomized;
+    std::vector<carrot::RCTOutputEnoteProposal> enotes;
+    {
+      const auto hybrid_device = std::make_shared<carrot::hybrid_hierarchy_address_device>(
+        carrot_device, cryptonote_device
+      );
+      const carrot::key_image_device_composed image_composed{
+        generate_image_device, hybrid_device, balance_device, incoming_device
+      };
+
+      EXPECT_NO_THROW(
+        carrot::make_signable_tx_hash_from_proposal_v1(
+          proposal, balance_device.get(), incoming_device.get(), image_composed, tx_hash
+        )
+      );
+
+      std::vector<crypto::public_key> one_times;
+      std::vector<rct::key> commitments;
+      std::vector<rct::key> input_blinding;
+
+      for (const auto& input : proposal.input_proposals)
+      {
+        one_times.push_back(onetime_address_ref(input));
+        commitments.push_back(amount_commitment_ref(input));
+
+        rct::xmr_amount amount;
+        EXPECT(
+          carrot::try_scan_opening_hint_amount(
+            input,
+            {std::addressof(keys.m_account_address.m_spend_public_key), 1},
+            incoming_device.get(),
+            balance_device.get(),
+            amount,
+            input_blinding.emplace_back()
+          )
+        );
+      }
+
+      std::vector<std::size_t> order;
+      EXPECT_NO_THROW(
+        carrot::get_sorted_input_key_images_from_proposal_v1(
+          proposal, image_composed, images, std::addressof(order)
+        )
+      );
+
+      EXPECT_NO_THROW(
+        carrot:get_output_enote_proposals_from_proposal_v1(
+          proposal, balance_device.get(), incoming_device.get(), images.at(0), enotes, enc_pid
+        )
+      );
+
+      std::vector<rct::key> output_blinding;
+      for (const auto& enote : enotes)
+        output_blinding.push_back(rct::sk2rct(enote.amount_blinding_factor));
+
+      EXPECT_NO_THROW(
+        carrot::make_carrot_rerandomized_outputs_nonrefundable(
+          one_times, commitments, input_blinding, output_blinding, rerandomized
+        )
+      );
+
+      std::size_t i = -1;
+      for (const auto& input : proposal.input_proposals)
+      {
+        ++i;
+        crypto::key_image ignored;
+        const bool is_legacy =
+          std::get_if<carrot::LegacyOutputOpeningHintV1>(std::addressof(input));
+        if (type == carrot::AddressDeriveType::PreCarrot)
+        {
+          EXPECT_NO_THROW(
+            carrot::make_sal_proof_any_to_legacy_v1(
+              tx_hash, rerandomized.at(i), input, keys.m_spend_secret_key, *cryptonote_device, proofs.emplace_back(), ignored
+            )
+          );
+        }
+        else
+        {
+          EXPECT_NO_THROW(
+            carrot::make_sal_proof_any_to_carrot_v1(
+              tx_hash,
+              rerandomized.at(i),
+              input,
+              prove_key,
+              image_key,
+              *balance_device,
+              *incoming_device,
+              *generate_address_device,
+              proofs.emplace_back(),
+              ignored
+            )
+          );
+        }
+      }
+
+      tools::apply_permutation(order, rerandomized);
+      tools::apply_permutation(order, proofs);
+    }
+
+    return transaction{
+      .tx = tools::wallet::finalize_fcmps_and_range_proofs(
+        images, rerandomized, proofs, enotes, enc_pid, proposal.fee, cache, tree
+      ),
+      .carrot = enotes
+    };
+  }
+
+  transaction make_carrot_tx(lest::env& lest_env, const cryptonote::account_keys& keys, const tree_cache& cache, const curve_tree& tree, const std::vector<lws::db::output>& sources)
+  { 
+    struct pair
+    {
+      crypto::public_key pub;
+      crypto::secret_key sec;
+
+      pair()
+        : pub{}, sec{}
+      {
+        crypto::generate_keys(pub, sec);
+      }
+    };
+
+    pair spend{};
+    pair view{};
+
+    return make_carrot_tx(lest_env, keys, {to_carrot_dest(lws::db::account_address{spend.pub, view.pub})}, cache, tree, sources);
+  }
+
   void scanner_thread(lws::scanner& scanner, void* ctx, const std::vector<epee::byte_slice>& reply)
   {
     struct stop_
@@ -292,8 +651,10 @@ namespace lws_test
   }
 }
 
-LWS_CASE("lws::scanner::sync and lws::scanner::run")
+LWS_CASE("lws::scanner::sync and lws::scanner::run (legacy keys)")
 {
+  static constexpr const std::uint64_t miner_reward = 35184372088830;
+
   cryptonote::account_keys keys{};
   crypto::generate_keys(keys.m_account_address.m_spend_public_key, keys.m_spend_secret_key);
   crypto::generate_keys(keys.m_account_address.m_view_public_key, keys.m_view_secret_key);
@@ -329,12 +690,39 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
     keys2.m_account_address.m_spend_public_key
   };
 
+  cryptonote::account_keys keys3{};
+  crypto::generate_keys(keys3.m_account_address.m_spend_public_key, keys3.m_spend_secret_key);
+
+  // carrot view-balance account
+  lws::db::account_address account3{};
+  {
+    crypto::secret_key incoming_key{};
+    crypto::secret_key prove_key{};
+    crypto::secret_key image_key{};
+    crypto::key_derivation view_public{};
+
+    carrot::make_carrot_provespend_key(keys3.m_spend_secret_key, prove_key);
+    carrot::make_carrot_viewbalance_secret(keys3.m_spend_secret_key, keys3.m_view_secret_key);
+    carrot::make_carrot_generateimage_key(keys3.m_view_secret_key, image_key);
+    carrot::make_carrot_spend_pubkey(image_key, prove_key, account3.spend_public); 
+
+    carrot::make_carrot_viewincoming_key(keys3.m_view_secret_key, incoming_key);
+    EXPECT(crypto::secret_key_to_public_key(incoming_key, account3.view_public));
+
+    keys3.m_account_address.m_spend_public_key = account3.spend_public;
+
+    EXPECT(crypto::generate_key_derivation(account3.spend_public, incoming_key, view_public));
+    keys3.m_account_address.m_view_public_key = carrot::raw_byte_convert<crypto::public_key>(view_public);
+
+    keys3.m_account_address.m_view_public_key =
+      rct::rct2pk(rct::scalarmultKey(rct::pk2rct(account3.spend_public), rct::sk2rct(incoming_key)));
+  }
+
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
     auto rpc = 
       lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
-
-
+  
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     const lws::db::block_info last_block =
@@ -422,6 +810,8 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
     SECTION("lws::scanner::run (with upsert)")
     {
+      const lws::db::block_id legacy_block_id = add(last_block.id, 2);
+      const lws::db::block_id carrot_block_id = add(legacy_block_id, 2);
       {
         const std::vector<lws::db::subaddress_dict> indexes{
           lws::db::subaddress_dict{
@@ -431,17 +821,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
             }
           }
         };
-        const auto result =
-          db.upsert_subaddresses(lws::db::account_id(1), account, keys.m_view_secret_key, indexes, 2);
-        EXPECT(result);
-        EXPECT(result->size() == 1);
-        EXPECT(result->at(0).first == lws::db::major_index::primary);
-        EXPECT(result->at(0).second.get_container().size() == 1);
-        EXPECT(result->at(0).second.get_container().at(0).size() == 2);
-        EXPECT(result->at(0).second.get_container().at(0).at(0) == lws::db::minor_index(1));
-        EXPECT(result->at(0).second.get_container().at(0).at(1) == lws::db::minor_index(2));
       }
 
+      const auto tree = fcmp_pp::curve_trees::curve_trees_v1();
+      tree_cache cache(tree); 
+      cache.init(std::uint64_t(last_block.id), last_block.hash, 0, {}, {});
+ 
       std::vector<cryptonote::tx_destination_entry> destinations;
       destinations.emplace_back();
       destinations.back().amount = 8000;
@@ -452,10 +837,27 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       EXPECT(tx.pub_keys.size() == 1);
       EXPECT(tx.spend_publics.size() == 1);
 
+      const lws::db::output legacy_output{
+        lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx.tx)},
+        lws::db::output::spend_meta_{
+          lws::db::output_id{0, 100}, miner_reward, 0, 0, tx.pub_keys.at(0)
+        },
+        0,
+        0,
+        cryptonote::get_transaction_prefix_hash(tx.tx),
+        tx.spend_publics.at(0),
+        rct::commit(miner_reward, rct::identity()),
+        {},
+        lws::db::pack(lws::db::extra(lws::db::ringct_output | lws::db::coinbase_output), 0),
+        {},
+        0, // fee
+        lws::db::address_index{}
+      };
+
       transaction tx2 = make_tx(lest_env, keys, destinations, 20, true);
       EXPECT(tx2.pub_keys.size() == 1);
       EXPECT(tx2.spend_publics.size() == 1);
-
+ 
       transaction tx3 = make_tx(lest_env, keys, destinations, 86, false);
       EXPECT(tx3.pub_keys.size() == 1);
       EXPECT(tx3.spend_publics.size() == 1);
@@ -469,18 +871,9 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       EXPECT(tx4.pub_keys.size() == 1);
       EXPECT(tx4.spend_publics.size() == 2);
 
-      //destinations.emplace_back();
-      //destinations.back().amount = 1000;
-      //destinations.back().addr = keys_subaddr2.m_account_address;
-      //destinations.back().is_subaddress = true;
-
-      //transaction tx5 = make_tx(lest_env, keys, destinations, 100, true);
-      //EXPECT(tx5.pub_keys.size() == 3);
-      //EXPECT(tx5.spend_publics.size() == 3);
-
       cryptonote::rpc::GetBlocksFast::Response bmessage{};
       bmessage.start_height = std::uint64_t(last_block.id) + 1;
-      bmessage.current_height = bmessage.start_height + 1;
+      bmessage.current_height = bmessage.start_height + 7;
       bmessage.blocks.emplace_back();
       bmessage.blocks.back().block.miner_tx = tx.tx;
       bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx2.tx));
@@ -501,10 +894,208 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.output_indices.back().back().push_back(201);
       bmessage.blocks.push_back(bmessage.blocks.back());
       bmessage.output_indices.push_back(bmessage.output_indices.back());
+      /*bmessage.blocks.back().block.miner_tx =
+        make_miner_tx(lest_env, lws::db::block_id(std::uint64_t(last_block.id) + 1), {}, false).tx; */
 
+      EXPECT(cache.register_output(make_output_pair(tx.tx, 0)));
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height,
+          get_block_hash(bmessage.blocks.at(0).block),
+          last_block.hash,
+          {{bmessage.start_height + 1, {{100, 0, make_output_pair(tx.tx, 0)}}}}
+        )
+      ); 
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height + 1,
+          get_block_hash(bmessage.blocks.at(1).block),
+          get_block_hash(bmessage.blocks.at(0).block),
+          {{bmessage.start_height + 2, {{250, 0, make_output_pair(bmessage.blocks.back().block.miner_tx, 0)}}}}
+        )
+      );
+
+      // third block
+      transaction tx5 = make_carrot_tx(lest_env, keys, {to_carrot_dest(account3)}, cache, *tree, {legacy_output});
+
+      static constexpr const std::uint64_t carrot1_payment = miner_reward / 2;
+      const auto carrot1_block_id = increment(legacy_block_id);
+      const bool carrot1_index = tx5.carrot.at(0).amount != carrot1_payment;
+      const std::uint64_t carrot1_change = tx5.carrot.at(!carrot1_index).amount;
+
+      const lws::db::output carrot1_output{
+        lws::db::transaction_link{carrot1_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+        lws::db::output::spend_meta_{
+          lws::db::output_id{0, std::uint64_t(301 + carrot1_index)},
+          carrot1_payment,
+          lws::db::carrot_external,
+          std::uint32_t(carrot1_index),
+          carrot::raw_byte_convert<crypto::public_key>(
+            tx5.carrot.at(carrot1_index).enote.enote_ephemeral_pubkey
+          )
+        },
+        0,
+        0,
+        cryptonote::get_transaction_prefix_hash(tx5.tx),
+        tx5.carrot.at(carrot1_index).enote.onetime_address,
+        tx5.carrot.at(carrot1_index).enote.amount_commitment,
+        {},
+        lws::db::pack(lws::db::extra::ringct_output, 8),
+        {},
+        519840000, // fee
+        lws::db::address_index{},
+        tx5.carrot.at(carrot1_index).enote.tx_first_key_image,
+        tx5.carrot.at(carrot1_index).enote.anchor_enc
+      };
+ 
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx = make_miner_tx(lest_env, last_block.id).tx;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx5.tx));
+      bmessage.blocks.back().transactions.push_back(tx5.tx);
+      bmessage.output_indices.emplace_back();
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(300);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(301);
+      bmessage.output_indices.back().back().push_back(302);
+
+      bmessage.blocks.push_back(bmessage.blocks.back());
+      bmessage.output_indices.push_back(bmessage.output_indices.back());
+
+      EXPECT(cache.register_output(make_output_pair(carrot1_output, true)));
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height + 2,
+          get_block_hash(bmessage.blocks.at(2).block),
+          get_block_hash(bmessage.blocks.at(1).block),
+          {{bmessage.start_height + 3, {{std::uint64_t(301 + carrot1_index), 0, make_output_pair(tx5.tx, carrot1_index)}}}}
+        )
+      );
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height + 3,
+          get_block_hash(bmessage.blocks.at(3).block),
+          get_block_hash(bmessage.blocks.at(2).block),
+          {{bmessage.start_height + 4, {{350, 0, make_output_pair(bmessage.blocks.back().block.miner_tx, 0)}}}}
+        )
+      );
+
+      // fifth block
+      transaction tx6 = make_carrot_tx(
+        lest_env, keys3, {to_carrot_dest(account, carrot::payment_id_t{{5}})}, cache, *tree, {carrot1_output}, carrot::AddressDeriveType::Carrot
+      );
+
+      static constexpr const std::uint64_t carrot2_payment = carrot1_payment / 2;
+      const auto carrot2_block_id = add(legacy_block_id, 3);
+      const bool carrot2_index = tx6.carrot.at(0).amount != carrot2_payment;
+      const std::uint64_t carrot2_change = tx6.carrot.at(!carrot2_index).amount;
+
+      const lws::db::output carrot2_output{
+        lws::db::transaction_link{carrot2_block_id, cryptonote::get_transaction_hash(tx6.tx)},
+        lws::db::output::spend_meta_{
+          lws::db::output_id{0, std::uint64_t(401 + carrot2_index)},
+          carrot2_payment,
+          lws::db::carrot_external,
+          std::uint32_t(carrot2_index),
+          carrot::raw_byte_convert<crypto::public_key>(
+            tx6.carrot.at(carrot2_index).enote.enote_ephemeral_pubkey
+          )
+        },
+        0,
+        0,
+        cryptonote::get_transaction_prefix_hash(tx6.tx),
+        tx6.carrot.at(carrot2_index).enote.onetime_address,
+        tx6.carrot.at(carrot2_index).enote.amount_commitment,
+        {},
+        lws::db::pack(lws::db::extra::ringct_output, 8),
+        {crypto::hash8{{5}}},
+        519840000, // fee
+        lws::db::address_index{},
+        tx6.carrot.at(carrot2_index).enote.tx_first_key_image,
+        tx6.carrot.at(carrot2_index).enote.anchor_enc
+      };
+
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx = make_miner_tx(lest_env, last_block.id).tx;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx6.tx));
+      bmessage.blocks.back().transactions.push_back(tx6.tx);
+      bmessage.output_indices.emplace_back();
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(400);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(401);
+      bmessage.output_indices.back().back().push_back(402);
+
+      bmessage.blocks.push_back(bmessage.blocks.back());
+      bmessage.output_indices.push_back(bmessage.output_indices.back());
+
+      EXPECT(cache.register_output(make_output_pair(carrot2_output, true)));
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height + 4,
+          get_block_hash(bmessage.blocks.at(4).block),
+          get_block_hash(bmessage.blocks.at(3).block),
+          {{bmessage.start_height + 5, {{std::uint64_t(401 + carrot2_index), 0, make_output_pair(tx6.tx, carrot2_index)}}}}
+        )
+      );
+      EXPECT_NO_THROW(
+        cache.sync_block(
+          bmessage.start_height + 5,
+          get_block_hash(bmessage.blocks.at(5).block),
+          get_block_hash(bmessage.blocks.at(4).block),
+          {}
+        )
+      );
+
+      // seventh block
+      transaction tx7 = make_carrot_tx(
+        lest_env, keys, {to_carrot_dest(account3), to_carrot_dest(keys3, {0, 2})}, cache, *tree, {carrot2_output}
+      );
+
+      static constexpr const std::uint64_t carrot3_payment = carrot2_payment / 3;
+      const auto carrot3_block_id = add(carrot2_block_id, 2);
+      const bool is_carrot3_0_change = tx7.carrot.at(0).amount != carrot3_payment;
+      const bool is_carrot3_1_change = tx7.carrot.at(1).amount != carrot3_payment;
+      const bool is_carrot3_2_change = tx7.carrot.at(2).amount != carrot3_payment;
+      const std::uint8_t carrot3_index1 = is_carrot3_0_change;
+      const std::uint8_t carrot3_index2 = 1 + std::uint8_t(is_carrot3_0_change) + is_carrot3_1_change;
+      const std::uint8_t carrot3_change_index =
+        std::uint8_t(is_carrot3_1_change) + std::uint8_t(is_carrot3_2_change) * 2;
+      const std::uint64_t carrot3_change = tx7.carrot.at(carrot3_change_index).amount;
+
+      EXPECT(carrot3_index1 <= 1);
+      EXPECT(1 <= carrot3_index2);
+      EXPECT(carrot3_index2 <= 2);
+      EXPECT(carrot3_change_index <= 2);
+      EXPECT(carrot3_change_index != carrot3_index1);
+      EXPECT(carrot3_change_index != carrot3_index2);
+      EXPECT(carrot3_index1 != carrot3_index2);
+
+      const auto miner_tx2 = make_single_enote_carrot_coinbase_transaction_v1(
+        carrot::CarrotDestinationV1{account3.spend_public, account3.view_public, false, {}},
+        miner_reward,
+        std::uint64_t(carrot3_block_id),
+        {}
+      );
+ 
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx = miner_tx2;
+      bmessage.blocks.back().block.tx_hashes.push_back(cryptonote::get_transaction_hash(tx7.tx));
+      bmessage.blocks.back().transactions.push_back(tx7.tx);
+      bmessage.output_indices.emplace_back();
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(500);
+      bmessage.output_indices.back().emplace_back();
+      bmessage.output_indices.back().back().push_back(501);
+      bmessage.output_indices.back().back().push_back(502);
+      bmessage.output_indices.back().back().push_back(503);
+
+      bmessage.blocks.push_back(bmessage.blocks.back());
+      bmessage.output_indices.push_back(bmessage.output_indices.back());
+ 
       std::vector<crypto::hash> hashes{
         last_block.hash,
-        cryptonote::get_block_hash(bmessage.blocks.back().block),
+        cryptonote::get_block_hash(bmessage.blocks.front().block),
       };
       {
         cryptonote::rpc::GetHashesFast::Response hmessage{};
@@ -528,13 +1119,48 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         }
       }
 
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(1).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(2).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(3).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(4).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(5).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(6).block));
+      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.at(7).block));
+
       EXPECT(db.add_account(account, keys.m_view_secret_key));
       EXPECT(db.add_account(account2, keys2.m_view_secret_key));
+      EXPECT(db.add_account(account3, keys3.m_view_secret_key, lws::db::view_balance_key));
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+        for (std::uint32_t i = 1; i < 4; i += 2)
+        {
+          const auto result =
+            db.upsert_subaddresses(lws::db::account_id(i), std::nullopt, indexes, 2);
+          EXPECT(result);
+          EXPECT(result->size() == 1);
+          EXPECT(result->at(0).first == lws::db::major_index::primary);
+          EXPECT(result->at(0).second.get_container().size() == 1);
+          EXPECT(result->at(0).second.get_container().at(0).size() == 2);
+          EXPECT(result->at(0).second.get_container().at(0).at(0) == lws::db::minor_index(1));
+          EXPECT(result->at(0).second.get_container().at(0).at(1) == lws::db::minor_index(2));
+        }
+
+        EXPECT(!db.upsert_subaddresses(lws::db::account_id(4), std::nullopt, indexes, 2));
+      } 
 
       messages.clear();
       messages.push_back(daemon_response(bmessage));
       bmessage.start_height = bmessage.current_height;
+      bmessage.blocks.front() = bmessage.blocks.back();
       bmessage.blocks.resize(1);
+      bmessage.output_indices.front() = bmessage.output_indices.back();
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
@@ -544,152 +1170,28 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         const join on_scope_exit{server_thread};
         scanner.run(std::move(rpc), 1, {}, {}, opts);
       }
-
-      hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
 
-      const lws::db::block_id new_last_block_id = lws::db::block_id(std::uint64_t(last_block.id) + 2);
-      EXPECT(get_account().scan_height == new_last_block_id);
-      {
-        const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
-          {
-            {lws::db::output_id{0, 100}, 35184372088830}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx.tx),
-              tx.spend_publics.at(0),
-              rct::commit(35184372088830, rct::identity()),
-              {},
-              lws::db::pack(lws::db::extra(lws::db::extra::coinbase_output | lws::db::extra::ringct_output), 0),
-              {},
-              0, // fee
-              lws::db::address_index{}
-            },
-          },
-          {
-            {lws::db::output_id{0, 101}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx2.tx),
-              tx2.spend_publics.at(0),
-              tx2.tx.rct_signatures.outPk.at(0).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              12000, // fee
-              lws::db::address_index{}
-            },
-          },
-	        {
-            {lws::db::output_id{0, 102}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx3.tx),
-              tx3.spend_publics.at(0),
-              tx3.tx.rct_signatures.outPk.at(0).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              12000, // fee
-              lws::db::address_index{}
-            },
-          },
-          {
-            {lws::db::output_id{0, 200}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx4.tx),
-              tx4.spend_publics.at(0),
-              tx4.tx.rct_signatures.outPk.at(0).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              10000, // fee
-              lws::db::address_index{}
-            }
-          },
-          {
-            {lws::db::output_id{0, 201}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx4.tx),
-              tx4.spend_publics.at(1),
-              tx4.tx.rct_signatures.outPk.at(1).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              10000, // fee
-              lws::db::address_index{}
-            }
-          },
-          {
-            {lws::db::output_id{0, 200}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx4.tx),
-              tx4.spend_publics.at(0),
-              tx4.tx.rct_signatures.outPk.at(0).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              10000, // fee
-              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
-            }
-          },
-          {
-            {lws::db::output_id{0, 201}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
-              lws::db::output::spend_meta_{
-                lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
-              },
-              0,
-              0,
-              cryptonote::get_transaction_prefix_hash(tx4.tx),
-              tx4.spend_publics.at(1),
-              tx4.tx.rct_signatures.outPk.at(1).mask,
-              {},
-              lws::db::pack(lws::db::extra::ringct_output, 8),
-              {},
-              10000, // fee
-              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
-            }
-          }
-        };
+      EXPECT(get_account().scan_height == add(carrot3_block_id, 1));
 
-        auto reader = MONERO_UNWRAP(db.start_read());
-        auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
-        EXPECT(outputs.count() == 5);
+      using expected_map = std::map<std::tuple<lws::db::output_id, std::uint32_t, std::uint32_t>, lws::db::output>; 
+      auto reader = MONERO_UNWRAP(db.start_read());
+
+      const auto verify_outputs = [&lest_env, &reader] (const lws::db::account_id id, const std::size_t count, const expected_map& expected)
+      {
+        auto outputs = MONERO_UNWRAP(reader.get_outputs(id));
+        EXPECT(count <= expected.size());
+        EXPECT(outputs.count() == count);
+
+        std::set<lws::db::output_id> matched;
         auto output_it = outputs.make_iterator();
         for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
         {
           auto real_output = *output_it;
           const auto expected_output =
-            expected.find(std::make_pair(real_output.spend_meta.id, real_output.spend_meta.amount));
+            expected.find(std::make_tuple(real_output.spend_meta.id, std::uint32_t(real_output.recipient.maj_i), std::uint32_t(real_output.recipient.min_i)));
           EXPECT(expected_output != expected.end());
+          EXPECT(matched.insert(real_output.spend_meta.id).second);
 
           EXPECT(real_output.link.height == expected_output->second.link.height);
           EXPECT(real_output.link.tx_hash == expected_output->second.link.tx_hash);
@@ -706,38 +1208,344 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
             EXPECT(real_output.payment_id.short_ == expected_output->second.payment_id.short_);
           EXPECT(real_output.fee == expected_output->second.fee);
           EXPECT(real_output.recipient == expected_output->second.recipient);
+          EXPECT(real_output.first_image == expected_output->second.first_image);
+          EXPECT(real_output.anchor == expected_output->second.anchor);
         }
+      };
 
-        auto spends = MONERO_UNWRAP(reader.get_spends(lws::db::account_id(1)));
-        EXPECT(spends.count() == 2);
-        auto spend_it = spends.make_iterator();
-        EXPECT(!spend_it.is_end());
+      {
+        const expected_map expected_account1{
+          {
+            {lws::db::output_id{0, 100}, 0, 0}, legacy_output 
+          },
+          {
+            {lws::db::output_id{0, 101}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx2.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx2.tx),
+              tx2.spend_publics.at(0),
+              tx2.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000, // fee
+              lws::db::address_index{}
+            },
+          },
+	        {
+            {lws::db::output_id{0, 102}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx3.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx3.tx),
+              tx3.spend_publics.at(0),
+              tx3.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              12000, // fee
+              lws::db::address_index{}
+            },
+          },
+          {
+            {lws::db::output_id{0, 200}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(0),
+              tx4.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 201}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(1),
+              tx4.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{}
+            }
+          },
+          {
+            {lws::db::output_id{0, 200}, 0, 1}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(0),
+              tx4.tx.rct_signatures.outPk.at(0).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
+            }
+          },
+          {
+            {lws::db::output_id{0, 201}, 0, 1}, lws::db::output{
+              lws::db::transaction_link{legacy_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx4.tx),
+              tx4.spend_publics.at(1),
+              tx4.tx.rct_signatures.outPk.at(1).mask,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              10000, // fee
+              lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(301 + !carrot1_index)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot1_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(301 + !carrot1_index)},
+                carrot1_change,
+                lws::db::carrot_external,
+                std::uint32_t(!carrot1_index),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx5.carrot.at(!carrot1_index).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx5.tx),
+              tx5.carrot.at(!carrot1_index).enote.onetime_address,
+              tx5.carrot.at(!carrot1_index).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              519840000, // fee
+              lws::db::address_index{},
+              tx5.carrot.at(!carrot1_index).enote.tx_first_key_image,
+              tx5.carrot.at(!carrot1_index).enote.anchor_enc
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(401 + carrot2_index)}, 0, 0}, carrot2_output
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(501 + carrot3_change_index)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(tx7.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(501 + carrot3_change_index)},
+                carrot3_change,
+                lws::db::carrot_external,
+                std::uint32_t(carrot3_change_index),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx7.carrot.at(carrot3_change_index).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx7.tx),
+              tx7.carrot.at(carrot3_change_index).enote.onetime_address,
+              tx7.carrot.at(carrot3_change_index).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              537600000, // fee
+              lws::db::address_index{},
+              tx7.carrot.at(carrot3_change_index).enote.tx_first_key_image,
+              tx7.carrot.at(carrot3_change_index).enote.anchor_enc
+            }
+          }
+        };
 
-        auto real_spend = *spend_it;
-        EXPECT(real_spend.link.height == new_last_block_id);
-        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
-        lws::db::output_id expected_out{0, 100};
-        EXPECT(real_spend.source == expected_out);
-        EXPECT(real_spend.mixin_count == 15);
-        EXPECT(real_spend.length == 0);
-        EXPECT(real_spend.payment_id == crypto::hash{});
-        EXPECT(real_spend.sender == lws::db::address_index{});
-
-        ++spend_it;
-        EXPECT(!spend_it.is_end());
-
-        real_spend = *spend_it;
-        EXPECT(real_spend.link.height == new_last_block_id);
-        EXPECT(real_spend.link.tx_hash == cryptonote::get_transaction_hash(tx3.tx));
-        expected_out = lws::db::output_id{0, 101};
-        EXPECT(real_spend.source == expected_out);
-        EXPECT(real_spend.mixin_count == 15);
-        EXPECT(real_spend.length == 0);
-        EXPECT(real_spend.payment_id == crypto::hash{});
-        EXPECT(real_spend.sender == lws::db::address_index{});
-
-        EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(2))).count() == 0);
-        EXPECT(MONERO_UNWRAP(reader.get_spends(lws::db::account_id(2))).count() == 0);
+        verify_outputs(lws::db::account_id(1), 8, expected_account1);
+      }
+      { 
+        const expected_map expected_account3{
+          {
+            {lws::db::output_id{0, std::uint64_t(301 + carrot1_index)}, 0, 0}, carrot1_output
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(401 + !carrot2_index)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot2_block_id, cryptonote::get_transaction_hash(tx6.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(401 + !carrot2_index)},
+                carrot2_change,
+                lws::db::carrot_internal,
+                std::uint32_t(!carrot2_index),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx6.carrot.at(!carrot2_index).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx6.tx),
+              tx6.carrot.at(!carrot2_index).enote.onetime_address,
+              tx6.carrot.at(!carrot2_index).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 0),
+              {},
+              519840000, // fee
+              lws::db::address_index{},
+              tx6.carrot.at(!carrot2_index).enote.tx_first_key_image,
+              tx6.carrot.at(!carrot2_index).enote.anchor_enc
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(500)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(miner_tx2)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(500)},
+                miner_reward,
+                lws::db::carrot_external,
+                std::uint32_t(0),
+                get_tx_pub_key_from_extra(miner_tx2),
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(miner_tx2),
+              boost::get<cryptonote::txout_to_carrot_v1>(miner_tx2.vout.at(0).target).key,
+              rct::commit(miner_reward, rct::identity()),
+              {},
+              lws::db::pack(lws::db::extra(lws::db::ringct_output | lws::db::coinbase_output), 0),
+              {},
+              0, // fee
+              lws::db::address_index{},
+              crypto::key_image{},
+              boost::get<cryptonote::txout_to_carrot_v1>(miner_tx2.vout.at(0).target).encrypted_janus_anchor
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(501 + carrot3_index1)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(tx7.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(501 + carrot3_index1)},
+                carrot3_payment,
+                lws::db::carrot_external,
+                std::uint32_t(carrot3_index1),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx7.carrot.at(carrot3_index1).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx7.tx),
+              tx7.carrot.at(carrot3_index1).enote.onetime_address,
+              tx7.carrot.at(carrot3_index1).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              537600000, // fee
+              lws::db::address_index{},
+              tx7.carrot.at(carrot3_index1).enote.tx_first_key_image,
+              tx7.carrot.at(carrot3_index1).enote.anchor_enc
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(501 + carrot3_index1)}, 0, 2}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(tx7.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(501 + carrot3_index1)},
+                carrot3_payment,
+                lws::db::carrot_external,
+                std::uint32_t(carrot3_index1),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx7.carrot.at(carrot3_index1).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx7.tx),
+              tx7.carrot.at(carrot3_index1).enote.onetime_address,
+              tx7.carrot.at(carrot3_index1).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              537600000, // fee
+              {lws::db::major_index(0), lws::db::minor_index(2)},
+              tx7.carrot.at(carrot3_index1).enote.tx_first_key_image,
+              tx7.carrot.at(carrot3_index1).enote.anchor_enc
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(501 + carrot3_index2)}, 0, 0}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(tx7.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(501 + carrot3_index2)},
+                carrot3_payment,
+                lws::db::carrot_external,
+                std::uint32_t(carrot3_index2),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx7.carrot.at(carrot3_index2).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx7.tx),
+              tx7.carrot.at(carrot3_index2).enote.onetime_address,
+              tx7.carrot.at(carrot3_index2).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              537600000, // fee
+              lws::db::address_index{},
+              tx7.carrot.at(carrot3_index2).enote.tx_first_key_image,
+              tx7.carrot.at(carrot3_index2).enote.anchor_enc
+            }
+          },
+          {
+            {lws::db::output_id{0, std::uint64_t(501 + carrot3_index2)}, 0, 2}, lws::db::output{
+              lws::db::transaction_link{carrot3_block_id, cryptonote::get_transaction_hash(tx7.tx)},
+              lws::db::output::spend_meta_{
+                lws::db::output_id{0, std::uint64_t(501 + carrot3_index2)},
+                carrot3_payment,
+                lws::db::carrot_external,
+                std::uint32_t(carrot3_index2),
+                carrot::raw_byte_convert<crypto::public_key>(
+                  tx7.carrot.at(carrot3_index2).enote.enote_ephemeral_pubkey
+                )
+              },
+              0,
+              0,
+              cryptonote::get_transaction_prefix_hash(tx7.tx),
+              tx7.carrot.at(carrot3_index2).enote.onetime_address,
+              tx7.carrot.at(carrot3_index2).enote.amount_commitment,
+              {},
+              lws::db::pack(lws::db::extra::ringct_output, 8),
+              {},
+              537600000, // fee
+              {lws::db::major_index(0), lws::db::minor_index(2)},
+              tx7.carrot.at(carrot3_index2).enote.tx_first_key_image,
+              tx7.carrot.at(carrot3_index2).enote.anchor_enc
+            }
+          }
+        };
+        verify_outputs(lws::db::account_id(3), 5, expected_account3);
       }
     } //SECTION (lws::scanner::run (with upsert))
 
@@ -1077,7 +1885,6 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
             }
           }
         };
-
         auto reader = MONERO_UNWRAP(db.start_read());
         auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
         EXPECT(outputs.count() == 6);
