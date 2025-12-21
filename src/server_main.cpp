@@ -208,13 +208,13 @@ namespace
     std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
+    std::uint64_t split_sync_depth;
+    std::uint64_t min_block_depth;
     unsigned create_queue_max;
+    double split_sync_threads;
     bool untrusted_daemon;
     bool regtest;
     bool block_depth_threading;
-    double split_sync_threads;
-    std::uint64_t split_sync_depth;
-    std::uint64_t min_block_depth;
     bool balance_new_addresses;
   };
 
@@ -316,13 +316,13 @@ namespace
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
+      command_line::get_arg(args, opts.split_sync_depth),
+      command_line::get_arg(args, opts.min_block_depth),
       command_line::get_arg(args, opts.create_queue_max),
+      command_line::get_arg(args, opts.split_sync_threads),
       command_line::get_arg(args, opts.untrusted_daemon),
       command_line::get_arg(args, opts.regtest),
       command_line::get_arg(args, opts.block_depth_threading),
-      command_line::get_arg(args, opts.split_sync_threads),
-      command_line::get_arg(args, opts.split_sync_depth),
-      command_line::get_arg(args, opts.min_block_depth),
       command_line::get_arg(args, opts.balance_new_addresses)
     };
 
@@ -381,7 +381,7 @@ namespace
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),
-      lws::scanner_options{prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest, prog.block_depth_threading, prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.balance_new_addresses}
+      lws::scanner_options{prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest, prog.block_depth_threading, prog.balance_new_addresses}
     );
   }
 } // anonymous
