@@ -75,8 +75,7 @@ namespace lws { namespace rpc { namespace scanner
   void queue::update_min_height(db::block_id height)
   {
     const boost::lock_guard<boost::mutex> lock{sync_};
-    if (height > current_min_height_)
-      current_min_height_ = height;
+    current_min_height_ = std::max(height, current_min_height_);
   }
 
   queue::status queue::get_accounts()

@@ -988,16 +988,7 @@ namespace lws
             user.updated(db::block_id(fetched->start_height));
           
           // Update queue with current minimum scan height (oldest account determines thread progress)
-          if (!users.empty())
-          {
-            const db::block_id min_height = std::min_element(
-              users.begin(), users.end(),
-              [](const account& a, const account& b) {
-                return a.scan_height() < b.scan_height();
-              }
-            )->scan_height();
-            queue.update_min_height(min_height);
-          }
+          queue.update_min_height(users.front().scan_height());
         }
       }
 
