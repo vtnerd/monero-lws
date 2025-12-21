@@ -538,7 +538,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
-        static constexpr const lws::scanner_options opts{1, false};
+        static constexpr const lws::scanner_options opts{0, 0, lws::MINIMUM_BLOCK_DEPTH, 1, false, false, false, false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
@@ -864,7 +864,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       bmessage.output_indices.resize(1);
       messages.push_back(daemon_response(bmessage));
       {
-        static constexpr const lws::scanner_options opts{10, false};
+        static constexpr const lws::scanner_options opts{0, 0, lws::MINIMUM_BLOCK_DEPTH, 10, false, false, false, false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
