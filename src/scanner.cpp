@@ -734,17 +734,19 @@ namespace lws
 
         if (pool) {
           auto client = std::make_shared<rpc::client>(MONERO_UNWRAP(ctx.connect()));
+          MONERO_UNWRAP(client->watch_scan_signals());
           threads.emplace_back(attrs, [pool, client, &self] ()
           {
+            MINFO("Pool updater thread started");
             while (self.is_running())
             {
               try
               {
-                  auto result = pool_update_loop(pool, *client);
-                  if (!result
-                    && result.error() != make_error_code(lws::error::signal_abort_process)
-                    && result.error() != make_error_code(lws::error::signal_abort_scan))
-                    MERROR("Pool update loop failed " << result.error());
+                auto result = pool_update_loop(pool, *client);
+                if (!result
+                  && result.error() != make_error_code(lws::error::signal_abort_process)
+                  && result.error() != make_error_code(lws::error::signal_abort_scan))
+                  MERROR("Pool update loop failed " << result.error());
               }
               catch (std::exception const& e)
               {
@@ -755,6 +757,7 @@ namespace lws
                 MERROR("Pool update threw unknown exception");
               }
             }
+            MINFO("Pool updater thread stopped");
           });
         }
 
