@@ -716,6 +716,9 @@ namespace lws
           }
         }
 
+        if (!data.global->mempool)
+          return resp;
+
         // Add mempool transactions. Order is not important, since
         // mempool txs cannot depend on each other.
         lws::account full_user{user->first, receives, {}};

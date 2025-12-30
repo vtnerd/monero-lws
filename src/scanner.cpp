@@ -732,7 +732,7 @@ namespace lws
           threads.emplace_back(attrs, std::bind(&do_scan_loop, std::ref(self), std::move(data), i));
         }
 
-        if (pool && !ctx.pub_address().empty()) {
+        if (pool) {
           auto client = std::make_shared<rpc::client>(MONERO_UNWRAP(ctx.connect()));
           threads.emplace_back(attrs, [pool, client, &self] ()
           {

@@ -42,7 +42,6 @@
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
-#include "mempool.h"
 #include "scanner.h"
 #include "wire/error.h"
 #include "wire/json/write.h"
@@ -332,7 +331,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
-    auto pool = std::make_shared<lws::mempool>();
+    std::shared_ptr<lws::mempool> pool{};
     auto rpc = 
       lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
 

@@ -331,11 +331,13 @@ namespace
     //! SIGINT handle registered by `scanner` constructor
     lws::scanner scanner{disk.clone(), prog.rest_config.webhook_verify};
 
+    std::shared_ptr<lws::mempool> mempool;
     MINFO("Using monerod ZMQ RPC at " << ctx.daemon_address());
     if (!sub_address.empty())
+    {
       MINFO("Using monerod ZMQ sub at " << sub_address);
-
-    auto mempool = std::make_shared<lws::mempool>();
+      mempool = std::make_shared<lws::mempool>();
+    }
 
     auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
 

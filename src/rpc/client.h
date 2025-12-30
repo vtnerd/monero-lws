@@ -236,9 +236,6 @@ namespace rpc
     //! \return The full address of the monerod ZMQ daemon.
     std::string const& daemon_address() const;
 
-    //! \return The full address of the monerod PUB port.
-    std::string const& pub_address() const;
-
     //! \return Exchange rate checking interval
     std::chrono::minutes cache_interval() const; 
 

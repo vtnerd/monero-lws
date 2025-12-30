@@ -34,7 +34,6 @@
 #include "db/string.h"
 #include "error.h"
 #include "hex.h" // monero/epee/contrib/include
-#include "mempool.h"
 #include "net/http_client.h"
 #include "rest_server.h"
 #include "scanner.test.h"
@@ -135,7 +134,7 @@ LWS_CASE("rest_server")
         std::vector<std::string>{admin_server},
         db.clone(),
         MONERO_UNWRAP(rpc.clone()),
-        std::make_shared<lws::mempool>(),
+        std::shared_ptr<lws::mempool>{},
         config
       );
     }

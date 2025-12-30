@@ -738,13 +738,6 @@ namespace rpc
     return ctx->daemon_addr;
   }
 
-  std::string const& context::pub_address() const
-  {
-    if (ctx == nullptr)
-      MONERO_THROW(common_error::kInvalidArgument, "Invalid lws::rpc::context");
-    return ctx->sub_addr;
-  }
-
   std::chrono::minutes context::cache_interval() const
   {
     if (ctx == nullptr)
