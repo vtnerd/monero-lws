@@ -29,6 +29,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/optional/optional.hpp>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -130,6 +131,17 @@ namespace rpc
 
     //! Wait for new block announce or internal timeout.
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
+
+    using rpc_handler = std::function<expect<void>(std::string&&)>;
+    using block_pub_handler = std::function<expect<void>(minimal_chain_pub&&)>;
+    using txpool_pub_handler = std::function<expect<void>(full_txpool_pub&&)>;
+
+    //! Loops until an error or shutdown happens, emitting events.
+    expect<void> event_loop(
+      rpc_handler on_rpc,
+      block_pub_handler on_block,
+      txpool_pub_handler on_txpool
+    );
 
     //! \return A JSON message for RPC request `M`.
     template<typename M>

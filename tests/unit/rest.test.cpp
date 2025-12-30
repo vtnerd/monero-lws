@@ -134,6 +134,7 @@ LWS_CASE("rest_server")
         std::vector<std::string>{admin_server},
         db.clone(),
         MONERO_UNWRAP(rpc.clone()),
+        std::shared_ptr<lws::mempool>{},
         config
       );
     }

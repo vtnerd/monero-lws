@@ -292,19 +292,22 @@ namespace lws
       }
 
       const bool is_coinbase = (extra.first & db::coinbase_output);
+      const auto height = self.value().info.link.height;
+      const bool mempool = height == db::block_id::txpool;
+      const iso_timestamp timestamp{self.value().info.timestamp};
 
       wire::object(dest,
         wire::field("id", std::uint64_t(self.index())),
         wire::field("hash", std::cref(self.value().info.link.tx_hash)),
-        wire::field("timestamp", iso_timestamp(self.value().info.timestamp)),
+        wire::optional_field("timestamp", mempool ? nullptr : &timestamp),
         wire::field("total_received", safe_uint64(self.value().info.spend_meta.amount)),
         wire::field("total_sent", safe_uint64(self.value().spent)),
         wire::field("fee", safe_uint64(self.value().info.fee)),
         wire::field("unlock_time", self.value().info.unlock_time),
-        wire::field("height", self.value().info.link.height),
+        wire::optional_field("height", mempool ? nullptr : &height),
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
-        wire::field("mempool", false),
+        wire::field("mempool", mempool),
         wire::field("mixin", self.value().info.spend_meta.mixin_count),
         wire::field("recipient", self.value().info.recipient),
         wire::field("spent_outputs", std::cref(self.value().spends))

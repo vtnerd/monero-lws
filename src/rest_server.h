@@ -41,6 +41,7 @@
 
 namespace lws
 {
+  class mempool;
   struct rest_server_data;
   class rest_server
   {
@@ -69,7 +70,13 @@ namespace lws
       bool auto_accept_import;
     };
 
-    explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);
+    explicit rest_server(
+      epee::span<const std::string> addresses,
+      std::vector<std::string> admin,
+      db::storage disk,
+      rpc::client client,
+      std::shared_ptr<lws::mempool> mempool,
+      configuration config);
 
     rest_server(rest_server&&) = delete;
     rest_server(rest_server const&) = delete;

@@ -331,6 +331,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
+    std::shared_ptr<lws::mempool> pool{};
     auto rpc = 
       lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
 
@@ -542,7 +543,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
-        scanner.run(std::move(rpc), 1, {}, {}, opts);
+        scanner.run(std::move(rpc), pool, 1, {}, {}, opts);
       }
 
       hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
@@ -868,7 +869,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
-        scanner.run(std::move(rpc), 1, {}, {}, opts);
+        scanner.run(std::move(rpc), pool, 1, {}, {}, opts);
       }
 
       hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));

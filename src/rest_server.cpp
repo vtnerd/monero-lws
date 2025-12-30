@@ -64,12 +64,14 @@
 #include "common/expect.h"         // monero/src
 #include "config.h"
 #include "crypto/crypto.h"         // monero/src
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/srcqq
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
 #include "lmdb/util.h"             // monero/src
+#include "mempool.h"
 #include "net/http/client.h"
 #include "net/http/slice_body.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
@@ -83,7 +85,9 @@
 #include "rpc/light_wallet.h"
 #include "rpc/rates.h"
 #include "rpc/webhook.h"
+#include "string_tools.h"          // monero/contrib/epee/include
 #include "util/gamma_picker.h"
+#include "util/ownership_test.h"
 #include "util/random_outputs.h"
 #include "util/source_location.h"
 #include "wire/adapted/crypto.h"
@@ -105,15 +109,17 @@ namespace lws
     boost::asio::io_context io;
     const db::storage disk;
     const rpc::client client;
+    std::shared_ptr<lws::mempool> mempool;
     const runtime_options options;
     std::vector<net::zmq::async_client> clients;
     net::http::client webhook_client;
     boost::mutex sync;
 
-    rest_server_data(db::storage disk, rpc::client client, runtime_options options)
+    rest_server_data(db::storage disk, rpc::client client, std::shared_ptr<lws::mempool> mempool, runtime_options options)
       : io(),
         disk(std::move(disk)),
         client(std::move(client)),
+        mempool(mempool),
         options(std::move(options)),
         webhook_client(options.webhook_verify),
         clients(),
@@ -614,7 +620,12 @@ namespace lws
         resp.lookahead_fail = to_uint(user->first.lookahead_fail);
         resp.lookahead = user->first.lookahead;
 
-        // merge input and output info into a single set of txes.
+        // track receives so we can match spends in the tx pool.
+        std::vector<std::pair<db::output_id, db::address_index>> receives{};
+        receives.reserve(outputs->count());
+
+        // merge input and output info into a single set of txes,
+        // linking spends back to outputs.
 
         auto output = outputs->make_iterator();
         auto spend = spends->make_iterator();
@@ -646,6 +657,10 @@ namespace lws
 
           if (spend.is_end() || (!output.is_end() && next_output <= next_spend))
           {
+            auto id = output.get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+            auto subaddr = output.get_value<MONERO_FIELD(db::output, recipient)>();
+            receives.emplace_back(std::move(id), std::move(subaddr));
+
             std::uint64_t amount = 0;
             if (resp.transactions.empty() || resp.transactions.back().info.link.tx_hash != next_output.tx_hash)
             {
@@ -701,6 +716,59 @@ namespace lws
             if (!spend.is_end())
               next_spend = spend.get_value<MONERO_FIELD(db::spend, link)>();
           }
+        }
+
+        if (!data.global->mempool)
+          return resp;
+
+        // Add mempool transactions. Order is not important, since
+        // mempool txs cannot depend on each other.
+        lws::account full_user{user->first, receives, {}};
+        auto pool_txs = data.global->mempool->scan_account(full_user);
+        for (auto &row: pool_txs)
+        {
+          lws::rpc::get_address_txs_response::transaction tx{};
+
+          // Ingore spends that use unknown outputs
+          // (perhaps the scanner thread is behind, and hasn't seen them yet).
+          bool from_future = false;
+          for (auto &spend: row.spends)
+          {
+            const auto meta = find_metadata(metas, spend.source);
+            if (meta == metas.end() || meta->id != spend.source)
+            {
+              from_future = true;
+              break;
+            }
+            tx.spends.push_back({*meta, spend});
+          }
+          if (from_future) continue;
+
+          uint64_t tx_total = 0;
+          for (auto &output: row.outputs)
+          {
+            auto amount = output.spend_meta.amount;
+            resp.total_received = rpc::safe_uint64(std::uint64_t(resp.total_received) + amount);
+            tx_total += amount;
+          }
+          if (!row.outputs.empty())
+          {
+            tx.info = row.outputs.front();
+            tx.info.spend_meta.amount = tx_total;
+          }
+          else
+          {
+            if (row.spends.empty()) break; // theoretically impossible
+            auto spend = row.spends.front();
+            tx.info.link.tx_hash = row.hash;
+            tx.info.link.height = db::block_id::txpool;
+            tx.info.spend_meta.amount = tx_total;
+            tx.info.spend_meta.mixin_count = spend.mixin_count;
+            tx.info.timestamp = spend.timestamp;
+            tx.info.unlock_time = spend.unlock_time;
+          }
+
+          resp.transactions.push_back(std::move(tx));
         }
 
         return resp;
@@ -1579,6 +1647,24 @@ namespace lws
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
+        cryptonote::blobdata tx_blob;
+        if (!epee::string_tools::parse_hexstr_to_binbuff(req.tx, tx_blob))
+          return {lws::error::bad_client_tx};
+
+        cryptonote::transaction tx;
+        if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, tx))
+          return {lws::error::bad_client_tx};
+
+        // also add the transaction to the mempool on successful broadcast
+        auto wrapped_resume =
+          [pool = data.global->mempool, tx = std::move(tx), resume = std::move(resume)]
+          (expect<copyable_slice> result) mutable
+          {
+            if (pool && result)
+              pool->add_txs(epee::span<cryptonote::transaction>(&tx, 1));
+            resume(std::move(result));
+          };
+
         struct frame
         {
           rest_server_data* parent;
@@ -1620,7 +1706,7 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
-          active->resumers.emplace_back(std::move(msg), std::move(resume));
+          active->resumers.emplace_back(std::move(msg), std::move(wrapped_resume));
           return success();
         }
 
@@ -1751,7 +1837,7 @@ namespace lws
         active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.status = active;
 
-        active->resumers.emplace_back(std::move(msg), std::move(resume));
+        active->resumers.emplace_back(std::move(msg), std::move(wrapped_resume));
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /submit_raw_tx");
@@ -2381,8 +2467,14 @@ namespace lws
     }
   }
 
-  rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation, config.auto_accept_import})),
+  rest_server::rest_server(
+    epee::span<const std::string> addresses,
+    std::vector<std::string> admin,
+    db::storage disk,
+    rpc::client client,
+    std::shared_ptr<lws::mempool> mempool,
+    configuration config)
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), mempool, runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation, config.auto_accept_import})),
       ports_(),
       workers_()
   {
