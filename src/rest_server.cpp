@@ -64,6 +64,7 @@
 #include "common/expect.h"         // monero/src
 #include "config.h"
 #include "crypto/crypto.h"         // monero/src
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/srcqq
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
 #include "db/storage.h"
@@ -84,6 +85,7 @@
 #include "rpc/light_wallet.h"
 #include "rpc/rates.h"
 #include "rpc/webhook.h"
+#include "string_tools.h"          // monero/contrib/epee/include
 #include "util/gamma_picker.h"
 #include "util/ownership_test.h"
 #include "util/random_outputs.h"
@@ -1645,6 +1647,24 @@ namespace lws
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
+        cryptonote::blobdata tx_blob;
+        if (!epee::string_tools::parse_hexstr_to_binbuff(req.tx, tx_blob))
+          return {lws::error::bad_client_tx};
+
+        cryptonote::transaction tx;
+        if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, tx))
+          return {lws::error::bad_client_tx};
+
+        // also add the transaction to the mempool on successful broadcast
+        auto wrapped_resume =
+          [pool = data.global->mempool, tx = std::move(tx), resume = std::move(resume)]
+          (expect<copyable_slice> result) mutable
+          {
+            if (pool && result)
+              pool->add_txs(epee::span<cryptonote::transaction>(&tx, 1));
+            resume(std::move(result));
+          };
+
         struct frame
         {
           rest_server_data* parent;
@@ -1686,7 +1706,7 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
-          active->resumers.emplace_back(std::move(msg), std::move(resume));
+          active->resumers.emplace_back(std::move(msg), std::move(wrapped_resume));
           return success();
         }
 
@@ -1817,7 +1837,7 @@ namespace lws
         active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.status = active;
 
-        active->resumers.emplace_back(std::move(msg), std::move(resume));
+        active->resumers.emplace_back(std::move(msg), std::move(wrapped_resume));
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /submit_raw_tx");
