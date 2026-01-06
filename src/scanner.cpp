@@ -335,6 +335,27 @@ namespace lws
         MWARNING("Failed to update lookahead for " << user.address() << ": " << upserted.error());
     }
 
+    std::optional<db::address_index> is_match(const crypto::public_key& derived_pub, const account& user, subaddress_reader& reader, const db::block_id height)
+    {
+      if (user.spend_public() == derived_pub)
+        return db::address_index::primary(); // no need to update lookahead
+
+      if (!reader.reader)
+        return std::nullopt;
+
+      const expect<db::address_index> match =
+        reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
+      if (!match)
+      {
+        if (match != lmdb::error(MDB_NOTFOUND))
+          MERROR("Failure when doing subaddress search: " << match.error().message());
+        return std::nullopt;
+      }
+
+      update_lookahead(user, reader, *match, height);
+      return *match;
+    }
+
     void scan_transaction_base(
       epee::span<lws::account> users,
       const db::block_id height,
@@ -344,12 +365,21 @@ namespace lws
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader,
       std::function<void(lws::account&, const db::spend&)> spend_action,
-      std::function<bool(expect<db::storage_reader>&, lws::account&, const db::output&)> output_action)
+      std::function<bool(expect<db::storage_reader>&, lws::account&, const db::output&)> output_action,
+      const bool is_unified)
     {
       if (2 < tx.version)
         throw std::runtime_error{"Unsupported tx version"};
 
-      const bool is_carrot = ::carrot::is_carrot_transaction_v1(tx);
+      struct carrot_secrets
+      {
+        crypto::secret_key gout;
+        crypto::secret_key tout;
+        crypto::secret_key blinding;
+      };
+      std::optional<carrot_secrets> is_carrot;
+      if (::carrot::is_carrot_transaction_v1(tx))
+        is_carrot.emplace();
 
       cryptonote::tx_extra_pub_key key;
       boost::optional<crypto::hash> prefix_hash;
@@ -517,10 +547,9 @@ namespace lws
           if (!found_tag)
             continue; // to next output
 
-          bool found_pub = false;
           std::uint64_t amount = out.amount;
           ::carrot::CarrotEnoteType enote_type = ::carrot::CarrotEnoteType::PAYMENT;
-          db::address_index account_index = db::address_index::primary();
+          std::optional<db::address_index> account_index;
           mx25519_pubkey active_derived{};
           crypto::public_key active_pub{};
           rct::key mask = rct::identity();
@@ -545,7 +574,7 @@ namespace lws
             crypto::public_key derived_pub{};
             cryptonote::txout_to_carrot_v1 const* const carrot_info =
               boost::get<cryptonote::txout_to_carrot_v1>(std::addressof(out.target));
-            if (carrot_info)
+            if (is_carrot && carrot_info)
             {
               payment_id = {};
               mixin = db::carrot_external;
@@ -553,8 +582,7 @@ namespace lws
 
               if (coinbase)
               {
-                crypto::secret_key unused1, unused2;
-                if (!::carrot::try_scan_carrot_coinbase_enote_receiver(
+                if (::carrot::try_scan_carrot_coinbase_enote_receiver(
                   ::carrot::CarrotCoinbaseEnoteV1{
                     out_pub_key,
                     out.amount,
@@ -565,18 +593,15 @@ namespace lws
                   },
                   active_derived,
                   {std::addressof(user.spend_public()), 1},
-                  unused1,
-                  unused2,
+                  is_carrot->gout,
+                  is_carrot->tout,
                   derived_pub
                 ))
-                  continue; // to next available active derived 
+                { account_index = is_match(derived_pub, user, reader, height); }
               }
               else if (index < tx.rct_signatures.outPk.size())
               {
                 crypto::hash8 temp{};
-                crypto::secret_key gout;
-                crypto::secret_key tout;
-                crypto::secret_key blinding{};
                 ::carrot::payment_id_t decrypted_id{};
                 ::carrot::janus_anchor_t janus;
                 std::optional<::carrot::encrypted_payment_id_t> cpayment_id;
@@ -606,14 +631,14 @@ namespace lws
                   active_derived,
                   {std::addressof(user.spend_public()), 1},
                   incoming_device,
-                  gout,
-                  tout,
+                  is_carrot->gout,
+                  is_carrot->tout,
                   derived_pub,
                   amount,
-                  blinding,
+                  is_carrot->blinding,
                   decrypted_id,
                   enote_type
-                  ))
+                  ) && (account_index = is_match(derived_pub, user, reader, height)))
                 {
                   payment_id.first = sizeof(crypto::hash8);
                   payment_id.second.short_ = ::carrot::raw_byte_convert<crypto::hash8>(decrypted_id);
@@ -621,21 +646,21 @@ namespace lws
                 else if (account_type == account::key_type::balance && ::carrot::try_scan_carrot_enote_internal_receiver(
                   enote,
                   balance_device,
-                  gout,
-                  tout,
+                  is_carrot->gout,
+                  is_carrot->tout,
                   derived_pub,
                   amount,
-                  blinding,
+                  is_carrot->blinding,
                   enote_type,
                   janus
-                  ))
+                  ) && (account_index = is_match(derived_pub, user, reader, height)))
                 {
                   mixin = db::carrot_internal;
                 }
                 else
                   continue; // to next available active_derived
 
-                mask = ::carrot::raw_byte_convert<rct::key>(tools::unwrap(blinding));
+                mask = ::carrot::raw_byte_convert<rct::key>(tools::unwrap(is_carrot->blinding));
               }
               else
               {
@@ -643,36 +668,15 @@ namespace lws
                 continue; // to next active_derived
               }
             }
-            else if (/* !is_carrot && */ !crypto::wallet::derive_subaddress_public_key(out_pub_key, ::carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, derived_pub))
-              continue; // to next available active_derived
-
-            if (user.spend_public() != derived_pub)
+            else // !is_carrot
             {
-              if (!reader.reader)
-                continue; // to next available active_derived
-
-              const expect<db::address_index> match =
-                reader.reader->find_subaddress(user.id(), derived_pub, reader.cur);
-              if (!match)
-              {
-                if (match != lmdb::error(MDB_NOTFOUND))
-                  MERROR("Failure when doing subaddress search: " << match.error().message());
-                continue; // to next available active_derived
-              }
-
-              update_lookahead(user, reader, *match, height);
-              found_pub = true;
-              account_index = *match;
-              break; // additional_derivations loop
-            }
-            else
-            {
-              found_pub = true;
-              break; // additional_derivations loop
+              if (crypto::wallet::derive_subaddress_public_key(out_pub_key, ::carrot::raw_byte_convert<crypto::key_derivation>(active_derived), index, derived_pub))
+                account_index = is_match(derived_pub, user, reader, height);
             }
           }
 
-          if (!found_pub)
+          // check for `!is_carrot` or `is_carrot && coinbase`
+          if (!account_index)
             continue; // to next output
 
           if (enote_type == ::carrot::CarrotEnoteType::CHANGE && account_type != account::key_type::balance)
@@ -696,7 +700,7 @@ namespace lws
                     {0, 0, 0}, // reserved
                     0,
                     crypto::hash{},
-                    db::address_index{account_index.maj_i, db::minor_index::primary}, // best guess
+                    db::address_index{account_index->maj_i, db::minor_index::primary}, // best guess
                   }
                 );
               }
@@ -735,13 +739,15 @@ namespace lws
               lws::decrypt_payment_id(payment_id.second.short_, ::carrot::raw_byte_convert<crypto::key_derivation>(active_derived));
             }
           }
+
+          const std::uint64_t id = out_ids.at(index);
           const bool added = output_action(
             reader.reader,
             user,
             db::output{
               db::transaction_link{height, tx_hash},
               db::output::spend_meta_{
-                db::output_id{tx.version < 2 ? out.amount : 0, out_ids.at(index)},
+                is_unified ? db::output_id::unified(id) : db::output_id{tx.version < 2 ? out.amount : 0, id},
                 amount,
                 mixin,
                 boost::numeric_cast<std::uint32_t>(index),
@@ -756,7 +762,7 @@ namespace lws
               db::pack(ext, payment_id.first),
               payment_id.second,
               cryptonote::get_tx_fee(tx),
-              account_index,
+              *account_index,
               first_key_image,
               anchor
             }
@@ -775,9 +781,10 @@ namespace lws
       crypto::hash const& tx_hash,
       cryptonote::transaction const& tx,
       std::vector<std::uint64_t> const& out_ids,
-      subaddress_reader& reader)
+      subaddress_reader& reader,
+      const bool is_unified)
     {
-      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{});
+      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{}, is_unified);
     }
 
     void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, scanner_sync& self, rpc::client& client, const scanner_options& opts)
@@ -800,7 +807,7 @@ namespace lws
       subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.max_subaddresses};
       send_webhook sender{disk, client, self};
       for (const auto& tx : parsed->txes)
-        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
+        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender, true);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
@@ -1022,15 +1029,17 @@ namespace lws
           if (!send(client, block_request.clone()))
             return false;
 
-          if (fetched->blocks.size() != fetched->output_indices.size())
+          if (fetched->blocks.size() != fetched->output_indices.size() && fetched->blocks.size() != fetched->unified_indices.size())
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};
 
           blockchain.push_back(cryptonote::get_block_hash(fetched->blocks.front().block));
           if (opts.untrusted_daemon)
             new_pow.push_back(db::pow_sync{fetched->blocks.front().block.timestamp});
 
+          const bool is_unified = !fetched->unified_indices.empty();
           auto blocks = epee::to_mut_span(fetched->blocks);
-          auto indices = epee::to_span(fetched->output_indices);
+          auto indices = is_unified ?
+            epee::to_span(fetched->unified_indices) : epee::to_span(fetched->output_indices);
 
           if (fetched->start_height != 1)
           {
@@ -1076,7 +1085,8 @@ namespace lws
               miner_tx_hash,
               block.miner_tx,
               *(indices.begin()),
-              reader
+              reader,
+              is_unified
             );
 
             if (opts.untrusted_daemon)
@@ -1128,7 +1138,8 @@ namespace lws
                 boost::get<0>(tx_data),
                 boost::get<1>(tx_data),
                 boost::get<2>(tx_data),
-                reader
+                reader,
+                is_unified
               );
             }
 

@@ -99,6 +99,14 @@ namespace db
     static constexpr output_id unknown_spend() noexcept
     { return {0, std::numeric_limits<std::uint64_t>::max() - 1}; }
 
+    // New output ids, post fcmp++/carrot are called `global`
+
+    static constexpr output_id unified(const std::uint64_t id) noexcept
+    { return {std::numeric_limits<std::uint64_t>::max(), id}; }
+
+    constexpr bool is_unified() const noexcept
+    { return high == std::numeric_limits<std::uint64_t>::max(); }
+
     std::uint64_t high; //!< Amount on public chain; rct outputs are `0`
     std::uint64_t low;  //!< Offset within `amount` on the public chain
   };

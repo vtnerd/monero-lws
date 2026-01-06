@@ -41,6 +41,7 @@
 #include "lws_version.h"
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
+#include "rpc/message_data_structs.h" // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "version.h"           // monero/src
@@ -53,6 +54,7 @@
 #include "wire/vector.h"
 #include "wire/wrapper/array.h"
 #include "wire/wrapper/defaulted.h"
+#include "wire/wrapper/variant.h"
 #include "wire/wrappers_impl.h"
 
 namespace
@@ -83,6 +85,29 @@ namespace wire
     : std::true_type
   {};
 }
+
+namespace fcmp_pp { namespace curve_trees
+{
+  static void write_bytes(wire::json_writer& dest, const OutputPair& self)
+  {
+    wire::object(dest, WIRE_FIELD(output_pubkey), WIRE_FIELD(commitment));
+  }
+
+  static void write_bytes(wire::json_writer& dest, const OutputContext& self)
+  {
+    wire::object(dest, WIRE_FIELD(output_id), WIRE_FIELD(torsion_checked), WIRE_FIELD(output_pair));
+  }
+ 
+  static void write_bytes(wire::json_writer& dest, const ChunkBytes& self)
+  {
+    wire::object(dest, WIRE_FIELD(chunk_bytes));
+  }
+
+  static void write_bytes(wire::json_writer& dest, const PathBytes& self)
+  {
+    wire::object(dest, WIRE_FIELD(leaves), WIRE_FIELD(layer_chunks));
+  } 
+}} // fcmp_pp // curve_trees
 
 namespace
 {
@@ -160,6 +185,7 @@ namespace
       wire::field("spend_key_images", std::cref(self.data.second)),
       wire::optional_field("rct", optional_rct),
       wire::field("recipient", std::cref(self.data.first.recipient)),
+      wire::field("unified", self.data.first.spend_meta.id.is_unified()),
       wire::optional_field("first_key_image", first),
       wire::optional_field("janus_anchor", anchor)
     );
@@ -350,6 +376,73 @@ namespace lws
   void rpc::write_bytes(wire::json_writer& dest, const get_subaddrs_response& self)
   {
     wire::object(dest, WIRE_FIELD(all_subaddrs));
+  }
+
+  namespace rpc
+  {
+    namespace
+    {
+      template<typename F, typename T>
+      void map_legacy(F& format, T& self)
+      {
+        wire::object(format, WIRE_FIELD(amount), WIRE_FIELD(index));
+      }
+    }
+
+    static void read_bytes(wire::json_reader& source, legacy_id& self)
+    {
+      map_legacy(source, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const legacy_id& self)
+    {
+      map_legacy(dest, self);
+    }
+
+    namespace
+    {
+      template<typename F, typename T>
+      void map_unified(F& format, T& self)
+      {
+        auto id = wire::variant(std::ref(self));
+        wire::object(format,
+          WIRE_OPTION("legacy", rpc::legacy_id, id),
+          WIRE_OPTION("unified", std::uint64_t, id)
+        ); 
+      }
+    }
+
+    static void read_bytes(wire::json_reader& source, unified_id& self)
+    {
+      map_unified(source, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const unified_id& self)
+    {
+      map_unified(dest, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const path_response& self)
+    {
+      wire::object(dest, WIRE_FIELD(output_id), WIRE_FIELD(leaf_idx), WIRE_FIELD(path));
+    }
+  } // rpc
+
+  void rpc::read_bytes(wire::json_reader& source, get_tree_paths_request& self)
+  {
+    using max_outputs = wire::max_element_count<21845>;
+    wire::object(source, WIRE_FIELD_ARRAY(output_ids, max_outputs));
+  }
+
+  void rpc::write_bytes(wire::json_writer& dest, const get_tree_paths_response& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(top_block_height),
+      WIRE_FIELD(n_leaf_tuples),
+      WIRE_FIELD(paths),
+      WIRE_FIELD(last_path),
+      WIRE_FIELD(top_block_hash)
+    );
   }
 
   void rpc::read_bytes(wire::json_reader& source, get_unspent_outs_request& self)

@@ -365,6 +365,7 @@ void lws::rpc::read_bytes(wire::json_reader& source, get_blocks_fast_response& s
   wire::object(source,
     WIRE_FIELD(blocks),
     wire::field("output_indices", wire::array<max_blocks_per_fetch>(wire::array<max_txes_per_block>(wire::array<max_outputs_per_tx>(std::ref(self.output_indices))))),
+    wire::field("unified_indices", wire::array<max_blocks_per_fetch>(wire::array<max_txes_per_block>(wire::array<max_outputs_per_tx>(std::ref(self.unified_indices))))),
     WIRE_FIELD(start_height),
     WIRE_FIELD(current_height)
   );
