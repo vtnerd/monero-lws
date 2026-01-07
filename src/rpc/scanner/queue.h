@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <algorithm>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/lock_guard.hpp>
 #include <boost/thread/mutex.hpp>
@@ -54,6 +55,7 @@ namespace lws { namespace rpc { namespace scanner
     std::optional<std::vector<lws::account>> replace_;
     std::vector<lws::account> push_;
     std::size_t user_count_;
+    db::block_id current_min_height_;  //!< Minimum scan height of accounts on this thread
     boost::mutex sync_;
     boost::condition_variable poll_;
     bool stop_;
@@ -69,6 +71,12 @@ namespace lws { namespace rpc { namespace scanner
 
     //! \return Total number of users given to this local thread
     std::size_t user_count();
+
+    //! \return Current minimum scan height of accounts on this thread
+    db::block_id current_min_height();
+
+    //! Update the current minimum scan height for this thread
+    void update_min_height(db::block_id height);
 
     //! \return Replacement and "push" accounts
     status get_accounts();
@@ -86,6 +94,12 @@ namespace lws { namespace rpc { namespace scanner
       {
         const boost::lock_guard<boost::mutex> lock{sync_};
         user_count_ += (end - begin);
+        // Update min height if any new account has a lower scan height
+        for (auto it = begin; it != end; ++it)
+        {
+          if (current_min_height_ == db::block_id(0) || it->scan_height() < current_min_height_)
+            current_min_height_ = it->scan_height();
+        }
         push_.insert(push_.end(), std::make_move_iterator(begin), std::make_move_iterator(end));
       }
       poll_.notify_all();
