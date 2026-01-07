@@ -2184,7 +2184,7 @@ namespace lws
   };
 
   template<typename Sock>
-  struct rest_server::handler_loop final : public boost::asio::coroutine
+  struct rest_server::handler_loop : public boost::asio::coroutine
   {
     std::shared_ptr<connection<Sock>> self_;
 
@@ -2330,7 +2330,7 @@ namespace lws
   };
 
   template<typename Sock>
-  struct rest_server::accept_loop final : public boost::asio::coroutine
+  struct rest_server::accept_loop : public boost::asio::coroutine
   {
     rest_server_data* global_;
     internal* parent_;
