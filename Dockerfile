@@ -78,11 +78,11 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
 
 # Build boost for latest security updates
 WORKDIR /tmp
-RUN set -ex && wget https://archives.boost.io/release/1.89.0/source/boost_1_89_0.tar.bz2 && \
-    echo "85a33fa22621b4f314f8e85e1a5e2a9363d22e4f4992925d4bb3bc631b5a0c7a boost_1_89_0.tar.bz2" | sha256sum -c && \
-    tar -xf boost_1_89_0.tar.bz2 && \
-    rm boost_1_89_0.tar.bz2 && \
-    cd boost_1_89_0 && \
+RUN set -ex && wget https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.bz2 && \
+    echo "49551aff3b22cbc5c5a9ed3dbc92f0e23ea50a0f7325b0d198b705e8ee3fc305 boost_1_90_0.tar.bz2" | sha256sum -c && \
+    tar -xf boost_1_90_0.tar.bz2 && \
+    rm boost_1_90_0.tar.bz2 && \
+    cd boost_1_90_0 && \
     ./bootstrap.sh && \
     ./b2 -j${NPROC:-$(nproc)} runtime-link=static link=static threading=multi variant=release \
       --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
