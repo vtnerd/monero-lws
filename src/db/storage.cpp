@@ -126,7 +126,7 @@ namespace db
       } payment_id;
     };
     static_assert(
-      sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32,
+      sizeof(output) == 8 + 32 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32,
       "padding in output"
     );
 
@@ -144,7 +144,7 @@ namespace db
       std::uint8_t length;      //!< Length of `payment_id` field (0..32).
       crypto::hash payment_id;  //!< Unencrypted only, can't decrypt spend
     };
-    static_assert(sizeof(spend) == 8 + 32 * 2 + 8 * 4 + 4 + 3 + 1 + 32, "padding in spend");
+    static_assert(sizeof(spend) == 8 + 32 * 3 + 8 * 4 + 4 + 3 + 1 + 32, "padding in spend");
  
     struct request_info
     {
@@ -191,7 +191,7 @@ namespace db
       std::uint64_t fee;       //!< Total fee for transaction
     };
     static_assert(
-      sizeof(output) == 8 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8,
+      sizeof(output) == 8 + 32 + 32 + (8 * 3) + (4 * 2) + 32 + (8 * 2) + (32 * 3) + 7 + 1 + 32 + 8,
       "padding in output"
     );
   }
@@ -1829,7 +1829,7 @@ namespace db
         hash = blocks.get_value<MONERO_FIELD(block_info, hash)>(value);
         if (!hash)
           return hash.error();
-
+        
         if (*hash != chain.front())
         {
           if (!regtest && current <= get_checkpoints().get_max_height())

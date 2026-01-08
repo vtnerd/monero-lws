@@ -296,6 +296,7 @@ namespace lws
       wire::object(dest,
         wire::field("id", std::uint64_t(self.index())),
         wire::field("hash", std::cref(self.value().info.link.tx_hash)),
+        wire::field("block_hash", std::cref(self.value().info.link.block_hash)),
         wire::field("timestamp", iso_timestamp(self.value().info.timestamp)),
         wire::field("total_received", safe_uint64(self.value().info.spend_meta.amount)),
         wire::field("total_sent", safe_uint64(self.value().spent)),
@@ -311,9 +312,23 @@ namespace lws
       );
     }
   } // rpc
+
+  void rpc::read_bytes(wire::json_reader& source, get_address_txs_request& self)
+  {
+    std::string address;
+    wire::object(source,
+      wire::field("address", std::ref(address)),
+      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      WIRE_OPTIONAL_FIELD(since_tx_id),
+      WIRE_OPTIONAL_FIELD(since_tx_block_hash)
+    );
+    convert_address(address, self.creds.address);
+  }
+
   void rpc::write_bytes(wire::json_writer& dest, const get_address_txs_response& self)
   {
     wire::object(dest,
+      WIRE_FIELD_COPY(since_tx_id),
       wire::field("total_received", safe_uint64(self.total_received)),
       WIRE_FIELD_COPY(scanned_height),
       WIRE_FIELD_COPY(scanned_block_height),
