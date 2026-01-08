@@ -25,21 +25,16 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <boost/optional/optional.hpp>
 #include <cstdint>
+#include <optional>
 #include <utility>
 
-#include "common/pod-class.h"
-#include "ringct/rctTypes.h"
-
-namespace crypto
-{
-  POD_CLASS hash8;
-  POD_CLASS key_derivation;
-}
+#include "common/pod-class.h" // monero/src
+#include "crypto/crypto.h"    // monero/src
+#include "ringct/rctTypes.h"  // moneor/src 
 
 namespace lws
 {
   void decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& key);
-  boost::optional<std::pair<std::uint64_t, rct::key>> decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2);
+  std::optional<std::pair<std::uint64_t, rct::key>> decode_amount(const rct::key& commitment, const rct::ecdhTuple& info, const crypto::key_derivation& sk, std::size_t index, const bool bulletproof2);
 }

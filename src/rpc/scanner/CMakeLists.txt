@@ -34,4 +34,4 @@ set(monero-lws-rpc-scanner_headers
 )
 
 add_library(monero-lws-rpc-scanner ${monero-lws-rpc-scanner_sources} ${monero-lws-rpc-scanner_headers})
-target_link_libraries(monero-lws-rpc-scanner monero::libraries monero-lws-wire-msgpack)
+target_link_libraries(monero-lws-rpc-scanner monero-lws-common monero-lws-db  monero-lws-rpc monero::libraries monero-lws-wire-msgpack)

@@ -64,7 +64,7 @@ LWS_CASE("lws::account serialization")
   };
   const std::vector<crypto::public_key> pubs{crypto::rand<crypto::public_key>()};
 
-  lws::account account{db_account, spendable, pubs};
+  lws::account account{db_account, spendable, {}, pubs};
   EXPECT(account);
 
   const lws::db::transaction_link link{

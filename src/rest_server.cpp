@@ -63,6 +63,7 @@
 #include "common/error.h"          // monero/src
 #include "common/expect.h"         // monero/src
 #include "config.h"
+#include "carrot_core/account_secrets.h" // monero/src
 #include "crypto/crypto.h"         // monero/src
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
@@ -238,14 +239,27 @@ namespace lws
       return true;
     }
 
-    bool key_check(const rpc::account_credentials& creds)
+    bool key_check(const crypto::public_key& view_public, const crypto::secret_key& key)
     {
       crypto::public_key verify{};
-      if (!crypto::secret_key_to_public_key(creds.key, verify))
+      if (!crypto::secret_key_to_public_key(key, verify))
         return false;
-      if (verify != creds.address.view_public)
-        return false;
-      return true;
+      return verify == view_public;
+    }
+
+    bool key_check(const rpc::account_credentials& creds)
+    {
+      return key_check(creds.address.view_public, creds.key);
+    }
+
+    bool key_check(const rpc::account_credentials& creds, const bool balance_key)
+    {
+      if (!balance_key)
+        return key_check(creds);
+
+      crypto::secret_key view_key{};
+      ::carrot::make_carrot_viewincoming_key(creds.key, view_key);
+      return key_check(creds.address.view_public, view_key);
     }
 
     //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
@@ -560,16 +574,20 @@ namespace lws
         resp.spent_outputs.reserve(spends->count());
         for (auto const& spend : spends->make_range())
         {
-          const auto meta = find_metadata(metas, spend.source);
-          if (meta == metas.end() || meta->id != spend.source)
+          if (spend.source != db::output_id::unknown_spend())
           {
-            throw std::logic_error{
-              "Serious database error, no receive for spend"
-            };
+            const auto meta = find_metadata(metas, spend.source);
+            if (meta == metas.end() || meta->id != spend.source)
+            {
+              throw std::logic_error{
+                "Serious database error, no receive for spend"
+              };
+            }
+            resp.spent_outputs.push_back({*meta, spend});
+            resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
           }
-
-          resp.spent_outputs.push_back({*meta, spend});
-          resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
+          else // carrot output with legacy or view-incoming key
+            resp.spent_outputs.push_back({db::output::spend_meta_::unknown(), spend}); 
         }
 
         // `get_rates()` nevers does I/O, so handler can remain synchronous
@@ -673,18 +691,23 @@ namespace lws
           else if (output.is_end() || (next_spend < next_output))
           {
             const db::output_id source_id = spend.get_value<MONERO_FIELD(db::spend, source)>();
-            const auto meta = find_metadata(metas, source_id);
-            if (meta == metas.end() || meta->id != source_id)
+            auto meta = db::output::spend_meta_::unknown();
+            if (source_id != db::output_id::unknown_spend())
             {
-              throw std::logic_error{
-                "Serious database error, no receive for spend"
-              };
+              const auto spend_meta = find_metadata(metas, source_id);
+              if (spend_meta == metas.end() || spend_meta->id != source_id)
+              {
+                throw std::logic_error{
+                  "Serious database error, no receive for spend"
+                };
+              }
+              meta = *spend_meta;
             }
 
             if (resp.transactions.empty() || resp.transactions.back().info.link.tx_hash != next_spend.tx_hash)
             {
               resp.transactions.push_back({});
-              resp.transactions.back().spends.push_back({*meta, *spend});
+              resp.transactions.back().spends.push_back({meta, *spend});
               resp.transactions.back().info.link.height = resp.transactions.back().spends.back().possible_spend.link.height;
               resp.transactions.back().info.link.tx_hash = resp.transactions.back().spends.back().possible_spend.link.tx_hash;
               resp.transactions.back().info.spend_meta.mixin_count =
@@ -693,9 +716,9 @@ namespace lws
               resp.transactions.back().info.unlock_time = resp.transactions.back().spends.back().possible_spend.unlock_time;
             }
             else
-              resp.transactions.back().spends.push_back({*meta, *spend});
+              resp.transactions.back().spends.push_back({meta, *spend});
 
-            resp.transactions.back().spent += meta->amount;
+            resp.transactions.back().spent += meta.amount;
 
             ++spend;
             if (!spend.is_end())
@@ -1072,6 +1095,296 @@ namespace lws
       }
     };
 
+    struct get_tree_paths
+    {
+      using request = rpc::get_tree_paths_request;
+      using response = void; // always async
+      using async_response = rpc::get_tree_paths_response;
+
+      static expect<response> handle(request&& req, const connection_data& data, std::function<async_complete>&& resume)
+      {
+        using unified_rpc = cryptonote::rpc::GetUnifiedId;
+        using path_rpc = cryptonote::rpc::GetTreePaths;
+
+        struct frame
+        {
+          rest_server_data* parent;
+          std::string in;
+          net::zmq::async_client client;
+          boost::asio::steady_timer timer;
+          boost::asio::io_context::strand strand;
+          std::unordered_map<std::uint64_t, rpc::legacy_id> legacy_map;
+          std::deque<std::pair<std::vector<rpc::unified_id>, std::function<async_complete>>> resumers;
+
+          frame(rest_server_data& parent, net::zmq::async_client client)
+            : parent(std::addressof(parent)),
+              in(),
+              client(std::move(client)),
+              timer(parent.io),
+              strand(parent.io),
+              legacy_map(),
+              resumers()
+          {}
+        };
+
+        struct cached_result
+        {
+          std::weak_ptr<frame> status;
+          boost::mutex sync;
+
+          cached_result() noexcept
+            : status(), sync()
+          {}
+        };
+
+
+        static cached_result cache;
+        boost::unique_lock<boost::mutex> lock{cache.sync};
+
+        auto active = cache.status.lock();
+        if (active)
+        {
+          active->resumers.emplace_back(std::move(req.output_ids), std::move(resume));
+          return success();
+        }
+
+        struct async_handler : public boost::asio::coroutine
+        {
+          std::shared_ptr<frame> self_;
+
+          explicit async_handler(std::shared_ptr<frame> self)
+            : boost::asio::coroutine(), self_(std::move(self))
+          {}
+
+          void send_response(const boost::system::error_code error, expect<copyable_slice> value)
+          {
+            assert(self_ != nullptr);
+            assert(self_->strand.running_in_this_thread());
+
+            std::deque<std::pair<std::vector<rpc::unified_id>, std::function<async_complete>>> resumers;
+            {
+              const boost::lock_guard<boost::mutex> lock{cache.sync};
+              if (error)
+              {
+                // Prevent further resumers, ZMQ REQ/REP in bad state
+                MERROR("Failure in /get_tree_paths: " << error.message());
+                value = {lws::error::daemon_timeout};
+                cache.status.reset();
+                resumers.swap(self_->resumers);
+              }
+              else
+              {
+                MDEBUG("Completed ZMQ request in /get_tree_paths");
+                resumers.push_back(std::move(self_->resumers.front()));
+                self_->resumers.pop_front();
+              }
+            }
+
+            self_->legacy_map.clear();
+            for (const auto& r : resumers)
+              r.second(value);
+          }
+
+          async_response get_response(path_rpc::Response&& response)
+          {
+            std::vector<rpc::path_response> paths;
+            paths.reserve(response.paths.size());
+
+            const boost::lock_guard<boost::mutex> lock{cache.sync};
+            const auto& map = self_->legacy_map;
+            for (const auto& path : response.paths)
+            {
+              rpc::unified_id id = path.output_id;
+              const auto mapped = map.find(path.output_id);
+              if (mapped != map.end())
+                id = mapped->second;
+              paths.push_back({std::move(path.path), id, path.leaf_idx});
+            }
+
+            return {
+                response.top_block_height,
+                response.n_leaf_tuples,
+                std::move(paths),
+                std::move(response.last_path),
+                response.top_block_hash
+            };
+          }
+
+          bool set_timeout(std::chrono::steady_clock::duration timeout, const bool expecting) const
+          {
+            struct on_timeout
+            {
+              std::shared_ptr<frame> self_;
+
+              void operator()(boost::system::error_code error) const
+              {
+                if (!self_ || error == boost::asio::error::operation_aborted)
+                  return;
+
+                assert(self_->strand.running_in_this_thread());
+                MWARNING("Timeout on /get_tree_paths ZMQ call");
+                self_->client.close = true;
+                self_->client.asock->cancel(error);
+              }
+            };
+
+            assert(self_ != nullptr);
+            if (!self_->timer.expires_after(timeout) && expecting)
+              return false;
+
+            self_->timer.async_wait(boost::asio::bind_executor(self_->strand, on_timeout{self_}));
+            return true;
+          }
+
+          void operator()(boost::system::error_code error = {}, const std::size_t bytes = 0)
+          {
+            if (!self_)
+              return;
+            if (error)
+              return send_response(error, async_ready());
+
+            frame& self = *self_;
+            assert(self.strand.running_in_this_thread());
+            epee::byte_slice next = nullptr;
+            BOOST_ASIO_CORO_REENTER(*this)
+            {
+              for (;;)
+              {
+                {
+                  const boost::lock_guard<boost::mutex> lock{cache.sync};
+                  if (self.resumers.empty())
+                  {
+                    cache.status.reset();
+                    self.parent->store_async_client(std::move(self.client));
+                    return;
+                  }
+
+                  std::vector<cryptonote::rpc::output_amount_and_index> needs_map;
+                  for (const auto& id : self.resumers.front().first)
+                  {
+                    const rpc::legacy_id* is_legacy = std::get_if<rpc::legacy_id>(std::addressof(id));
+                    if (is_legacy)
+                      needs_map.push_back({.amount = is_legacy->amount, .index = is_legacy->index});
+                  }
+
+                  if (!needs_map.empty())
+                  {
+                    unified_rpc::Request daemon_req{};
+                    daemon_req.legacy_ids = std::move(needs_map);
+                    next = rpc::client::make_message("get_unified_ids", daemon_req);
+                  }
+                  else
+                    next = nullptr;
+                }
+
+                if (!next.empty())
+                {
+                  MDEBUG("Mapping legacy ids to new global ids in /get_tree_paths");
+                  set_timeout(std::chrono::seconds{10}, false);
+                  BOOST_ASIO_CORO_YIELD net::zmq::async_write(
+                    self.client, std::move(next), boost::asio::bind_executor(self.strand, std::move(*this))
+                  );
+
+                  if (!set_timeout(std::chrono::seconds{20}, true))
+                    return send_response(boost::asio::error::operation_aborted, async_ready());
+
+                  self.in.clear(); // could be in moved-from state
+                  BOOST_ASIO_CORO_YIELD net::zmq::async_read(
+                    self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
+                  );
+  
+                  if (!self.timer.cancel())
+                    return send_response(boost::asio::error::operation_aborted, async_ready());
+
+                  {
+                    unified_rpc::Response daemon_resp{};
+                    const expect<void> status =
+                      rpc::parse_response(daemon_resp, std::move(self.in));
+
+                    self.in.clear();
+                    next = nullptr;
+                    if (status)
+                    {
+                      // lock not needed, these are only touched in-strand
+                      auto& map = self.legacy_map; // only
+                      map.clear();
+                      for (const auto& id : daemon_resp.output_ids)
+                        map[id.unified_id] = {id.legacy.amount, id.legacy.index};
+                    }
+                    else
+                      send_response({}, status.error());
+                  }
+                }
+
+                // prep request with only newer unified ids
+                {
+                  path_rpc::Request daemon_req{};
+                  for (const auto& id : self.legacy_map)
+                    daemon_req.output_ids.push_back(id.first);
+
+                  {
+                    // resumers is touched outside of strand
+                    const boost::lock_guard<boost::mutex> lock{cache.sync};
+                    for (const auto& id : self.resumers.front().first)
+                    {
+                      const std::uint64_t* is_global = std::get_if<std::uint64_t>(std::addressof(id));
+                      if (is_global)
+                        daemon_req.output_ids.push_back(*is_global);
+                    }
+                  }
+
+                  next = rpc::client::make_message("get_tree_paths", daemon_req);
+                }
+
+                MDEBUG("Getting curve tree info in /get_tree_paths"); 
+                set_timeout(std::chrono::seconds{10}, false);
+                BOOST_ASIO_CORO_YIELD net::zmq::async_write(
+                  self.client, std::move(next), boost::asio::bind_executor(self.strand, std::move(*this))
+                );
+
+                if (!set_timeout(std::chrono::seconds{20}, true))
+                  return send_response(boost::asio::error::operation_aborted, async_ready());
+
+                self.in.clear(); // could be in moved-from state
+                BOOST_ASIO_CORO_YIELD net::zmq::async_read(
+                  self.client, self.in, boost::asio::bind_executor(self.strand, std::move(*this))
+                );
+
+                if (!self.timer.cancel())
+                  return send_response(boost::asio::error::operation_aborted, async_ready());    
+
+                {
+                  path_rpc::Response daemon_resp{};
+                  const expect<void> status =
+                    rpc::parse_response(daemon_resp, std::move(self.in));
+
+                  if (!status)
+                    send_response({}, status.error());
+                  else
+                    send_response({}, json_response(get_response(std::move(daemon_resp))));
+                }
+              }
+            }
+          }
+        };
+
+        expect<net::zmq::async_client> client = data.global->get_async_client();
+        if (!client)
+          return client.error();
+
+        active = std::make_shared<frame>(*data.global, std::move(*client));
+        cache.status = active;
+
+        active->resumers.emplace_back(std::move(req.output_ids), std::move(resume));
+        lock.unlock();
+
+        MDEBUG("Starting new ZMQ request in /get_tree_paths");
+        boost::asio::dispatch(active->strand, async_handler{active});
+        return success();
+      }
+    };
+
+
     struct get_unspent_outs
     {
       using request = rpc::get_unspent_outs_request;
@@ -1444,7 +1757,7 @@ namespace lws
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!key_check(req.creds))
+        if (!key_check(req.creds, req.balance_key))
           return {lws::error::bad_view_key};
 
         auto disk = data.global->disk.clone();
@@ -1472,7 +1785,10 @@ namespace lws
         if (!check_lookahead(data, req.lookahead))
           return {lws::error::max_subaddresses};
 
-        const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
+        db::account_flags flags = req.generated_locally ? db::account_generated_locally : db::default_account;
+        if (req.balance_key)
+          flags = db::account_flags(flags | db::view_balance_key);
+
         const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags, req.lookahead);
         if (!hooks)
           return hooks.error();
@@ -1547,7 +1863,7 @@ namespace lws
               db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
-          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global->options.max_subaddresses);
+          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.generate_address, ranges, data.global->options.max_subaddresses);
           if (!upserted)
             return upserted.error();
           new_ranges = std::move(*upserted);
@@ -1784,7 +2100,7 @@ namespace lws
         std::vector<db::subaddress_dict> all_ranges;
         auto disk = data.global->disk.clone();
         auto new_ranges =
-          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global->options.max_subaddresses);
+          disk.upsert_subaddresses(id, req.generate_address, req.subaddrs, data.global->options.max_subaddresses);
         if (!new_ranges)
           return new_ranges.error();
 
@@ -1913,13 +2229,14 @@ namespace lws
       {"/get_address_txs",       call<get_address_txs>,    2 * 1024, false},
       {"/get_random_outs",       call<get_random_outs>,    2 * 1024,  true},
       {"/get_subaddrs",          call<get_subaddrs>,       2 * 1024, false},
+      {"/get_tree_paths",        call<get_tree_paths>,    10 * 1024, true},
       {"/get_txt_records",       nullptr,                         0, false},
       {"/get_unspent_outs",      call<get_unspent_outs>,   2 * 1024,  true},
       {"/get_version",           call<get_version>,            1024, false},
       {"/import_wallet_request", call<import_request>,     2 * 1024, false},
       {"/login",                 call<login>,              2 * 1024, false},
       {"/provision_subaddrs",    call<provision_subaddrs>, 2 * 1024, false},
-      {"/submit_raw_tx",         call<submit_raw_tx>,     50 * 1024,  true},
+      {"/submit_raw_tx",         call<submit_raw_tx>,    512 * 1024,  true},
       {"/upsert_subaddrs",       call<upsert_subaddrs>,   10 * 1024, false}
     };
     constexpr const unsigned max_standard_endpoint_size =

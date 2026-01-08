@@ -28,14 +28,19 @@
 
 #include <cstring>
 #include <memory>
+#include <optional>
 
+#include "carrot_core/destination.h"         // monero/src
+#include "carrot_core/device_ram_borrowed.h" // monero/src
 #include "cryptonote_config.h" // monero/src
+#include "db/carrot.h"
 #include "db/string.h"
 #include "int-util.h"          // monero/contribe/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "ringct/rctTypes.h"   // monero/src
 #include "wire.h"
 #include "wire/adapted/array.h"
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/json/write.h"
 #include "wire/msgpack.h"
@@ -163,6 +168,19 @@ namespace db
     return rct::rct2pk(rct::addKeys(rct::pk2rct(base.spend_public), rct::pk2rct(M)));
   }
 
+  crypto::public_key address_index::get_spend_public(carrot::account const& base, crypto::secret_key const& address) const
+  {
+    if (is_zero())
+      return base.spend;
+
+    ::carrot::CarrotDestinationV1 out{};
+    const ::carrot::generate_address_secret_ram_borrowed_device address_device{address};
+    ::carrot::make_carrot_subaddress_v1(
+      base.spend, base.view, address_device, std::uint32_t(maj_i), std::uint32_t(min_i), out
+    );
+    return out.address_spend_pubkey; 
+  }
+
   namespace
   {
     template<typename F, typename T>
@@ -255,8 +273,10 @@ namespace db
   void read_bytes(wire::reader& source, output& self)
   {
     bool coinbase = false;
-    boost::optional<rct::key> rct;
-    boost::optional<std::vector<std::uint8_t>> payment_id;
+    std::optional<rct::key> rct;
+    std::optional<std::vector<std::uint8_t>> payment_id;
+    std::optional<crypto::key_image> first_image;
+    std::optional<::carrot::encrypted_janus_anchor_t> anchor;
 
     wire::object(source,
       wire::optional_field<0>("id", wire::defaulted(std::ref(self.spend_meta.id), output_id::txpool())),
@@ -274,7 +294,9 @@ namespace db
       wire::field<12>("coinbase", std::ref(coinbase)),
       wire::field<13>("fee", std::ref(self.fee)),
       wire::field<14>("recipient", std::ref(self.recipient)),
-      wire::field<15>("pub", std::ref(self.pub))
+      wire::field<15>("pub", std::ref(self.pub)),
+      wire::optional_field<16>("first_image", std::ref(first_image)),
+      wire::optional_field<17>("anchor", std::ref(anchor))
     );
 
     std::uint8_t pay_length = 0;
@@ -299,6 +321,14 @@ namespace db
     if (rct)
       flags = extra(lws::db::ringct_output | flags);
     self.extra = db::pack(flags, pay_length);
+
+    if (self.spend_meta.is_carrot())
+    {
+      if (!first_image || !anchor)
+        WIRE_DLOG_THROW(wire::error::schema::binary, "expected first_image and anchor");
+      self.first_image = *first_image;
+      self.anchor = *anchor;
+    }
   }
 
   void write_bytes(wire::writer& dest, const output& self)
@@ -320,6 +350,14 @@ namespace db
     const auto payment_id = payment_bytes.empty() ?
       nullptr : std::addressof(payment_bytes);
 
+    crypto::key_image const* first = nullptr;
+    ::carrot::encrypted_janus_anchor_t const* anchor = nullptr;
+    if (self.spend_meta.is_carrot())
+    {
+      first = std::addressof(self.first_image);
+      anchor = std::addressof(self.anchor);
+    }
+
     // defaulted will omit "id" and "block" when the output is in the
     // txpool with no valid values.
     wire::object(dest,
@@ -338,7 +376,9 @@ namespace db
       wire::field<12>("coinbase", coinbase),
       wire::field<13>("fee", self.fee),
       wire::field<14>("recipient", self.recipient),
-      wire::field<15>("pub", std::cref(self.pub))
+      wire::field<15>("pub", std::cref(self.pub)),
+      wire::optional_field<16>("first_image", first),
+      wire::optional_field<17>("anchor", anchor)
     );
   }
 

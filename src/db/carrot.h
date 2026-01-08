@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -24,13 +24,35 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 #pragma once
 
-namespace lws
+#include <optional>
+#include "db/fwd.h"
+#include "crypto/crypto.h" // monero/src
+
+namespace carrot
 {
-  struct carrot_account;
-  class gamma_picker;
-  struct random_output;
-  struct random_ring;
+  struct janus_anchor_t;
+  using encrypted_janus_anchor_t = janus_anchor_t;
+  class key_image_device;
+  class view_incoming_key_device;
 }
+namespace lws { namespace carrot
+{
+  //! View public differs from "address" account - see carrot docs
+  struct account 
+  {
+    crypto::public_key view;
+    crypto::public_key spend;
+    crypto::secret_key incoming;
+
+    explicit account(const db::account& source);
+    account() noexcept
+      : view{}, spend{}, incoming{}
+    {}
+  };
+
+  std::optional<crypto::key_image> get_image(const db::output& source, const ::carrot::key_image_device& imager, const ::carrot::view_incoming_key_device& incoming, const crypto::secret_key& balance_key);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key, const crypto::secret_key& image_key, const crypto::secret_key& address_key, const crypto::secret_key& incoming_key);
+  std::optional<crypto::key_image> get_image(const db::output& source, const db::account_address& primary, const crypto::secret_key& balance_key);
+}} // lws // carrot

@@ -32,4 +32,4 @@ set(monero-lws-net_sources zmq_async.cpp)
 set(monero-lws-net_headers zmq_async.h)
 
 add_library(monero-lws-net ${monero-lws-net_sources} ${monero-lws-net_headers})
-target_link_libraries(monero-lws-net monero-lws-net-http monero::libraries)
+target_link_libraries(monero-lws-net monero-lws-common monero-lws-net-http monero::libraries)

@@ -443,6 +443,13 @@ namespace wire_read
     expand_tracker_map(head.set_mapping(index, map), map, tail...);
   }
 
+  template<typename R>
+  inline void object(R& source)
+  {
+    source.start_object();
+    source.end_object();
+  }
+
   template<typename R, typename... T>
   inline void object(R& source, tracker<T>... fields)
   {

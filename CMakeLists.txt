@@ -81,18 +81,23 @@ set(MONERO_LIBRARIES
   common
   lmdb
   device
-  cncrypto
-  randomx
   epee
   easylogging
   version
   wallet-crypto
+  fcmp_pp
+  wallet
+  carrot_impl
+  carrot_core
+  cncrypto
+  randomx
+  mx25519
 )
 
 set(MONERO_OPTIONAL wallet-crypto)
 
 if (MONERO_BUILD_DIR)
-
+  list(APPEND MONERO_LIBRARIES "fcmp_pp_rust")
   set(MONERO_SEARCH_PATHS
     "/contrib/epee/src"
     "/external/db_drivers/liblmdb"
@@ -101,6 +106,7 @@ if (MONERO_BUILD_DIR)
     "/src/crypto"
     "/src/crypto/wallet"
     "/src/cryptonote_basic"
+    "/src/fcmp_pp/fcmp_pp_rust"
     "/src/lmdb"
     "/src/ringct"
     "/src/rpc"
@@ -161,7 +167,7 @@ if (MONERO_BUILD_DIR)
   endif()
 
   foreach (LIB ${MONERO_LIBRARIES})
-    find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
+    find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "/lib" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
 
     list(FIND MONERO_OPTIONAL "${LIB}" LIB_OPTIONAL)
     if (NOT LIB_PATH)
@@ -280,6 +286,7 @@ set_property(TARGET monero::libraries PROPERTY
     "${MONERO_SOURCE_DIR}/external/easylogging++"
     "${MONERO_SOURCE_DIR}/external/rapidjson/include"
     "${MONERO_SOURCE_DIR}/external/supercop/include"
+    "${MONERO_SOURCE_DIR}/external/mx25519/include"
     "${MONERO_SOURCE_DIR}/src"
 )
 
