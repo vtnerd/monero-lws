@@ -972,7 +972,7 @@ namespace lws
       {"/import_wallet_request", call<import_request>,     2 * 1024},
       {"/login",                 call<login>,              2 * 1024},
       {"/provision_subaddrs",    call<provision_subaddrs>, 2 * 1024},
-      {"/submit_raw_tx",         call<submit_raw_tx>,     50 * 1024},
+      {"/submit_raw_tx",         call<submit_raw_tx>,    512 * 1024},
       {"/upsert_subaddrs",       call<upsert_subaddrs>,   10 * 1024}
     };
 
