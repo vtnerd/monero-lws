@@ -364,6 +364,9 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
+          if (config::daemon_wait_queue_max < active->resumers.size())
+            return {error::load};
+
           active->resumers.push_back(std::move(resume));
           return async_ready();
         }
@@ -757,6 +760,9 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
+          if (config::get_random_outs_max < active->resumers.size())
+            return {error::load};
+
           active->resumers.emplace_back(std::move(req), std::move(resume));
           return success();
         }
@@ -1193,6 +1199,9 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
+          if (config::daemon_wait_queue_max < active->resumers.size())
+            return {error::load};
+
           active->resumers.emplace_back(std::move(req), std::move(resume));
           return async_ready();
         }
@@ -1587,6 +1596,7 @@ namespace lws
           boost::asio::steady_timer timer;
           boost::asio::io_context::strand strand;
           std::deque<std::pair<epee::byte_slice, std::function<async_complete>>> resumers;
+          std::size_t outstanding;
 
           frame(rest_server_data& parent, net::zmq::async_client client)
             : parent(std::addressof(parent)),
@@ -1594,7 +1604,8 @@ namespace lws
               client(std::move(client)),
               timer(parent.io),
               strand(parent.io),
-              resumers()
+              resumers(),
+              outstanding(0)
           {}
         };
 
@@ -1620,6 +1631,10 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
+          if (std::numeric_limits<std::size_t>::max() - msg.size() < active->outstanding || config::submit_tx_max < msg.size() + active->outstanding)
+            return {error::load};
+
+          active->outstanding += msg.size(); 
           active->resumers.emplace_back(std::move(msg), std::move(resume));
           return success();
         }
@@ -1709,6 +1724,7 @@ namespace lws
                     return;
                   }
                   next = std::move(self_->resumers.front().first);
+                  self_->outstanding -= std::min(self_->outstanding, next.size());
                 }
 
                 set_timeout(std::chrono::seconds{10}, false);
@@ -1751,6 +1767,7 @@ namespace lws
         active = std::make_shared<frame>(*data.global, std::move(*client));
         cache.status = active;
 
+        active->outstanding += msg.size();
         active->resumers.emplace_back(std::move(msg), std::move(resume));
         lock.unlock();
 
