@@ -296,7 +296,7 @@ namespace db
       wire::field<14>("recipient", std::ref(self.recipient)),
       wire::field<15>("pub", std::ref(self.pub)),
       wire::optional_field<16>("first_image", std::ref(first_image)),
-      wire::optional_field<17>("anchor", std::ref(anchor))
+      wire::optional_field<17>("janus_enc", std::ref(anchor))
     );
 
     std::uint8_t pay_length = 0;
@@ -378,7 +378,7 @@ namespace db
       wire::field<14>("recipient", self.recipient),
       wire::field<15>("pub", std::cref(self.pub)),
       wire::optional_field<16>("first_image", first),
-      wire::optional_field<17>("anchor", anchor)
+      wire::optional_field<17>("janus_enc", anchor)
     );
   }
 

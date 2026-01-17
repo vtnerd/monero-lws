@@ -187,7 +187,7 @@ namespace
       wire::field("recipient", std::cref(self.data.first.recipient)),
       wire::field("unified", self.data.first.spend_meta.id.is_unified()),
       wire::optional_field("first_key_image", first),
-      wire::optional_field("janus_anchor", anchor)
+      wire::optional_field("janus_enc", anchor)
     );
   }
 

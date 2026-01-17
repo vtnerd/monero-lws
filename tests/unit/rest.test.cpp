@@ -594,7 +594,8 @@ LWS_CASE("rest_server")
           "\"timestamp\":\"1970-01-01T01:56:40Z\","
           "\"height\":4000,"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
-          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66},"
+          "\"unified\":false}"
         "],\"fees\":[40,41]}"
       );
     }
@@ -751,7 +752,8 @@ LWS_CASE("rest_server")
           "\"height\":4000,"
           "\"spend_key_images\":[\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\"],"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
-          "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
+          "\"recipient\":{\"maj_i\":2,\"min_i\":66},"
+          "\"unified\":false}"
         "],\"fees\":[40,41]}"
       );
     }
@@ -912,8 +914,9 @@ LWS_CASE("rest_server")
           "\"height\":5000,"
           "\"rct\":\"" + epee::to_hex::string(epee::as_byte_span(ringct_expanded)) + "\","
           "\"recipient\":{\"maj_i\":0,\"min_i\":0},"
+          "\"unified\":false,"
           "\"first_key_image\":\"" + epee::to_hex::string(epee::as_byte_span(first_ki)) + "\","
-          "\"janus_anchor\":\"" + epee::to_hex::string(epee::as_byte_span(anchor)) + "\"}"
+          "\"janus_enc\":\"" + epee::to_hex::string(epee::as_byte_span(anchor)) + "\"}"
         "],\"fees\":[40,41]}"
       );
     }
