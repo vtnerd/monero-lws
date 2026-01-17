@@ -1919,7 +1919,7 @@ namespace lws
       {"/import_wallet_request", call<import_request>,     2 * 1024, false},
       {"/login",                 call<login>,              2 * 1024, false},
       {"/provision_subaddrs",    call<provision_subaddrs>, 2 * 1024, false},
-      {"/submit_raw_tx",         call<submit_raw_tx>,     50 * 1024,  true},
+      {"/submit_raw_tx",         call<submit_raw_tx>,    512 * 1024,  true},
       {"/upsert_subaddrs",       call<upsert_subaddrs>,   10 * 1024, false}
     };
     constexpr const unsigned max_standard_endpoint_size =
