@@ -87,6 +87,11 @@ namespace
     const command_line::arg_descriptor<bool> regtest;
     const command_line::arg_descriptor<bool> version;
     const command_line::arg_descriptor<bool> auto_accept_import;
+    const command_line::arg_descriptor<bool> block_depth_threading;
+    const command_line::arg_descriptor<std::uint64_t> min_block_depth;
+    const command_line::arg_descriptor<double> split_sync_threads;
+    const command_line::arg_descriptor<std::uint64_t> split_sync_depth;
+    const command_line::arg_descriptor<bool> balance_new_addresses;
 
     static std::string get_default_zmq()
     {
@@ -137,6 +142,11 @@ namespace
       , regtest{"regtest", "Run in a regression testing mode", false}
       , version{"version", "Display version and quit", false}
       , auto_accept_import{"auto-accept-import", "Account import requests are automatically accepted", false}
+      , block_depth_threading{"block-depth-threading", "Balance thread workload by block depth instead of account count", false}
+      , min_block_depth{"min-block-depth", "Minimum block depth for block depth threading (defaults to 16)", lws::MINIMUM_BLOCK_DEPTH}
+      , split_sync_threads{"split-sync-threads", "Percentage of threads to use for fully synced accounts (0-1, requires --block-depth-threading, 0 to disable)", 0.0}
+      , split_sync_depth{"split-sync-depth", "Maximum block depth for an address to be considered synced (defaults to 10)", 10}
+      , balance_new_addresses{"balance-new-addresses", "Assign new addresses to thread with highest blockheight (or fewest addresses if tied)", false}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -175,6 +185,11 @@ namespace
       command_line::add_arg(description, regtest);
       command_line::add_arg(description, version);
       command_line::add_arg(description, auto_accept_import);
+      command_line::add_arg(description, block_depth_threading);
+      command_line::add_arg(description, min_block_depth);
+      command_line::add_arg(description, split_sync_threads);
+      command_line::add_arg(description, split_sync_depth);
+      command_line::add_arg(description, balance_new_addresses);
     }
   };
 
@@ -193,9 +208,14 @@ namespace
     std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
     std::size_t scan_threads;
+    std::uint64_t split_sync_depth;
+    std::uint64_t min_block_depth;
     unsigned create_queue_max;
+    double split_sync_threads;
     bool untrusted_daemon;
     bool regtest;
+    bool block_depth_threading;
+    bool balance_new_addresses;
   };
 
   void print_version(std::ostream& out)
@@ -296,13 +316,24 @@ namespace
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
       command_line::get_arg(args, opts.scan_threads),
+      command_line::get_arg(args, opts.split_sync_depth),
+      command_line::get_arg(args, opts.min_block_depth),
       command_line::get_arg(args, opts.create_queue_max),
+      command_line::get_arg(args, opts.split_sync_threads),
       command_line::get_arg(args, opts.untrusted_daemon),
-      command_line::get_arg(args, opts.regtest)
+      command_line::get_arg(args, opts.regtest),
+      command_line::get_arg(args, opts.block_depth_threading),
+      command_line::get_arg(args, opts.balance_new_addresses)
     };
 
     if (prog.regtest && lws::config::network != cryptonote::MAINNET)
       MONERO_THROW(lws::error::configuration, "Regtest cannot be used with testnet or stagenet");
+
+    if (prog.split_sync_threads < 0.0 || prog.split_sync_threads > 1.0)
+      MONERO_THROW(lws::error::configuration, "--split-sync-threads must be between 0 and 1");
+    
+    if (prog.split_sync_threads > 0.0 && !prog.block_depth_threading)
+      MONERO_THROW(lws::error::configuration, "--split-sync-threads requires --block-depth-threading=true");
 
     if (!prog.lws_server_addr.empty() && (prog.rest_config.max_subaddresses || prog.untrusted_daemon))
       MONERO_THROW(lws::error::configuration, "Remote scanning cannot be used with subaddresses or untrusted daemon");
@@ -350,7 +381,7 @@ namespace
       prog.scan_threads,
       std::move(prog.lws_server_addr),
       std::move(prog.lws_server_pass),
-      lws::scanner_options{prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest}
+      lws::scanner_options{prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest, prog.block_depth_threading, prog.balance_new_addresses}
     );
   }
 } // anonymous
