@@ -91,6 +91,8 @@ namespace lws
         return "Invalid subaddress range provided";
       case error::json_rpc:
         return "Error returned by JSON-RPC server";
+      case error::load:
+        return "Server load limits have been reached";
       case error::exchange_rates_old:
         return "Exchange rates are older than cache interval";
       case error::max_subaddresses:
@@ -125,6 +127,7 @@ namespace lws
       case error::bad_view_key:
         return std::errc::bad_address;
       case error::daemon_timeout:
+      case error::load:
         return std::errc::timed_out;
       case error::exceeded_blockchain_buffer:
         return std::errc::no_buffer_space;
