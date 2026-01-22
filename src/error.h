@@ -60,6 +60,7 @@ namespace lws
     http_server,                //!< HTTP server failure (init or run)
     invalid_range,              //!< Invalid subaddress range provided
     json_rpc,                   //!< Error returned by JSON-RPC server
+    load,                       //!< Server load limits reached
     max_subaddresses,           //!< Max subaddresses exceeded
     not_enough_mixin,           //!< Not enough outputs to meet mixin count
     not_enough_amount,          //!< Not enough outputs to meet amount
