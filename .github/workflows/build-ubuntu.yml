@@ -1,4 +1,4 @@
-name: unix-ci
+name: ci
 
 on:
   push:
@@ -8,13 +8,15 @@ on:
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
-  BUILD_TYPE: Release
-  APT_INSTALL_LINUX: 'sudo apt -y install build-essential cmake libboost-all-dev miniupnpc libunbound-dev libunwind8-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libnorm-dev libusb-1.0-0-dev libpgm-dev libprotobuf-dev protobuf-compiler'
+  APT_INSTALL_LINUX: 'apt -y install build-essential cmake git libboost-all-dev miniupnpc libunbound-dev libunwind8-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libnorm-dev libusb-1.0-0-dev libpgm-dev libprotobuf-dev protobuf-compiler'
   APT_SET_CONF: |
         echo "Acquire::Retries \"3\";"         | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
   BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf unbound'
+  CONFIGURE_BASIC: '-B "$GITHUB_WORKSPACE/lws/build" -DMONERO_SOURCE_DIR="$GITHUB_WORKSPACE/monero" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -S "$GITHUB_WORKSPACE/lws"'
+  BUILD: 'cmake --build "$GITHUB_WORKSPACE/lws/build" -j$(nproc)'
+  RUN: 'ctest --test-dir "$GITHUB_WORKSPACE/lws/build" --output-on-failure'
 
 jobs:
   build-beginner:
@@ -24,31 +26,65 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: set apt conf (Debian base Linux)
+      - name: Install Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: ${{env.APT_SET_CONF}}
-      - name: update apt (Debian based Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt update
-      - name: Install dependencies (Debian based Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: ${{env.APT_INSTALL_LINUX}}
+        run: |
+          ${{env.APT_SET_CONF}}
+          sudo apt update
+          sudo ${{env.APT_INSTALL_LINUX}}
       - name: Install dependencies (MacOS)
         if: matrix.os == 'macos-latest'
         run: ${{env.BREW_INSTALL_MAC}}
+      - name: Checkout Monero Source
+        uses: actions/checkout@v4
+        with:
+          repository: monero-project/monero
+          path: ${{github.workspace}}/monero/
+          submodules: recursive 
       - name: Checkout LWS Source
         uses: actions/checkout@v4
         with:
           path: ${{github.workspace}}/lws
           submodules: recursive
       - name: Configure LWS
-        # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-        # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-        run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} ${{github.workspace}}/lws
+        run: cmake ${{env.CONFIGURE_BASIC}}
       - name: Build LWS
-        # Build your program with the given configuration
-        run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
-  build-tests:
+        run: ${{env.BUILD}}
+  build-distro:
+    runs-on: ubuntu-latest
+    container: ${{matrix.distro}}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [archlinux:base-devel, debian:bookworm-slim, debian:trixie-slim]
+    steps:
+      - name: Install Dependencies (Debian/apt)
+        if: matrix.distro == 'debian:bookworm-slim' || matrix.distro == 'debian:trixie-slim'
+        run: |
+          apt update
+          ${{env.APT_INSTALL_LINUX}}
+      - name: Install Dependencies (Arch/pacman)
+        if: matrix.distro == 'archlinux:base-devel'
+        run: |
+          sudo pacman -Syu
+          sudo pacman --noconfirm -S cmake boost boost-libs git hidapi libsodium miniupnpc openssl unbound zeromq 
+      - name: Checkout Monero Source
+        uses: actions/checkout@v4
+        with:
+          repository: monero-project/monero
+          path: ${{github.workspace}}/monero/
+          submodules: recursive 
+      - name: Checkout LWS Source
+        uses: actions/checkout@v4
+        with:
+          path: ${{github.workspace}}/lws
+      - name: Configure LWS
+        run: cmake ${{env.CONFIGURE_BASIC}}
+      - name: Build LWS
+        run: ${{env.BUILD}}    
+      - name: Run Tests
+        run: ${{env.RUN}}
+  build-advanced:
     runs-on: ${{matrix.os}}
     strategy:
       fail-fast: false
@@ -56,16 +92,13 @@ jobs:
         os: [ubuntu-24.04, ubuntu-22.04, macos-15, macos-14]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
-    - name: set apt conf (Debian based Linux)
+    - name: Install Dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' ||  matrix.os == 'ubuntu-22.04'
-      run: ${{env.APT_SET_CONF}}
-    - name: update apt (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
-      run: sudo apt update
-    - name: Install dependencies (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
-      run: ${{env.APT_INSTALL_LINUX}}
-    - name: Install RabbitMQ iff WITH_RMQ (Debian based Linux)
+      run: |
+        ${{env.APT_SET_CONF}}
+        sudo apt update
+        sudo ${{env.APT_INSTALL_LINUX}}
+    - name: Install RabbitMQ iff WITH_RMQ (Ubuntu)
       if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04')
       run: sudo apt -y install librabbitmq-dev
 
@@ -95,16 +128,13 @@ jobs:
         path: ${{github.workspace}}/lws
 
     - name: Configure LWS
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/lws/build -D${{matrix.rmq}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{github.workspace}}/lws -DBUILD_TESTS=ON
-
+      run: cmake -D${{matrix.rmq}} -DMONERO_BUILD_DIR=${{github.workspace}}/monero/build ${{env.CONFIGURE_BASIC}}
     - name: Build LWS
       # Build your program with the given configuration
-      run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
-      
+      run: ${{env.BUILD}}
     - name: Run Tests
-      run: cd ${{github.workspace}}/lws/build && ctest
+      run: ${{env.RUN}}
+
   build-sanitizer-tests:
     runs-on: ${{matrix.os}}
     strategy:
@@ -114,16 +144,13 @@ jobs:
         rmq: [WITH_RMQ=ON]
         sanitizer: [SANITIZER=address]
     steps:
-    - name: set apt conf (Debian based Linux)
+    - name: Install Dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
-      run: ${{env.APT_SET_CONF}}
-    - name: update apt (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: sudo apt update
-    - name: Install dependencies (Debian based Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: ${{env.APT_INSTALL_LINUX}}
-    - name: Install RabbitMQ iff WITH_RMQ (Debian based Linux)
+      run: |
+        ${{env.APT_SET_CONF}}
+        sudo apt update
+        sudo ${{env.APT_INSTALL_LINUX}}
+    - name: Install RabbitMQ iff WITH_RMQ (Ubuntu)
       if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest')
       run: sudo apt -y install librabbitmq-dev
 
@@ -147,14 +174,8 @@ jobs:
         path: ${{github.workspace}}/lws
 
     - name: Configure LWS
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/lws/build -D${{matrix.rmq}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DMONERO_SOURCE_DIR=${{github.workspace}}/monero ${{github.workspace}}/lws -D${{matrix.sanitizer}} -DBUILD_TESTS=ON
-
+      run: cmake -D${{matrix.rmq}} -D${{matrix.sanitizer}} ${{env.CONFIGURE_BASIC}}
     - name: Build LWS
-      # Build your program with the given configuration
-      run: (cd ${{github.workspace}}/lws/build && make -j$(nproc))
-
+      run: ${{env.BUILD}}
     - name: Run Tests
-      run: cd ${{github.workspace}}/lws/build && ctest --output-on-failure
-
+      run: ${{env.RUN}}
