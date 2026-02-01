@@ -1,7 +1,7 @@
 # monero-lws
 
 > This project is **NOT** a part of the official monero "core" code, but will
-> hopefully be merged into that project as a new repository seperate from the
+> hopefully be merged into that project as a new repository separate from the
 > [`monero-project/monero`](https://github.com/monero-project/monero)
 > repository.
 
