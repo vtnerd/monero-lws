@@ -95,8 +95,8 @@ Add account for view-key scanning. An example of the JSON:
 ```
 
 ### list_accounts
-Request a listing of all active accounts in the datbase. The request
-should looke like:
+Request a listing of all active accounts in the database. The request
+should look like:
 ```bash
 curl -v -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8081/list_accounts
 ```
@@ -189,7 +189,7 @@ This is used to track events happening in the database: (1) a new payment to
 an optional payment_id, or (2) a new account creation. This endpoint always
 requires a URL for callback purposes.
 
-When the event type is `tx-confirmation`, this endpint requires a web address
+When the event type is `tx-confirmation`, this endpoint requires a web address
 for callback purposes, a primary (not integrated!) address, and finally the
 type ("tx-confirmation"). The event will remain in the database until one of
 the delete commands ([webhook_delete_uuid](#webhook_delete_uuid) or
