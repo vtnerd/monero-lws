@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: [almalinux:9, almalinux:10, archlinux:base-devel, debian:bookworm-slim, debian:trixie-slim]
+        distro: [almalinux:9, almalinux:10, archlinux:base-devel, debian:bookworm-slim, debian:trixie-slim, opensuse/leap:16.0]
     steps:
       - name: Install Dependencies (Debian/apt)
         if: matrix.distro == 'debian:bookworm-slim' || matrix.distro == 'debian:trixie-slim'
@@ -77,6 +77,13 @@ jobs:
           dnf makecache
           dnf config-manager --set-enabled crb
           dnf -y install boost-devel cmake gcc g++ git hidapi-devel libsodium-devel make miniupnpc-devel openssl-devel unbound-devel zeromq-devel zlib-devel
+      - name: Install Dependencies (Suse/zypper)
+        if: matrix.distro == 'opensuse/leap:16.0'
+        run: |
+          zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:libraries:c_c++/16.0/devel:libraries:c_c++.repo
+          zypper --gpg-auto-import-keys refresh
+          zypper --non-interactive update
+          zypper --non-interactive install boost-base czmq libsodium miniupnpc unbound
       - name: Checkout Monero Source
         uses: actions/checkout@v4
         with:
