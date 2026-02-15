@@ -58,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: [archlinux:base-devel, debian:bookworm-slim, debian:trixie-slim]
+        distro: [almalinux:9, almalinux:10, archlinux:base-devel, debian:bookworm-slim, debian:trixie-slim]
     steps:
       - name: Install Dependencies (Debian/apt)
         if: matrix.distro == 'debian:bookworm-slim' || matrix.distro == 'debian:trixie-slim'
@@ -69,7 +69,16 @@ jobs:
         if: matrix.distro == 'archlinux:base-devel'
         run: |
           sudo pacman --noconfirm -Syu
-          sudo pacman --noconfirm -S cmake boost boost-libs git hidapi libsodium miniupnpc openssl unbound zeromq 
+          sudo pacman --noconfirm -S cmake boost boost-libs git hidapi libsodium miniupnpc openssl unbound zeromq
+      - name: Install Dependencies (Alma/dnf)
+        if: matrix.distro == 'almalinux:9' || matrix.distro == 'almalinux:10'
+        run: |
+          dnf -y update
+          dnf -y install epel-release
+          dnf clean all
+          dnf makecache
+          dnf config-manager --set-enabled crb
+          dnf -y install boost-devel cmake gcc g++ git hidapi-devel libsodium-devel make miniupnpc-devel openssl-devel unbound-devel zeromq-devel zlib-devel
       - name: Checkout Monero Source
         uses: actions/checkout@v4
         with:
