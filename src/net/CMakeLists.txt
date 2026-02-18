@@ -28,8 +28,8 @@
 
 add_subdirectory(http)
 
-set(monero-lws-net_sources zmq_async.cpp)
-set(monero-lws-net_headers zmq_async.h)
+set(monero-lws-net_sources rate_limiter.cpp zmq_async.cpp)
+set(monero-lws-net_headers rate_limiter.h zmq_async.h)
 
 add_library(monero-lws-net ${monero-lws-net_sources} ${monero-lws-net_headers})
 target_link_libraries(monero-lws-net monero-lws-net-http monero::libraries)

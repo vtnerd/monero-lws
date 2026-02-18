@@ -82,6 +82,7 @@ namespace
     const command_line::arg_descriptor<std::string> webhook_ssl_verification;
     const command_line::arg_descriptor<std::string> config_file;
     const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
+    const command_line::arg_descriptor<unsigned> rate_limit;
     const command_line::arg_descriptor<bool> auto_accept_creation;
     const command_line::arg_descriptor<bool> untrusted_daemon;
     const command_line::arg_descriptor<bool> regtest;
@@ -137,6 +138,7 @@ namespace
       , webhook_ssl_verification{"webhook-ssl-verification", "[<none|system_ca>] specify SSL verification mode for webhooks", "system_ca"}
       , config_file{"config-file", "Specify any option in a config file; <name>=<value> on separate lines"}
       , max_subaddresses{"max-subaddresses", "Maximum number of subaddresses per primary account (defaults to 0)", 0}
+      , rate_limit{"rate-limit", "Weighted API calls per second allowed per account, with 1/4 allotment per ip. Zero disables.", lws::config::rate::max_calls_per_second}
       , auto_accept_creation{"auto-accept-creation", "New account creation requests are automatically accepted", false}
       , untrusted_daemon{"untrusted-daemon", "Perform (expensive) chain-verification and PoW checks", false}
       , regtest{"regtest", "Run in a regression testing mode", false}
@@ -180,6 +182,8 @@ namespace
       command_line::add_arg(description, webhook_ssl_verification);
       command_line::add_arg(description, config_file);
       command_line::add_arg(description, max_subaddresses);
+      if (lws::config::rate::max_calls_per_second)
+        command_line::add_arg(description, rate_limit);
       command_line::add_arg(description, auto_accept_creation);
       command_line::add_arg(description, untrusted_daemon);
       command_line::add_arg(description, regtest);
@@ -294,6 +298,7 @@ namespace
         command_line::get_arg(args, opts.access_controls),
         command_line::get_arg(args, opts.rest_threads),
 	      command_line::get_arg(args, opts.max_subaddresses),
+        lws::config::rate::max_calls_per_second ? command_line::get_arg(args, opts.rate_limit) : 0,
         webhook_verify,
         command_line::get_arg(args, opts.external_bind),
         command_line::get_arg(args, opts.disable_admin_auth),

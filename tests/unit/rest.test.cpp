@@ -59,14 +59,20 @@ namespace
     rct::key amount;
   };
 
-  std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
+  std::pair<std::string, unsigned> invoke_base(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
   {
     const enet::http::http_response_info* info = nullptr;
     if (!client.invoke(uri, "POST", body, std::chrono::milliseconds{500}, std::addressof(info), {}))
       throw std::runtime_error{"HTTP invoke failed"};
-    if (info->m_response_code != 200)
-      throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(info->m_response_code)};
-    return std::string{info->m_body}; 
+    return {info->m_body, info->m_response_code};
+  }
+
+  std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
+  {
+    auto result = invoke_base(client, uri, body);
+    if (result.second != 200)
+      throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(result.second)};
+    return result.first;
   }
 
   epee::byte_slice get_fee_response()
@@ -126,7 +132,7 @@ LWS_CASE("rest_server")
     const auto rpc = MONERO_UNWRAP(context.connect());
     {
       const lws::rest_server::configuration config{
-        {}, {}, 1, 20, {}, false, true, true
+        {}, {}, 1, 20, 0, {}, false, true, true
       };
       std::vector<std::string> addresses{rest_server};
       server.emplace(
@@ -744,6 +750,35 @@ LWS_CASE("rest_server")
         "],\"all_subaddrs\":["
           "{\"key\":0,\"value\":[[1,20]]}]}"
       );
+    }
+
+    SECTION("Rate Limiting")
+    {
+      {
+        const lws::rest_server::configuration config{
+          {}, {}, 1, 20, 1, {}, false, true, true
+        };
+        std::vector<std::string> addresses{rest_server};
+        server.emplace(
+          epee::to_span(addresses),
+          std::vector<std::string>{admin_server},
+          db.clone(),
+          MONERO_UNWRAP(rpc.clone()),
+          config
+        );
+      }
+
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      client.disconnect();
+      EXPECT(invoke_base(client, "/get_address_info", message).second == 200);
+
+      unsigned count = 0;
+      for (; count != 10; ++count)
+        if (invoke_base(client, "/get_address_info", message).second == 429)
+          break;
+      EXPECT(count != 10);
     }
   }
 }
