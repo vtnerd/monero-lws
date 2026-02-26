@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://docs.monerolws.com/api/schemas/feed_tx_sync.json",
+  "type": "object",
+  "properties": {
+    "scanned_block_height": {"$ref": "feed_base.json#/definitions/uint64"},
+    "blockchain_height": {"$ref": "feed_base.json#/definitions/uint64"},
+    "lookahead_fail": {"$ref": "feed_base.json#/definitions/uint64"},
+    "lookahead": {
+      "$ref": "feed_base.json#/definitions/address_meta",
+      "default": "{0, 0}"
+    },
+    "transactions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "feed_base.json#/definitions/transaction"}
+    }
+  },
+  "required": ["scanned_block_height", "blockchain_height"]
+}

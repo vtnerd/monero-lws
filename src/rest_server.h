@@ -60,6 +60,7 @@ namespace lws
     {
       epee::net_utils::ssl_authentication_t auth;
       std::vector<std::string> access_controls;
+      std::chrono::seconds feed_timeout;
       std::size_t threads;
       std::uint32_t max_subaddresses;
       epee::net_utils::ssl_verification_t webhook_verify;

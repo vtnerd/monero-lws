@@ -195,7 +195,7 @@ namespace
   {
     std::shared_ptr<lws::rpc::scanner::client> client_;
 
-    bool operator()(boost::asio::io_context&, lws::rpc::client&, net::http::client&, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const lws::db::pow_sync> pow)
+    bool operator()(boost::asio::io_context&, lws::rpc::client&, net::http::client&, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const lws::db::pow_sync> pow)
     {
       if (!client_)
         return false;
@@ -203,15 +203,21 @@ namespace
         return true;
       if (!pow.empty() || chain.empty())
         return false;
+      if (!std::is_sorted(users.begin(), users.end(), lws::by_height{}))
+        return false;
 
       std::vector<crypto::hash> chain_copy{};
       chain_copy.reserve(chain.size());
       std::copy(chain.begin(), chain.end(), std::back_inserter(chain_copy));
 
+      const lws::db::block_id height = lws::db::block_id(to_uint(users[0].scan_height()) + chain.size() - 1);
       std::vector<lws::account> users_copy{};
       users_copy.reserve(users.size());
-      for (const auto& user : users)
+      for (auto& user : users)
+      {
         users_copy.push_back(user.clone());
+        user.updated(height);
+      }
 
       MINFO("Processed " << chain.size() << " block(s) against " << users.size() << " account(s)");
       lws::rpc::scanner::client::send_update(client_, std::move(users_copy), std::move(chain_copy));
@@ -271,7 +277,7 @@ namespace
   void run(program prog)
   {
     MINFO("Using monerod ZMQ RPC at " << prog.monerod_rpc);
-    auto ctx = lws::rpc::context::make(std::move(prog.monerod_rpc), std::move(prog.monerod_sub), {}, {}, std::chrono::minutes{0}, false);
+    auto ctx = lws::rpc::context::make(std::move(prog.monerod_rpc), std::move(prog.monerod_sub), {}, {}, std::chrono::minutes{0}, false, false);
 
     lws::scanner_sync self{epee::net_utils::ssl_verification_t::system_ca};
 

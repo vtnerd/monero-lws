@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://docs.monerolws.com/api/schemas/feed_base.json",
+  "definitions": {
+    "address_meta": {
+      "type": "object",
+      "properties": {
+        "maj_i": {"$ref": "#/definitions/uint32"},
+        "min_i": {"$ref": "#/definitions/uint32"}
+      },
+      "required": ["maj_i", "min_i"]
+    },
+    "binary8": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "pattern": "^[0-9A-Fa-f]{16}$",
+      "example": "ee171270296bbc26"
+    },
+    "binary32": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9A-Fa-f]{64}$",
+      "example": "ee171270296bbc26d5be4455b6313e1a2086a92080e205f77d6f861f8e5fd205"
+    },
+    "composite_id": {
+      "anyOf": [
+        {"$ref": "#/definitions/legacy_id"},
+        {"$ref": "#/definitions/unified_id"}
+      ]
+    },
+    "int64": {
+      "type": "integer",
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807
+    },
+    "legacy_id": {
+      "type": "object",
+      "properties": {
+        "legacy": {
+          "type": "object",
+          "properties": {
+            "amount": {"$ref": "#/definitions/uint64"},
+            "index": {"$ref": "#/definitions/uint64"}
+          },
+          "required": ["amount", "index"]
+        }
+      },
+      "required": ["legacy"]
+    },
+    "receive" : {
+      "type": "object",
+      "properties": {
+        "amount": {"$ref": "#/definitions/uint64"},
+        "public_key": {"$ref": "#/definitions/binary32"},
+        "index": {"$ref": "#/definitions/uint32"},
+        "tx_pub_key": {"$ref": "#/definitions/binary32"},
+        "id": {"$ref": "#/definitions/composite_id"},
+        "rct": {"$ref": "#/definitions/binary32"},
+        "recipient": {
+          "$ref": "#/definitions/address_meta",
+          "default": "{0, 0}"
+        }
+      },
+      "required": [
+        "amount",
+        "public_key",
+        "index",
+        "tx_pub_key"
+      ]
+    },
+    "spend": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/definitions/composite_id"},
+        "key_image": {"$ref": "#/definitions/binary32"}
+      },
+      "required": ["key_image"]
+    },
+    "transaction": {
+      "type": "object",
+      "properties": {
+        "hash": {"$ref": "#/definitions/binary32"},
+        "prefix_hash": {"$ref": "#/definitions/binary32"},
+        "timestamp": {"$ref": "#/definitions/int64"},
+        "fee": {"$ref": "#/definitions/uint64"},
+        "unlock_time": {"$ref": "#/definitions/uint64"},
+        "mixin": {"$ref": "#/definitions/uint32"},
+        "height": {"$ref": "#/definitions/uint64"},
+        "payment_id": {
+          "anyOf": [
+            {"$ref": "#/definitions/binary8"},
+            {"$ref": "#/definitions/binary32"}
+          ]
+        },
+        "coinbase": {
+          "type": "boolean",
+          "default": false
+        },
+        "mempool": {
+          "type": "boolean",
+          "default": false
+        },
+        "spends": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref" : "#/definitions/spend"} 
+        },
+        "receives": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref" : "#/definitions/receive"} 
+        }
+      },
+      "required": [
+        "hash",
+        "prefix_hash",
+        "timestamp",
+        "fee",
+        "unlock_time"
+      ]
+    },
+    "uint16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "uint64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "unified_id": {
+      "type": "object",
+      "properties": {
+        "unified": {"$ref" : "#/definitions/uint64"}
+      },
+      "required": ["unified"]
+    }
+  }
+}

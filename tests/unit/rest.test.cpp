@@ -27,7 +27,11 @@
 
 #include "framework.test.h"
 
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/websocket/error.hpp>
+#include <memory>
 #include <optional>
+
 #include "db/data.h"
 #include "db/print.test.h"
 #include "db/storage.test.h"
@@ -35,8 +39,26 @@
 #include "error.h"
 #include "hex.h" // monero/epee/contrib/include
 #include "net/http_client.h"
+#include "rapidjson/document.h"     // monero/external/rapidjson/include
+#include "rapidjson/stringbuffer.h" // monero/external/rapidjson/incldue
+#include "rapidjson/prettywriter.h" // monero/external/rapidjson/incldue
 #include "rest_server.h"
 #include "scanner.test.h"
+#include "rpc/pull.test.h"
+
+#include "misc_log_ex.h"
+
+namespace rapidjson
+{
+  std::ostream& operator<<(std::ostream& out, const Document& src)
+  {
+    StringBuffer buffer;
+    PrettyWriter<StringBuffer> writer{buffer};
+    src.Accept(writer);
+
+    return out << buffer.GetString();
+  }
+}
 
 namespace
 {
@@ -59,14 +81,20 @@ namespace
     rct::key amount;
   };
 
-  std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
+  std::pair<std::string, unsigned> invoke_base(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
   {
     const enet::http::http_response_info* info = nullptr;
     if (!client.invoke(uri, "POST", body, std::chrono::milliseconds{500}, std::addressof(info), {}))
       throw std::runtime_error{"HTTP invoke failed"};
-    if (info->m_response_code != 200)
-      throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(info->m_response_code)};
-    return std::string{info->m_body}; 
+    return {std::string{info->m_body}, info->m_response_code}; 
+  }
+
+  std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
+  {
+    auto result = invoke_base(client, uri, body);
+    if (result.second != 200)
+      throw std::runtime_error{"HTTP invoke not 200, instead " + std::to_string(result.second)};
+    return result.first;
   }
 
   epee::byte_slice get_fee_response()
@@ -105,6 +133,29 @@ namespace
 
     return out;
   }
+
+  void verify_json(lest::env& lest_env, std::string name, std::string actual_json, std::string expected_json)
+  {
+    const lest::ctx ctx{lest_env, std::move(name)};
+
+    rapidjson::Document expected;
+    expected.Parse(expected_json.c_str());
+    EXPECT(!expected.HasParseError());
+
+    rapidjson::Document actual;
+    actual.Parse(actual_json.c_str());
+    EXPECT(!actual.HasParseError());
+
+    EXPECT(expected == actual);
+  }
+
+  std::string get_prefix(const std::string& raw)
+  {
+    char const* const sep = std::strchr(raw.c_str(), u8':');
+    if (!sep)
+      return {};
+    return {raw.data(), std::size_t(sep - raw.data() + 1)};
+  }
 }
 
 LWS_CASE("rest_server")
@@ -122,11 +173,11 @@ LWS_CASE("rest_server")
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     auto context =
-      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
+      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false, true);
     const auto rpc = MONERO_UNWRAP(context.connect());
     {
       const lws::rest_server::configuration config{
-        {}, {}, 1, 20, {}, false, true, true
+        {}, {}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
       };
       std::vector<std::string> addresses{rest_server};
       server.emplace(
@@ -144,6 +195,13 @@ LWS_CASE("rest_server")
     {
       return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account_address)).second;
     };
+
+    const auto get_full_account = [&db, &get_account] () -> lws::account
+    {
+      const lws::db::account acct = get_account();
+      return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_full_account(acct));
+    };
+
 
     enet::http::http_simple_client client{};
     client.set_server("127.0.0.1", "10000", boost::none);
@@ -744,6 +802,331 @@ LWS_CASE("rest_server")
         "],\"all_subaddrs\":["
           "{\"key\":0,\"value\":[[1,20]]}]}"
       );
+    }
+
+    SECTION("feed check")
+    {
+      auto response = invoke_base(client, "/feed", "");
+      EXPECT(response.second == 501);
+      EXPECT(response.first == "");
+    }
+
+    SECTION("feed subscription")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
+      namespace pull = lws_test::rpc::pull;
+
+      const auto local = boost::asio::ip::make_address("127.0.0.1");
+      boost::asio::io_context io;
+      boost::asio::steady_timer timeout{io};
+
+      timeout.expires_after(std::chrono::seconds{5});
+      timeout.async_wait([&io] (auto) { io.stop(); });
+
+      //
+      // invalid version
+      //
+      std::shared_ptr<pull::connection> conn = 
+        pull::make(io, boost::asio::ip::tcp::endpoint(local, 10000), {});
+
+      bool ran = false;
+      boost::system::error_code error{};
+      std::string response;
+      message = R"(login:{"account":{"address":")" + address + R"(","view_key":")" + viewkey + R"("}})";
+      const auto handler =  [&] (auto ec, auto msg) { ran = true; error = ec; response = msg; };
+
+      pull::async_handshake(conn, message, handler);
+
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+      
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::beast::websocket::error::upgrade_declined);
+
+      //
+      // empty tx sync
+      // 
+      conn = pull::make(io, boost::asio::ip::tcp::endpoint(local, 10000), "lws.feed.v0.json");
+      pull::async_handshake(conn, message, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      std::string expected =
+        R"({"scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + "}";
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(get_prefix(response) == "tx_sync:");
+      response.erase(0, std::strlen("tx_sync:"));
+      verify_json(lest_env, "tx_sync", response, expected);
+
+      const lws::db::transaction_link link{
+        lws::db::block_id::txpool, crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
+      const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
+      const crypto::public_key pub = crypto::rand<crypto::public_key>();
+      const crypto::public_key pub2 = crypto::rand<crypto::public_key>();
+      const rct::key ringct = crypto::rand<rct::key>();
+      const auto extra = lws::db::extra(lws::db::extra::ringct_output);
+      const auto payment_id_ = crypto::rand<lws::db::output::payment_id_>();
+
+      rpc.push_update(
+        get_full_account(),
+        lws::mempool_receive{
+          lws::db::output{
+            link,
+            lws::db::output::spend_meta_{
+              lws::db::output_id::txpool(),
+              std::uint64_t(40000),
+              std::uint32_t(16),
+              std::uint32_t(2),
+              tx_public
+            },
+            std::uint64_t(7000),
+            std::uint64_t(4670),
+            tx_prefix,
+            pub,
+            ringct,
+            {0, 0, 0, 0, 0, 0, 0},
+            lws::db::pack(extra, sizeof(crypto::hash)),
+            payment_id_,
+            std::uint64_t(100),
+            lws::db::address_index{lws::db::major_index(2), lws::db::minor_index(66)}
+          }
+        }
+      );
+      pull::async_next_message(conn, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      expected =
+        R"({
+          "hash":")" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + R"(",
+          "prefix_hash":")" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + R"(",
+          "fee":100,
+          "unlock_time":4670,
+          "payment_id":")" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + R"(",
+          "mixin":16,
+          "amount":40000,
+          "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub)) + R"(",
+          "index":2,
+          "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+          "rct":")" + epee::to_hex::string(epee::as_byte_span(ringct)) + R"(",
+          "recipient":{"maj_i":2,"min_i":66}
+        })";
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(get_prefix(response) == "mempool:");
+      response.erase(0, std::strlen("mempool:"));
+      verify_json(lest_env, "mempool", response, expected);
+
+      const lws::db::block_id new_height = lws::db::block_id(to_uint(last_block.id) + 1);
+      const crypto::key_image image = crypto::rand<crypto::key_image>();
+      {
+        lws::account account = get_full_account();
+        account.add_out(
+          lws::db::output{
+            {new_height, link.tx_hash},
+            lws::db::output::spend_meta_{
+              lws::db::output_id{0, 100},
+              std::uint64_t(40000),
+              std::uint32_t(16),
+              std::uint32_t(2),
+              tx_public
+            },
+            std::uint64_t(7000),
+            std::uint64_t(4670),
+            tx_prefix,
+            pub,
+            ringct,
+            {0, 0, 0, 0, 0, 0, 0},
+            lws::db::pack(extra, sizeof(crypto::hash)),
+            payment_id_,
+            std::uint64_t(100),
+            lws::db::address_index{lws::db::major_index(2), lws::db::minor_index(66)}
+          }
+        );
+        account.add_out(
+          lws::db::output{
+            {new_height, link.tx_hash},
+            lws::db::output::spend_meta_{
+              lws::db::output_id{0, 99},
+              std::uint64_t(30000),
+              std::uint32_t(16),
+              std::uint32_t(1),
+              tx_public
+            },
+            std::uint64_t(7000),
+            std::uint64_t(4670),
+            tx_prefix,
+            pub2,
+            ringct,
+            {0, 0, 0, 0, 0, 0, 0},
+            lws::db::pack(extra, sizeof(crypto::hash)),
+            payment_id_,
+            std::uint64_t(100),
+            lws::db::address_index{lws::db::major_index(0), lws::db::minor_index(0)}
+          }
+        );
+
+        account.add_spend(
+          lws::db::spend{
+            {new_height, link.tx_hash},
+            image,
+            lws::db::output_id{0, 90},
+            std::uint64_t(7000),
+            std::uint64_t(0),
+            std::uint16_t(16),
+            {0, 0, 0},
+            std::uint8_t(0),
+            {},
+            {}
+          }
+        );
+       
+        const std::array<crypto::hash, 2> chain{{
+          last_block.hash, crypto::rand<crypto::hash>()
+        }};
+        MONERO_UNWRAP(db.update(last_block.id, epee::to_span(chain), {std::addressof(account), 1}, nullptr));
+        rpc.push_updates({std::addressof(account), 1}, new_height);
+      }
+
+      pull::async_next_message(conn, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      std::string new_height_str = std::to_string(to_uint(new_height));
+      expected =
+        R"({
+          "scan_start":)" + scan_height + R"(,
+          "scan_end":)" + new_height_str + R"(,
+          "blockchain_height":)" + new_height_str + R"(,
+          "transactions":[{
+            "hash":")" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + R"(",
+            "prefix_hash":")" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + R"(",
+            "timestamp":7000,
+            "fee":100,
+            "unlock_time":4670,
+            "height":)" + new_height_str + R"(,
+            "payment_id":")" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + R"(",
+            "mixin":16,
+            "receives":[
+              {
+                "amount":40000,
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub)) + R"(",
+                "index":2,
+                "id": {"legacy": {"amount": 0, "index": 100}},
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(ringct)) + R"(",
+                "recipient":{"maj_i":2,"min_i":66}
+              },
+              {
+                "amount":30000,
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub2)) + R"(",
+                "index":1,
+                "id": {"legacy": {"amount": 0, "index": 99}},
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(ringct)) + R"("
+              }
+            ],
+            "spends":[
+              {
+                "id": {"legacy": {"amount": 0, "index": 90}},
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(image)) + R"("
+              }
+            ]
+          }]
+        })";
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(get_prefix(response) == "blocks:");
+      response.erase(0, std::strlen("blocks:"));
+      verify_json(lest_env, "blocks", response, expected);
+
+      pull::async_close(conn, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(response == "");
+
+      // invalid view key
+      message = R"(login:{"account":{"address":")" + address + R"(","view_key":")" + epee::to_hex::string(epee::as_byte_span(crypto::ec_scalar{})) + R"("}})";
+      conn = pull::make(io, boost::asio::ip::tcp::endpoint(local, 10000), "lws.feed.v0.json");
+      pull::async_handshake(conn, message, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      expected = R"({"msg":"Address/viewkey mismatch", "code":3})";
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(get_prefix(response) == "error:");
+      response.erase(0, std::strlen("error:"));
+      verify_json(lest_env, "view key error", response, expected);
+
+      pull::async_next_message(conn, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::beast::websocket::error::closed); 
     }
   }
 }

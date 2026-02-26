@@ -35,11 +35,13 @@
 #include <type_traits>
 
 #include "config.h"
+#include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
 #include "lws_version.h"
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
+#include "rpc/feed.h"
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "version.h"           // monero/src
@@ -47,6 +49,7 @@
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
+#include "wire/msgpack/read.h"
 #include "wire/traits.h"
 #include "wire/vector.h"
 #include "wire/wrapper/array.h"
@@ -196,7 +199,7 @@ namespace lws
     source.end_array();
   }
 
-  void rpc::read_bytes(wire::json_reader& source, account_credentials& self)
+  void rpc::read_bytes(wire::reader& source, account_credentials& self)
   {
     std::string address;
     wire::object(source,
@@ -237,6 +240,217 @@ namespace lws
     );
   }
 
+  rpc::feed_error::feed_error(std::error_code error)
+    : msg(error.message()),
+      code(feed::map(error))
+  {}
+
+  void rpc::write_bytes(wire::writer& dest, const feed_error& self)
+  {
+    wire::object(dest, WIRE_FIELD(msg), WIRE_FIELD(code));
+  }
+
+  void rpc::read_bytes(wire::reader& src, feed_login& self)
+  {
+    wire::object(src,
+      WIRE_FIELD(account),
+      WIRE_FIELD_DEFAULTED(tx_sync, true),
+      WIRE_FIELD_DEFAULTED(receives_only, false)
+    );
+  }
+
+  void rpc::write_bytes(wire::writer& dest, const feed_mempool& self)
+  {
+    epee::span<const std::uint8_t> const* payment_id = nullptr;
+    epee::span<const std::uint8_t> payment_id_bytes;
+
+    const auto extra = db::unpack(self.received.extra);
+    if (extra.second)
+    {
+      payment_id = std::addressof(payment_id_bytes);
+
+      if (extra.second == sizeof(self.received.payment_id.short_))
+        payment_id_bytes = epee::as_byte_span(self.received.payment_id.short_);
+      else
+        payment_id_bytes = epee::as_byte_span(self.received.payment_id.long_);
+    }
+
+    rct::key const* optional_rct = nullptr;
+    if (extra.first & lws::db::ringct_output)
+      optional_rct = std::addressof(self.received.ringct_mask);
+
+    wire::object(dest,
+      wire::field("hash", std::cref(self.received.link.tx_hash)),
+      wire::field("prefix_hash", std::cref(self.received.tx_prefix_hash)),
+      wire::field("fee", self.received.fee),
+      wire::field("unlock_time", self.received.unlock_time),
+      wire::optional_field("payment_id", payment_id),
+      wire::field("mixin", self.received.spend_meta.mixin_count),
+      wire::field("amount", self.received.spend_meta.amount),
+      wire::field("public_key", std::cref(self.received.pub)),
+      wire::field("tx_pub_key", std::cref(self.received.spend_meta.tx_public)),
+      wire::field("index", self.received.spend_meta.index),
+      wire::optional_field("recipient", wire::defaulted(std::cref(self.received.recipient), db::address_index{})),
+      wire::optional_field("rct", optional_rct)
+    );
+  }
+
+  namespace
+  {
+    template<typename T>
+    struct sync_wrapper
+    {
+      const T& data;
+    };
+
+    struct sync_transform_
+    {
+      template<typename T>
+      sync_wrapper<T> operator()(const T& value) const noexcept
+      { return {value}; }
+    };
+    constexpr const sync_transform_ sync_transform{};
+
+    struct legacy_temp { db::output_id id; };
+    struct composite_temp { db::output_id id; };
+
+    bool operator!=(const composite_temp& left, const composite_temp& right) noexcept
+    { return left.id != right.id; }
+ 
+    void write_bytes(wire::writer& dest, const legacy_temp& self)
+    {
+      wire::object(dest,
+        wire::field("amount", self.id.high),
+        wire::field("index", self.id.low)
+      );
+    }
+
+    void write_bytes(wire::writer& dest, const composite_temp& self)
+    {
+      wire::object(dest, wire::field("legacy", legacy_temp{self.id}));
+    }
+
+    void write_bytes(wire::writer& dest, sync_wrapper<db::output> self)
+    {
+      rct::key rct{};
+      rct::key const* optional_rct = nullptr;
+      const auto flags = unpack(self.data.extra).first;
+      if (flags & lws::db::ringct_output)
+      {
+        if (!(flags & lws::db::coinbase_output))
+          rct = self.data.ringct_mask;
+        else
+          rct = rct::identity();
+
+        optional_rct = std::addressof(rct);
+      }
+
+      wire::object(dest,
+        wire::field("amount", self.data.spend_meta.amount),
+        wire::field("public_key", std::cref(self.data.pub)),
+        wire::field("index", self.data.spend_meta.index),
+        wire::optional_field("id", wire::defaulted(composite_temp{self.data.spend_meta.id}, composite_temp{db::output_id::txpool()})),
+        wire::field("tx_pub_key", std::cref(self.data.spend_meta.tx_public)),
+        wire::optional_field("rct", optional_rct),
+        wire::optional_field("recipient", wire::defaulted(std::cref(self.data.recipient), db::address_index{}))
+      );
+    }
+
+    void write_bytes(wire::writer& dest, sync_wrapper<rpc::transaction_spend> self)
+    {
+      wire::object(dest,
+        wire::field("id", composite_temp{self.data.possible_spend.source}),
+        wire::field("key_image", std::cref(self.data.possible_spend.image))
+      );
+    }
+
+    void write_bytes(wire::writer& dest, sync_wrapper<rpc::get_transaction> self)
+    {
+      epee::span<const std::uint8_t> const* payment_id = nullptr;
+      epee::span<const std::uint8_t> payment_id_bytes;
+
+      const auto extra = db::unpack(self.data.info.extra);
+      if (extra.second)
+      {
+        payment_id = std::addressof(payment_id_bytes);
+
+        if (extra.second == sizeof(self.data.info.payment_id.short_))
+          payment_id_bytes = epee::as_byte_span(self.data.info.payment_id.short_);
+        else
+          payment_id_bytes = epee::as_byte_span(self.data.info.payment_id.long_);
+      }
+
+      const bool is_coinbase = (extra.first & db::coinbase_output);
+      const bool txpool = self.data.info.link.height == db::block_id::txpool;
+      wire::object(dest,
+        wire::field("hash", std::cref(self.data.info.link.tx_hash)),
+        wire::field("prefix_hash", std::cref(self.data.info.tx_prefix_hash)),
+        wire::field("timestamp", self.data.info.timestamp),
+        wire::field("fee", self.data.info.fee),
+        wire::field("unlock_time", self.data.info.unlock_time),
+        wire::optional_field("height", wire::defaulted(self.data.info.link.height, db::block_id::txpool)),
+        wire::optional_field("payment_id", payment_id),
+        wire::optional_field("coinbase", wire::defaulted(is_coinbase, false)),
+        wire::optional_field("mempool", wire::defaulted(txpool, false)),
+        wire::field("mixin", self.data.info.spend_meta.mixin_count),
+        wire::optional_field("spends", wire::array(boost::adaptors::transform(self.data.spends, sync_transform))),
+        wire::optional_field("receives", wire::array(boost::adaptors::transform(self.data.receives, sync_transform)))
+      );
+    }
+  }
+
+  void rpc::write_bytes(wire::writer& dest, const feed_tx_sync& self)
+  { 
+    wire::object(dest,
+      wire::field("scanned_block_height", self.info.scanned_block_height),
+      wire::field("start_height", self.info.start_height),
+      wire::field("blockchain_height", self.info.blockchain_height),
+      wire::optional_field("lookahead_fail", wire::defaulted(self.info.lookahead_fail, unsigned(0))),
+      wire::optional_field("lookahead", wire::defaulted(self.info.lookahead, db::address_index{})),
+      wire::optional_field("transactions", wire::array(boost::adaptors::transform(self.info.transactions, sync_transform)))
+    );
+  }
+
+  void rpc::write_bytes(wire::writer& dest, const feed_blocks& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(scan_start),
+      WIRE_FIELD(scan_end),
+      WIRE_FIELD(blockchain_height),
+      wire::optional_field("lookahead_fail", wire::defaulted(self.lookahead_fail, db::block_id(0))),
+      wire::optional_field("lookahead", wire::defaulted(std::cref(self.lookahead), db::address_index{})),
+      wire::optional_field("transactions", wire::array(boost::adaptors::transform(self.transactions, sync_transform)))
+    );
+  }
+
+  rpc::feed_warning::feed_warning(std::error_code error, const std::uint32_t counter, const db::block_id height)
+    : msg(error.message()),
+      code(feed::map(error)),
+      counter(counter),
+      height(height)
+  {}
+
+  namespace
+  {
+    template<typename F, typename T>
+    void map_feed_warning(F& format, T& self)
+    {
+      wire::object(format,
+        WIRE_FIELD_ID(0, msg),
+        WIRE_FIELD_ID(1, code),
+        WIRE_FIELD_ID(2, counter),
+        WIRE_FIELD_ID(3, height)
+      );
+    }
+  }
+
+  void rpc::read_bytes(wire::msgpack_reader& src, feed_warning& dest)
+  { map_feed_warning(src, dest); }
+
+  void rpc::write_bytes(wire::writer& dest, const feed_warning& src)
+  { map_feed_warning(dest, src); }
+
+
   void rpc::write_bytes(wire::json_writer& dest, const new_subaddrs_response& self)
   {
     wire::object(dest, WIRE_FIELD(new_subaddrs), WIRE_FIELD(all_subaddrs));
@@ -275,7 +489,7 @@ namespace lws
 
   namespace rpc
   {
-    static void write_bytes(wire::json_writer& dest, boost::range::index_value<const get_address_txs_response::transaction&> self)
+    static void write_bytes(wire::json_writer& dest, boost::range::index_value<const get_transaction&> self)
     {
       epee::span<const std::uint8_t> const* payment_id = nullptr;
       epee::span<const std::uint8_t> payment_id_bytes;
@@ -311,6 +525,204 @@ namespace lws
       );
     }
   } // rpc
+
+  std::vector<db::output::spend_meta_>::const_iterator
+  rpc::get_address_txs_response::find_metadata(std::vector<db::output::spend_meta_> const& metas, const db::output_id id)
+  {
+    struct by_output_id
+    {
+      bool operator()(db::output::spend_meta_ const& left, db::output_id right) const noexcept
+      {
+        return left.id < right;
+      }
+      bool operator()(db::output_id left, db::output::spend_meta_ const& right) const noexcept
+      {
+        return left < right.id;
+      }
+    };
+    return std::lower_bound(metas.begin(), metas.end(), id, by_output_id{});
+  }
+
+  namespace
+  {
+    template<typename T>
+    struct vec_lmdb_
+    {
+      using iterator = typename std::vector<T>::const_iterator;
+      using value_type = T;
+ 
+      iterator pos;
+      const iterator end;
+
+      bool is_end() const { return pos == end; }
+      vec_lmdb_& operator++()
+      {
+        ++pos;
+        return *this;
+      }
+
+      template<typename U, typename G = U, std::size_t uoffset = 0>
+      G get_value() const noexcept
+      {
+          static_assert(std::is_same<U, T>(), "bad MONERO_FIELD usage?");
+          static_assert(std::is_trivially_copyable<U>(), "value type must be memcpy safe");
+          static_assert(std::is_trivially_copyable<G>(), "field type must be memcpy safe");
+          static_assert(sizeof(G) + uoffset <= sizeof(U), "bad field and/or offset");
+          assert(sizeof(G) + uoffset <= end - pos);
+          assert(!is_end());
+
+          G value;
+          std::memcpy(std::addressof(value), reinterpret_cast<const std::uint8_t*>(std::addressof(*pos)) + uoffset, sizeof(value));
+          return value;
+      }
+
+      const value_type& operator*() const noexcept { return *pos; }
+    };
+
+    template<typename T>
+    vec_lmdb_<T> vec_lmdb(const std::vector<T>& src) { return {src.begin(), src.end()}; }
+
+    template<typename T, typename U>
+    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
+    {
+      // merge input and output info into a single set of txes.
+
+      std::uint64_t total = 0;
+      std::vector<rpc::get_transaction> out{};
+      std::vector<db::output::spend_meta_> metas{};
+
+      out.reserve(reserve);
+      metas.reserve(reserve);
+
+      db::transaction_link next_output{};
+      db::transaction_link next_spend{};
+
+      if (!output.is_end())
+        next_output = output.template get_value<MONERO_FIELD(db::output, link)>();
+      if (!spend.is_end())
+        next_spend = spend.template get_value<MONERO_FIELD(db::spend, link)>();
+
+      while (!output.is_end() || !spend.is_end())
+      {
+        if (!out.empty())
+        {
+          db::transaction_link const& last = out.back().info.link;
+          LWS_VERIFY((output.is_end() || last <= next_output) && (spend.is_end() || last <= next_spend));
+        }
+
+        if (spend.is_end() || (!output.is_end() && next_output <= next_spend))
+        {
+          LWS_VERIFY(!output.is_end());
+
+          std::uint64_t amount = 0;
+          if (out.empty() || out.back().info.link.tx_hash != next_output.tx_hash)
+          {
+            out.push_back({*output});
+            amount = out.back().info.spend_meta.amount;
+          }
+          else
+          {
+            amount = output.template get_value<MONERO_FIELD(db::output, spend_meta.amount)>();
+            out.back().info.spend_meta.amount += amount;
+          }
+
+          if (all_outputs)
+            out.back().receives.push_back(*output);
+
+          const db::output::spend_meta_ meta = output.template get_value<MONERO_FIELD(db::output, spend_meta)>();
+          if (metas.empty() || metas.back().id < meta.id)
+            metas.push_back(meta);
+          else
+            metas.insert(rpc::get_address_txs_response::find_metadata(metas, meta.id), meta);
+
+          total += amount;
+
+          ++output;
+          if (!output.is_end())
+            next_output = output.template get_value<MONERO_FIELD(db::output, link)>();
+        }
+        else if (output.is_end() || (next_spend < next_output))
+        {
+          using meta_type = db::output::spend_meta_;
+          LWS_VERIFY(!spend.is_end());
+
+          const db::output_id source_id = spend.template get_value<MONERO_FIELD(db::spend, source)>();
+          const auto meta = rpc::get_address_txs_response::find_metadata(metas, source_id);
+          LWS_VERIFY(skip_spend_meta || (meta != metas.end() && meta->id == source_id));
+
+          if (out.empty() || out.back().info.link.tx_hash != next_spend.tx_hash)
+          {
+            out.push_back({});
+            out.back().spends.push_back({skip_spend_meta ? meta_type{} : *meta, *spend});
+            out.back().info.link.height = out.back().spends.back().possible_spend.link.height;
+            out.back().info.link.tx_hash = out.back().spends.back().possible_spend.link.tx_hash;
+            out.back().info.spend_meta.mixin_count =
+              out.back().spends.back().possible_spend.mixin_count;
+            out.back().info.timestamp = out.back().spends.back().possible_spend.timestamp;
+            out.back().info.unlock_time = out.back().spends.back().possible_spend.unlock_time;
+          }
+          else
+            out.back().spends.push_back({skip_spend_meta ? meta_type{} : *meta, *spend});
+
+          if (!skip_spend_meta)
+            out.back().spent += meta->amount;
+
+          ++spend;
+          if (!spend.is_end())
+            next_spend = spend.template get_value<MONERO_FIELD(db::spend, link)>();
+        }
+      }
+      
+      return {std::move(out), total};
+    }
+
+    struct tx_link_sorter_
+    { 
+      template<typename T>
+      bool operator()(const T& left, const T& right) const noexcept
+      {
+        return left.link < right.link;
+      }
+    };
+    constexpr const tx_link_sorter_ by_tx_link{};
+  }
+
+  std::vector<rpc::get_transaction> rpc::get_address_txs_response::load(std::vector<db::output> outputs, std::vector<db::spend> spends)
+  {
+    std::sort(outputs.begin(), outputs.end(), by_tx_link);
+    std::sort(spends.begin(), spends.end(), by_tx_link);
+    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), outputs.size(), true, true).first;
+  }
+
+  expect<rpc::get_address_txs_response> rpc::get_address_txs_response::load(db::storage_reader& reader, const db::account& acct, const bool all_outputs)
+  {
+    auto outputs = reader.get_outputs(acct.id);
+    if (!outputs)
+      return outputs.error();
+
+    auto spends = reader.get_spends(acct.id);
+    if (!spends)
+      return spends.error();
+
+    const expect<db::block_info> last = reader.get_last_block();
+    if (!last)
+      return last.error();
+
+    get_address_txs_response resp{};
+    resp.scanned_height = std::uint64_t(acct.scan_height);
+    resp.scanned_block_height = resp.scanned_height;
+    resp.start_height = std::uint64_t(acct.start_height);
+    resp.blockchain_height = std::uint64_t(last->id);
+    resp.transaction_height = resp.blockchain_height;
+    resp.lookahead_fail = db::to_uint(acct.lookahead_fail);
+    resp.lookahead = acct.lookahead;
+
+    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), outputs->count(), all_outputs, false);
+    resp.total_received = safe_uint64(out.second);
+    resp.transactions = std::move(out.first);
+    return resp;
+  }
+
   void rpc::write_bytes(wire::json_writer& dest, const get_address_txs_response& self)
   {
     wire::object(dest,
@@ -457,7 +869,7 @@ namespace lws
     );
     convert_address(address, self.creds.address);
   }
-
+ 
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)
   {
     wire::object(source, WIRE_FIELD(tx));
