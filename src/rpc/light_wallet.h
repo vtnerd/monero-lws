@@ -38,9 +38,12 @@
 #include "cryptonote_basic/difficulty.h" // monero/src
 #include "crypto/crypto.h"     // monero/src
 #include "db/data.h"
+#include "db/fwd.h"
+#include "rpc/fwd.h"
 #include "rpc/rates.h"
 #include "util/fwd.h"
 #include "wire/json/fwd.h"
+#include "wire/msgpack/fwd.h"
 
 namespace lws
 {
@@ -64,7 +67,7 @@ namespace rpc
     lws::db::account_address address;
     crypto::secret_key key;
   };
-  void read_bytes(wire::json_reader&, account_credentials&);
+  void read_bytes(wire::reader&, account_credentials&);
 
 
   enum class daemon_state : std::uint8_t
@@ -107,15 +110,6 @@ namespace rpc
   void write_bytes(wire::json_writer&, const daemon_status_response&);
 
 
-  struct new_subaddrs_response
-  {
-    new_subaddrs_response() = delete;
-    std::vector<db::subaddress_dict> new_subaddrs;
-    std::vector<db::subaddress_dict> all_subaddrs;
-  };
-  void write_bytes(wire::json_writer&, const new_subaddrs_response&);
-
-
   struct transaction_spend
   {
     transaction_spend() = delete;
@@ -124,6 +118,114 @@ namespace rpc
   };
   void write_bytes(wire::json_writer&, const transaction_spend&);
 
+  struct get_transaction
+  {
+    get_transaction() = delete;
+    db::output info;
+    std::vector<db::output> receives;
+    std::vector<transaction_spend> spends;
+    std::uint64_t spent;
+  };
+
+  struct get_address_txs_response
+  {
+    get_address_txs_response() = delete;
+    
+    static std::vector<db::output::spend_meta_>::const_iterator
+      find_metadata(std::vector<db::output::spend_meta_> const& metas, db::output_id id);
+
+    static std::vector<get_transaction> load(std::vector<db::output> outputs, std::vector<db::spend> spends);
+    static expect<get_address_txs_response> load(db::storage_reader& reader, const db::account& acct, const bool all_outputs);
+
+    safe_uint64 total_received;
+    std::uint64_t scanned_height;
+    std::uint64_t scanned_block_height;
+    std::uint64_t start_height;
+    std::uint64_t transaction_height;
+    std::uint64_t blockchain_height;
+    std::uint64_t lookahead_fail;
+    std::vector<get_transaction> transactions;
+    db::address_index lookahead;
+  };
+  void write_bytes(wire::json_writer&, const get_address_txs_response&);
+
+
+  struct feed_blocks
+  {
+    static constexpr const char* prefix() noexcept { return "blocks:"; }
+    feed_blocks() = delete;
+    db::block_id scan_start;
+    db::block_id scan_end;
+    db::block_id blockchain_height;
+    db::block_id lookahead_fail;
+    db::address_index lookahead;
+    std::vector<get_transaction> transactions;
+  };
+  void write_bytes(wire::writer&, const feed_blocks&);
+
+  struct feed_error
+  {
+    static constexpr const char* prefix() noexcept { return "error:"; }
+    feed_error() = delete;
+    feed_error(std::error_code);
+
+    std::string msg;
+    feed::status code;
+  };
+  void write_bytes(wire::writer&, const feed_error&);
+
+  struct feed_login
+  {
+    static constexpr const char* prefix() noexcept { return "login:"; }
+    feed_login() = delete;
+    account_credentials account;
+    bool tx_sync;
+    bool receives_only;
+  };
+  void read_bytes(wire::reader&, feed_login&);
+
+  struct feed_mempool
+  {
+    static constexpr const char* prefix() noexcept { return "mempool:"; }
+    feed_mempool() = delete;
+    db::output received;
+  };
+  void write_bytes(wire::writer&, const feed_mempool&);
+
+  struct feed_tx_sync
+  {
+    static constexpr const char* prefix() noexcept { return "tx_sync:"; }
+    feed_tx_sync() = delete;
+    get_address_txs_response info;
+  };
+  void write_bytes(wire::writer&, const feed_tx_sync&);
+
+  struct feed_warning
+  {
+    static constexpr const char* prefix() noexcept { return "warning:"; }
+
+    feed_warning()
+      : msg(), code(feed::status(0)), counter(0), height(db::block_id::txpool)
+    {}
+
+    feed_warning(std::error_code error, const std::uint32_t counter, const db::block_id height);
+ 
+    std::string msg;
+    feed::status code;
+    std::uint32_t counter;
+    db::block_id height;
+  };
+  void read_bytes(wire::msgpack_reader&, feed_warning&);
+  void write_bytes(wire::writer&, const feed_warning&);
+
+
+  struct new_subaddrs_response
+  {
+    new_subaddrs_response() = delete;
+    std::vector<db::subaddress_dict> new_subaddrs;
+    std::vector<db::subaddress_dict> all_subaddrs;
+  };
+  void write_bytes(wire::json_writer&, const new_subaddrs_response&); 
 
   struct get_address_info_response
   {
@@ -138,7 +240,8 @@ namespace rpc
         blockchain_height(0),
         lookahead_fail(0),
         spent_outputs(),
-        rates(common_error::kInvalidArgument)
+        rates(common_error::kInvalidArgument),
+        lookahead{}
     {}
 
     safe_uint64 locked_funds;
@@ -155,31 +258,7 @@ namespace rpc
     db::address_index lookahead;
   };
   void write_bytes(wire::json_writer&, const get_address_info_response&);
-
-
-  struct get_address_txs_response
-  {
-    get_address_txs_response() = delete;
-    struct transaction
-    {
-      transaction() = delete;
-      db::output info;
-      std::vector<transaction_spend> spends;
-      std::uint64_t spent;
-    };
-
-    safe_uint64 total_received;
-    std::uint64_t scanned_height;
-    std::uint64_t scanned_block_height;
-    std::uint64_t start_height;
-    std::uint64_t transaction_height;
-    std::uint64_t blockchain_height;
-    std::uint64_t lookahead_fail;
-    std::vector<transaction> transactions;
-    db::address_index lookahead;
-  };
-  void write_bytes(wire::json_writer&, const get_address_txs_response&);
-
+ 
 
   struct get_random_outs_request
   {
@@ -298,7 +377,7 @@ namespace rpc
     db::address_index lookahead;
   };
   void write_bytes(wire::json_writer&, login_response);
-
+ 
 
   struct provision_subaddrs_request
   {
@@ -310,9 +389,9 @@ namespace rpc
     boost::optional<std::uint32_t> n_min;
     boost::optional<bool> get_all;
   };
-  void read_bytes(wire::json_reader&, provision_subaddrs_request&);
+  void read_bytes(wire::json_reader&, provision_subaddrs_request&); 
+ 
 
-  
   struct submit_raw_tx_request
   {
     submit_raw_tx_request() = delete;

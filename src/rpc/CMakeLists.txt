@@ -28,9 +28,9 @@
 
 add_subdirectory(scanner)
 
-set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp light_wallet.cpp lws_pub.cpp rates.cpp)
-set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h fwd.h json.h light_wallet.h lws_pub.h rates.h)
+set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp feed_ssl.cpp feed_tcp.cpp light_wallet.cpp login.cpp lws_pub.cpp rates.cpp)
+set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h feed.h fwd.h json.h light_wallet.h login.h lws_pub.h rates.h)
 
 add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})
 target_include_directories(monero-lws-rpc PRIVATE ${RMQ_INCLUDE_DIR})
-target_link_libraries(monero-lws-rpc monero::libraries monero-lws-util monero-lws-wire-json monero-lws-wire-wrapper ${RMQ_LIBRARY})
+target_link_libraries(monero-lws-rpc monero::libraries monero-lws-db monero-lws-util monero-lws-wire-json monero-lws-wire-wrapper ${RMQ_LIBRARY})

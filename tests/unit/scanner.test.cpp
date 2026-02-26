@@ -332,7 +332,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
     auto rpc = 
-      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false);
+      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false, true);
 
 
     lws::db::test::cleanup_db on_scope_exit{};

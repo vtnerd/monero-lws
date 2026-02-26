@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://docs.monerolws.com/api/schemas/feed_mempool.json",
+  "type": "object",
+  "properties": {
+    "hash": {"$ref": "feed_base.json#/definitions/binary32"},
+    "prefix_hash": {"$ref": "feed_base.json#/definitions/binary32"},
+    "fee": {"$ref": "feed_base.json#/definitions/uint64"},
+    "unlock_time": {"$ref": "feed_base.json#/definitions/uint64"},
+    "amount": {"$ref": "feed_base.json#/definitions/uint64"},
+    "public_key": {"$ref": "feed_base.json#/definitions/binary32"},
+    "tx_pub_key": {"$ref": "feed_base.json#/definitions/binary32"},
+    "index": {"$ref": "feed_base.json#/definitions/uint32"},
+    "payment_id": {
+      "anyOf": [
+        {"$ref": "feed_base.json#/definitions/binary8"},
+        {"$ref": "feed_base.json#/definitions/binary32"}
+      ]
+    },
+    "mixin": {"$ref": "feed_base.json#/definitions/uint32"},
+    "recipient": {"$ref": "feed_base.json#/definitions/address_meta"},
+    "rct": {"$ref": "feed_base.json#/definitions/binary32"}
+  },
+  "required": [
+    "hash",
+    "prefix_hash",
+    "fee",
+    "unlock_time",
+    "public_key",
+    "tx_pub_key",
+    "index"
+  ]
+}
