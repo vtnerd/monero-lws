@@ -1,5 +1,5 @@
-# monero-lws RabbitMQ Usage
-Monero-lws uses RabbitMQ to provide JSON notifications of payment_id
+# RabbitMQ
+`monero-lws-daemon` uses RabbitMQ to provide JSON notifications of payment_id
 (web)hooks. The feature is optional - by default LWS is _not_ compiled with
 RabbitMQ support. The cmake option -DWITH_RMQ=ON must be specified during the
 configuration stage to enable the feature.
