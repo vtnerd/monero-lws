@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/api/zmq/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Webhooks/ZeroMQ - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Webhooks/ZeroMQ";
+        var mkdocs_page_input_path = "api/zmq.md";
+        var mkdocs_page_url = "/api/zmq/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Webhooks/ZeroMQ</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#registration">Registration</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#events">Events</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#payments">Payments</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#spends">Spends</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#new-accounts">New Accounts</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#updated-accounts">Updated Accounts</a>
+    </li>
+        </ul>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">API</li>
+      <li class="breadcrumb-item active">Webhooks/ZeroMQ</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/api/zmq.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="webhooks-zeromq">Webhooks / ZeroMQ</h1>
+<p>monero-lws can report scanner events via HTTP/1.1 webhooks or ZeroMQ PUB/SUB.
+The ZeroMQ PUB is distinct from the <code>monerod</code> PUB socket;
+<code>monero-lws-daemon --zmq-pub</code> creates a socket just for <code>monero-lws-daemon</code>
+scanner updates. Webhooks can be "http" or "https" - the latter performing
+standard system certificate authority checks (self-signed certificates NOT
+allowed).</p>
+<p>Events are ALWAYS published over ZMQ-PUB, whereas webhooks are only used when
+a specific URL is given to <code>/webhook_add</code>. If the provided URL is <code>zmq</code> then
+only ZMQ-PUB is used to push the event. All other URLs must start with
+<code>http://</code> or <code>https://</code> as per <a href="/api/admin">admin api spec</a>.</p>
+<h2 id="registration">Registration</h2>
+<p>Registering for events requires <code>/webhook_add</code> from the
+<a href="/api/admin">admin api</a>. Examples and full schema are provided on that page.</p>
+<h2 id="events">Events</h2>
+<p>Every callback for an event has this structure:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 0,
+  &quot;event&quot;: {...}
+}
+</code></pre>
+<p>The <code>index</code> field is per event type, and tracks the number of events in that
+type. This is useful only for ZeroMQ, where events can be dropped.</p>
+<h3 id="payments">Payments</h3>
+<p>A payment event occurs from 0-confirmations up to the user requested number of
+confirmations. A payment event, even when using ZeroMQ, only occurs when one is
+registered via <code>/webhook_add</code>. Payment registerations can only be done on
+primary addresses and optionally a payment id. Registering a primary address
+automatically registers all subaddresses; specifying a payment id only
+registers that payment id. Leaving the payment id field blank during
+registeration enables hooks from all payment ids.</p>
+<p>The relevant topics for ZeroMQ-PUB are: <code>json-full-payment_hook</code>, and
+<code>msgpack-full-payment_hook</code>.</p>
+<p>Example payload of a webhook callback:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 2,
+  &quot;event&quot;: {
+    &quot;event&quot;: &quot;tx-confirmation&quot;,
+    &quot;payment_id&quot;: &quot;4f695d197f2a3c54&quot;,
+    &quot;token&quot;: &quot;single zmq wallet&quot;,
+    &quot;confirmations&quot;: 1,
+    &quot;event_id&quot;: &quot;3894f98f5dd54af5857e4f8a961a4e57&quot;,
+    &quot;tx_info&quot;: {
+      &quot;id&quot;: {
+        &quot;high&quot;: 0,
+        &quot;low&quot;: 5666768
+      },
+      &quot;block&quot;: 2265961,
+      &quot;index&quot;: 1,
+      &quot;amount&quot;: 3117324236131,
+      &quot;timestamp&quot;: 1687301600,
+      &quot;tx_hash&quot;: &quot;ef3187775584351cc5109de124b877bcc530fb3fdbf77895329dd447902cc566&quot;,
+      &quot;tx_prefix_hash&quot;: &quot;064884b8a8f903edcfebab830707ed44b633438b47c95a83320f4438b1b28626&quot;,
+      &quot;tx_public&quot;: &quot;54dce1a6eebafa2fdedcea5e373ef9de1c3d2737ae9f809e80958d1ba4590d74&quot;,
+      &quot;rct_mask&quot;: &quot;4cdc4c4e340aacb4741ba20f9b0b859242ecdad2fcc251f71d81123a47db3400&quot;,
+      &quot;payment_id&quot;: &quot;4f695d197f2a3c54&quot;,
+      &quot;unlock_time&quot;: 0,
+      &quot;mixin_count&quot;: 15,
+      &quot;coinbase&quot;: false
+    }
+  }
+}
+
+</code></pre>
+<h3 id="spends">Spends</h3>
+<p>All of the information in the <a href="#payments">payments</a> section is relevant to
+here, except instead of payment confirmations, spend confirmations are
+published. The relevant ZeroMQ-PUB topics are: <code>json-full-spend_hook</code> and
+<code>msgpack-full_spend_hook</code>. Example payload of a webhook callback:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 0,
+  &quot;event&quot;: {
+    &quot;event&quot;: &quot;tx-spend&quot;,
+    &quot;token&quot;: &quot;spend-xmr&quot;,
+    &quot;event_id&quot;: &quot;7ff047aa74e14f4aa978469bc0eec8ec&quot;,
+    &quot;tx_info&quot;: {
+      &quot;input&quot;: {
+        &quot;height&quot;: 2464207,
+        &quot;tx_hash&quot;: &quot;97d4e66c4968b16fec7662adc9f8562c49108d3c5e7030c4d6dd32d97fb62540&quot;,
+        &quot;image&quot;: &quot;b0fe7acd9e17bb8b9ac2daae36d4cb607ac60ed8a101cc9b2e1f74016cf80b24&quot;,
+        &quot;source&quot;: {
+          &quot;high&quot;: 0,
+          &quot;low&quot;: 6246316
+        },
+        &quot;timestamp&quot;: 1711902214,
+        &quot;unlock_time&quot;: 0,
+        &quot;mixin_count&quot;: 15,
+        &quot;sender&quot;: {
+          &quot;maj_i&quot;: 0,
+          &quot;min_i&quot;: 0
+        }
+      },
+      &quot;source&quot;: {
+        &quot;id&quot;: {
+          &quot;high&quot;: 0,
+          &quot;low&quot;: 6246316
+        },
+        &quot;amount&quot;: 10000000000,
+        &quot;mixin&quot;: 15,
+        &quot;index&quot;: 0,
+        &quot;tx_public&quot;: &quot;426ccd6d39535a1ee8636d14978581e580fcea35c8d3843ceb32eb688a0197f7&quot;
+      }
+    }
+  }
+}
+</code></pre>
+<h3 id="new-accounts">New Accounts</h3>
+<p>When a new account is registered, regardless of the <code>--auto-accept-creation</code>
+flag for <code>monero-lws-daemon</code>, the system will publish events. Registration
+occurs in the <a href="/api/admin">admin api</a>. The ZeroMQ-PUB topics are
+<code>json_full-new_account</code> and <code>msgpack-full-new_account</code>. Example of callback:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 2,
+  &quot;event&quot;: {
+    &quot;event&quot;: &quot;new-account&quot;,
+    &quot;event_id&quot;: &quot;c5a735e71b1e4f0a8bfaeff661d0b38a&quot;,
+    &quot;token&quot;: &quot;&quot;,
+    &quot;address&quot;: &quot;9zGwnfWRMTF9nFVW9DNKp46aJ43CRtQBWNFvPqFVSN3RUKHuc37u2RDi2GXGp1wRdSRo5juS828FqgyxkumDaE4s9qyyi9B&quot;
+  }
+}
+</code></pre>
+<h3 id="updated-accounts">Updated Accounts</h3>
+<p>You can register to be notified when the scanner has updated <em>any</em> account,
+and the event will batch the notifications per-thread. The ZeroMQ-PUB topics
+are <code>json-minimal-scanned</code> and <code>msgpack-minimal-scanned</code>. Example of
+callback:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 13,
+  &quot;event&quot;: {
+    &quot;height&quot;: 2438536,
+    &quot;id&quot;: &quot;9197e1c6f3de28a98dfc579325903e5416ef1ba2681043c54b5fff0d39645a7f&quot;,
+    &quot;addresses&quot;: [
+      &quot;9xkhhJSa7ZhS5sAcTix6ozL14RwdgxbV7JZVFW4rCghN7GidutaykfxDHfgW45UPiCTXncuvZ91GNSGgxs3b2Cin9TU8nP3&quot;
+    ]
+  }
+}
+</code></pre>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../admin/" class="btn btn-neutral float-left" title="Admin"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../rmq/" class="btn btn-neutral float-right" title="RabbitMQ">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../admin/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../rmq/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

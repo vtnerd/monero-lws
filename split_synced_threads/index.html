@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/split_synced_threads/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Split Synced Threading - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Split Synced Threading";
+        var mkdocs_page_input_path = "split_synced_threads.md";
+        var mkdocs_page_url = "/split_synced_threads/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Split Synced Threading</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/split_synced_threads.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="split-synced-threading">Split Synced Threading</h1>
+<h2 id="overview">Overview</h2>
+<p>The split-sync threading feature is an enhancement to the block-depth-threading algorithm that isolates synced addresses from unsynced addresses across different scanner threads. This prevents fully or near-fully synced addresses from being blocked by addresses that are still catching up to the blockchain.</p>
+<p>Split-sync is enabled by setting <code>--split-sync-threads</code> to a value greater than 0, which specifies the percentage of threads to allocate for synced accounts.</p>
+<h2 id="requirements">Requirements</h2>
+<ul>
+<li>Requires <code>--block-depth-threading</code></li>
+<li>Only affects initial thread assignment at startup</li>
+<li><code>--split-sync-threads</code> accepts a value from 0-1 representing the percentage of threads for synced accounts (e.g., 0.25 = 25%)</li>
+<li><code>--split-sync-depth</code> accepts a numeric value representing the maximum block depth for an address to be considered synced (defaults to 10)</li>
+<li>If <code>--split-sync-threads</code> is not provided or set to 0, split-sync is disabled</li>
+</ul>
+<h2 id="arguments">Arguments</h2>
+<ul>
+<li><code>--split-sync-threads=[numthreadspercent]</code>: Specified as a number from 0-1, where 0.25 = 25%. Defaults to 0 (disabled) if not specified. Split-sync is enabled when this value is &gt; 0.</li>
+<li><code>--split-sync-depth=[synced depth]</code>: The maximum block depth for an account to be considered synced. Defaults to 10 if not specified. Accounts with <code>raw_blockdepth ≤ split-sync-depth</code> are considered synced.</li>
+</ul>
+<h2 id="behavior">Behavior</h2>
+<h3 id="address-classification">Address Classification</h3>
+<p>Addresses are classified as either <strong>synced</strong> or <strong>unsynced</strong> based on their block depth:
+- <strong>Synced address</strong>: <code>raw_blockdepth ≤ --split-sync-depth</code> value (default 10)
+- <strong>Unsynced address</strong>: <code>raw_blockdepth &gt; --split-sync-depth</code> value</p>
+<p>Note: The <code>--min-block-depth</code> parameter is only used for assigning a minimum block depth value to addresses for workload calculations, and is not used to determine if an address is synced.</p>
+<h3 id="thread-allocation-algorithm">Thread Allocation Algorithm</h3>
+<p>When <code>--split-sync-threads &gt; 0</code>:</p>
+<ol>
+<li>
+<p><strong>Calculate synced thread count</strong>: The number of threads allocated for synced accounts is calculated as <code>ceil(split-sync-threads × total_threads)</code>, rounded up. The remaining threads are used for unsynced accounts.</p>
+</li>
+<li>
+<p><strong>Separate accounts</strong>: Accounts are classified as synced or unsynced based on <code>--split-sync-depth</code>.</p>
+</li>
+<li>
+<p><strong>Distribute synced accounts</strong>: Synced accounts are distributed across the allocated synced threads using <strong>round-robin assignment</strong> (account 0 → thread 0, account 1 → thread 1, ..., account N → thread (N % num_synced_threads)). Accounts are already sorted by block depth (smallest to largest) from the block-depth-threading preparation.</p>
+</li>
+<li>
+<p><strong>Distribute unsynced accounts</strong>: Unsynced accounts are distributed across the remaining threads using the <strong>standard block-depth-threading algorithm</strong> (alternating over/under-allocation strategy) starting from the first unsynced thread.</p>
+</li>
+</ol>
+<h3 id="edge-cases">Edge Cases</h3>
+<ul>
+<li><strong>No synced accounts</strong>: If there are no synced accounts, all threads are used for unsynced accounts with standard block-depth-threading.</li>
+<li><strong>Fewer synced accounts than threads</strong>: If there are fewer synced accounts than threads allocated for synced accounts, only as many synced threads are used as there are synced accounts (one account per thread). The remaining threads are used for unsynced accounts.</li>
+<li><strong>Split-sync disabled</strong>: If <code>--split-sync-threads</code> is 0 or not set (default), split-sync is disabled and all accounts use standard block-depth-threading.</li>
+</ul>
+<h2 id="example">Example</h2>
+<p>With 4 threads, <code>--split-sync-threads=0.25</code>, and <code>--split-sync-depth=16</code>, and 20 accounts with varying sync states:
+- Accounts A-H: 16 blocks each (synced) = 128 blocks
+- Accounts I-L: 100 blocks each (unsynced) = 400 blocks
+- Accounts M-P: 300 blocks each (unsynced) = 1,200 blocks
+- Accounts Q-T: 500 blocks each (unsynced) = 2,000 blocks</p>
+<p><strong>Thread allocation</strong>:
+- Synced threads: <code>ceil(0.25 × 4) = 1</code> thread
+- Unsynced threads: <code>4 - 1 = 3</code> threads</p>
+<p><strong>With split-sync enabled</strong>:
+- Thread 0 (synced, round-robin): A, B, C, D, E, F, G, H (8 accounts)
+  - Contains: 8 synced (A-H) only - <strong>synced thread</strong>
+- Thread 1 (unsynced, block-depth-threading): I, J, K, L, M (800 blocks)
+  - Contains: 5 unsynced (I-M) only - <strong>unsynced thread</strong>
+- Thread 2 (unsynced, block-depth-threading): N, O, P, Q (1,400 blocks)
+  - Contains: 4 unsynced - <strong>unsynced thread</strong>
+- Thread 3 (unsynced, block-depth-threading): R, S, T (1,500 blocks)
+  - Contains: 3 unsynced - <strong>unsynced thread</strong>
+- <strong>Result</strong>: Synced addresses (A-H) are isolated in Thread 0 and can process updates quickly without waiting for unsynced addresses. All unsynced addresses are separated into threads 1-3 using block-depth-threading.</p>
+<p><strong>Without split-sync</strong> (standard block-depth-threading):
+- Total: 3,728 blocks, target: 932 blocks/thread
+- Thread 0 (even, over-allocate): A, B, C, D, E, F, G, H, I, J, K, L, M, N (1,128 blocks)
+  - Contains: 8 synced (A-H) + 6 unsynced (I-N) - <strong>mixed</strong>
+- Thread 1 (odd, under-allocate): O, P (600 blocks)
+- Thread 2 (even, over-allocate): Q, R (1,000 blocks)
+- Thread 3 (odd, under-allocate): S, T (1,000 blocks)
+- <strong>Problem</strong>: Synced addresses (A-H) are mixed with unsynced addresses (I-N) in Thread 0, causing synced addresses to wait for unsynced ones to catch up</p>
+<h2 id="benefits">Benefits</h2>
+<p>This approach ensures that synced addresses receive timely updates without being delayed by the potentially lengthy synchronization process of newly added or far-behind addresses. By pre-allocating threads and using round-robin distribution for synced accounts, the algorithm provides predictable thread allocation and better isolation between synced and unsynced workloads.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

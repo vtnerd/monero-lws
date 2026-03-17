@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/scan/block_depth_threading/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Block Depth Threading - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Block Depth Threading";
+        var mkdocs_page_input_path = "scan/block_depth_threading.md";
+        var mkdocs_page_url = "/scan/block_depth_threading/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Block Depth Threading</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#motivation">Motivation</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#configuration">Configuration</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#usage">Usage</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#algorithm">Algorithm</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#block-depth-calculation">Block Depth Calculation</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#minimum-block-depth">Minimum Block Depth</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#thread-assignment">Thread Assignment</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#example">Example</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#benefits">Benefits</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Scan Algorithms</li>
+      <li class="breadcrumb-item active">Block Depth Threading</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/scan/block_depth_threading.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="block-depth-threading">Block Depth Threading</h1>
+<h2 id="overview">Overview</h2>
+<p>Block depth threading is a work distribution algorithm that balances scanner thread workload based on the amount of blockchain data each address needs to process, rather than simply distributing addresses evenly across threads. This approach addresses the performance inefficiency where threads with fewer blocks to scan finish early and become idle while other threads continue processing.</p>
+<h2 id="motivation">Motivation</h2>
+<p>The default threading algorithm distributes addresses evenly across threads, treating each address as an equal unit of work. However, addresses have vastly different synchronization requirements:
+- A fully synced address may only need to process a few recent blocks
+- A newly added address may need to scan hundreds of thousands of blocks</p>
+<p>This imbalance causes threads with mostly synced addresses to finish quickly and remain idle while threads with unsynced addresses continue working, resulting in poor CPU utilization and longer overall sync times.</p>
+<h2 id="configuration">Configuration</h2>
+<ul>
+<li><code>--block-depth-threading</code>: Enable block depth threading algorithm (default: false)</li>
+<li><code>--min-block-depth</code>: Minimum block depth value for workload calculations (default: 16)</li>
+</ul>
+<h2 id="usage">Usage</h2>
+<p>Enable block depth threading with default settings:</p>
+<pre><code class="language-bash">monero-lws-daemon --block-depth-threading [other options]
+</code></pre>
+<p>Enable with custom minimum block depth:</p>
+<pre><code class="language-bash">monero-lws-daemon --block-depth-threading --min-block-depth=32 [other options]
+</code></pre>
+<p>Or in config file:</p>
+<pre><code>block-depth-threading=true
+min-block-depth=32
+</code></pre>
+<h2 id="algorithm">Algorithm</h2>
+<h3 id="block-depth-calculation">Block Depth Calculation</h3>
+<p>For each address, the <strong>block depth</strong> is calculated as the number of blocks remaining to be scanned:</p>
+<pre><code>blockdepth = max(current_blockchain_height - address_scan_height, min_block_depth)
+</code></pre>
+<p>Where <code>min_block_depth</code> is the value specified by <code>--min-block-depth</code> (default: 16).</p>
+<p>Addresses with blockdepth less than the minimum are assigned the minimum value. This prevents edge cases where fully synced addresses would have zero blockdepth, which could cause:
+- Division by zero or near-zero values in workload calculations
+- Degenerate cases where many fully-synced accounts get assigned together
+- Poor workload distribution when most accounts are fully synced</p>
+<h3 id="minimum-block-depth">Minimum Block Depth</h3>
+<p>The <code>--min-block-depth</code> flag sets the minimum block depth value used in workload calculations. This ensures that even fully synced accounts contribute meaningfully to workload balancing.</p>
+<p><strong>Default value</strong>: 16 blocks</p>
+<p><strong>Example</strong>: With <code>--min-block-depth=16</code>, an account at the current blockchain height (0 blocks remaining) is treated as having 16 blocks remaining for workload distribution purposes.</p>
+<p><strong>When to adjust</strong>: You may want to increase this value if you have many fully synced accounts and want them to contribute more to workload balancing, or decrease it if you want more precise distribution for nearly-synced accounts.</p>
+<h3 id="thread-assignment">Thread Assignment</h3>
+<ol>
+<li><strong>Calculate total work</strong>: Sum all address blockdepths to get <code>total_blockdepth</code></li>
+<li><strong>Calculate target per thread</strong>: <code>blockdepth_per_thread = total_blockdepth / thread_count</code></li>
+<li><strong>Sort addresses</strong>: Order by blockdepth (smallest first)</li>
+<li><strong>Distribute to threads</strong>: </li>
+<li>Addresses are assigned sequentially to threads</li>
+<li>Accounts are added to the current thread until the cumulative depth reaches or exceeds the target</li>
+<li>When target is reached, move to the next thread</li>
+<li>Final thread receives any remaining addresses</li>
+</ol>
+<p>This overallocation strategy ensures more balanced workload distribution and better thread utilization throughout the scanning process.</p>
+<h2 id="example">Example</h2>
+<p>With 4 threads and 20 accounts with varying sync states:
+- Accounts A-H: 16 blocks each (synced, at minimum) = 128 blocks
+- Accounts I-L: 100 blocks each = 400 blocks
+- Accounts M-P: 300 blocks each = 1,200 blocks
+- Accounts Q-T: 500 blocks each = 2,000 blocks</p>
+<p><strong>Old Algorithm</strong> (by count, evenly distributed - 5 accounts per thread):
+- Thread 0: A, B, C, D, E (80 blocks) ✓ finishes immediately
+- Thread 1: F, G, H, I, J (228 blocks) ⏱
+- Thread 2: K, L, M, N, O (1,028 blocks) ⏱⏱
+- Thread 3: P, Q, R, S, T (2,100 blocks) ⏱⏱⏱⏱ takes much longer
+- <strong>Problem</strong>: Despite equal account count (5 per thread), massive workload imbalance - thread 3 has 26x more work than thread 0</p>
+<p><strong>New Algorithm</strong> (by depth, balanced workload with alternating over/under allocation):
+- Total: 3,728 blocks, target: 932 blocks/thread
+- Thread 0: (even, over-allocate): A, B, C, D, E, F, G, H, I, J, K, L, M, N (1,128 blocks)
+- Thread 1: (odd, under-allocate): O, P (600 blocks)
+- Thread 2: (even, over-allocate): Q, R (1,000 blocks)
+- Thread 3: (odd, under-allocate): S, T (1,000 blocks)
+- <strong>Result</strong>: All 4 threads utilized with better balance (600-1,128 vs 80-2,100 blocks), synced accounts efficiently grouped</p>
+<h2 id="benefits">Benefits</h2>
+<ul>
+<li><strong>Improved parallelization</strong>: All threads remain active longer</li>
+<li><strong>Reduced sync time</strong>: More efficient CPU utilization</li>
+<li><strong>Better resource usage</strong>: Eliminates idle threads waiting for others to complete</li>
+<li><strong>Predictable performance</strong>: Workload is distributed based on actual work required</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../balance_new_addresses/" class="btn btn-neutral float-left" title="Balance New Addresses"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../api/wallet/" class="btn btn-neutral float-right" title="Wallet">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../balance_new_addresses/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../api/wallet/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

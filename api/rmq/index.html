@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/api/rmq/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>RabbitMQ - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "RabbitMQ";
+        var mkdocs_page_input_path = "api/rmq.md";
+        var mkdocs_page_url = "/api/rmq/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">RabbitMQ</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#json-full-payment_hook">json-full-payment_hook</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">API</li>
+      <li class="breadcrumb-item active">RabbitMQ</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/api/rmq.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="rabbitmq">RabbitMQ</h1>
+<p><code>monero-lws-daemon</code> uses RabbitMQ to provide JSON notifications of payment_id
+(web)hooks. The feature is optional - by default LWS is <em>not</em> compiled with
+RabbitMQ support. The cmake option -DWITH_RMQ=ON must be specified during the
+configuration stage to enable the feature.</p>
+<p>The notification location is specified with <code>--rmq-address</code>, the login details
+are specified with <code>--rmq-credentials</code> (specified as <code>user:pass</code>), the exchange
+is specified with <code>--rmq-exchange</code>, and routing name is specified with
+<code>--rmq-routing</code>. </p>
+<h2 id="json-full-payment_hook"><code>json-full-payment_hook</code></h2>
+<p>Only events of this type are sent to RabbitMQ. They are always "simulcast" with
+the webhook URL. If the webhook URL is <code>zmq</code> then no simulcast occurs - the
+event is only sent via ZeroMQ and/or RabbitMQ (if both are configured then it
+sent to both, otherwise it is only sent to the one configured).</p>
+<p>Example of the "raw" output to RabbitMQ:</p>
+<pre><code class="language-json">{
+  &quot;index&quot;: 2,
+  &quot;event&quot;: {
+    &quot;event&quot;: &quot;tx-confirmation&quot;,
+    &quot;payment_id&quot;: &quot;4f695d197f2a3c54&quot;,
+    &quot;token&quot;: &quot;single zmq wallet&quot;,
+    &quot;confirmations&quot;: 1,
+    &quot;event_id&quot;: &quot;3894f98f5dd54af5857e4f8a961a4e57&quot;,
+    &quot;tx_info&quot;: {
+      &quot;id&quot;: {
+        &quot;high&quot;: 0,
+        &quot;low&quot;: 5666768
+      },
+      &quot;block&quot;: 2265961,
+      &quot;index&quot;: 1,
+      &quot;amount&quot;: 3117324236131,
+      &quot;timestamp&quot;: 1687301600,
+      &quot;tx_hash&quot;: &quot;ef3187775584351cc5109de124b877bcc530fb3fdbf77895329dd447902cc566&quot;,
+      &quot;tx_prefix_hash&quot;: &quot;064884b8a8f903edcfebab830707ed44b633438b47c95a83320f4438b1b28626&quot;,
+      &quot;tx_public&quot;: &quot;54dce1a6eebafa2fdedcea5e373ef9de1c3d2737ae9f809e80958d1ba4590d74&quot;,
+      &quot;rct_mask&quot;: &quot;4cdc4c4e340aacb4741ba20f9b0b859242ecdad2fcc251f71d81123a47db3400&quot;,
+      &quot;payment_id&quot;: &quot;4f695d197f2a3c54&quot;,
+      &quot;unlock_time&quot;: 0,
+      &quot;mixin_count&quot;: 15,
+      &quot;coinbase&quot;: false
+    }
+  }
+}
+</code></pre>
+<blockquote>
+<p><code>index</code> is a counter used to detect dropped messages. It is not useful to
+RabbitMQ but is a carry-over from ZeroMQ (the same serialized message is used
+to send to both).</p>
+<p>The <code>block</code> and <code>id</code> fields in the above example are NOT present when
+<code>confirmations == 0</code>.</p>
+</blockquote>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../zmq/" class="btn btn-neutral float-left" title="Webhooks/ZeroMQ"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../zmq/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/installation/source/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>From Source - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "From Source";
+        var mkdocs_page_input_path = "installation/source.md";
+        var mkdocs_page_url = "/installation/source/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">From Source</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#branches">Branches</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#dependencies">Dependencies</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#building">Building</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#beginner">Beginner</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#advanced">Advanced</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#other-build-options">Other Build Options</a>
+    </li>
+        </ul>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Installation</li>
+      <li class="breadcrumb-item active">From Source</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/installation/source.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="from-source">From Source</h1>
+<h2 id="branches">Branches</h2>
+<p>Building from source requires deciding on a branch to compile:</p>
+<ul>
+<li><code>develop</code> is where all merges go first. So this the "nightly" branch, and
+    is generally only recommended for developers. This should compile against
+    the <code>master</code> branch of <code>monerod</code>.</li>
+<li><code>master</code> is where tested merges go - making this the "alpha" branch.
+    Recommended only if some new feature(s) are needed. This should compile
+    against the <code>master</code> branch of <code>monerod</code>.</li>
+<li><code>release-v...</code> - The first number specifies the <code>monero-lws</code> version and
+    the second number specifies the <code>monerod</code> version. Example:
+    <code>release-v0.3_0.18</code> is the v0.3 version of <code>monero-lws</code> to be compiled
+    against the  v0.18 version of <code>monerod</code>. The most recent release branch is
+    recommended for the bulk of users. The supported release branches are:<ul>
+<li>release-v0.3_0.18</li>
+</ul>
+</li>
+</ul>
+<h2 id="dependencies">Dependencies</h2>
+<p>After deciding on a branch, the next step is dependency installation. The only
+dependencies are those required by <code>monerod</code> - go to
+the <a href="https://github.com/monero-project/monero/?tab=readme-ov-file#dependencies"><code>monerod</code> dependency section</a>
+and follow those instructions for installing dependencies. Then come back to
+this guide.</p>
+<h2 id="building">Building</h2>
+<h3 id="beginner">Beginner</h3>
+<p>The "beginner" method for compilation lets the git submodules do all of the
+hard work, but is only available on <code>develop</code> and <code>master</code> branches. The
+process is simply:</p>
+<pre><code class="language-bash">git clone https://github.com/vtnerd/monero-lws.git
+git checkout master
+git submodule update --init --recursive
+mkdir monero-lws/build &amp;&amp; cd monero-lws/build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+</code></pre>
+<p>If on macOS, replace <code>-j$(nproc)</code> with <code>-j8</code> (or the number of cores on your
+system). This should produce three binaries in the <code>monero/build/src</code> folder:
+<code>monero-lws-daemon</code>, <code>monero-lws-admin</code>, and <code>monero-lws-client</code>. You can now
+move onto <a href="/monero-lws/usage/">usage</a>.</p>
+<h3 id="advanced">Advanced</h3>
+<p>If you already have the <code>monerod</code> source tree on your system, you can save some
+space by re-using that copy. You need to manually ensure that the <code>monerod</code>
+branch is the one needed by <code>monero-lws</code>. The
+<a href="#building-from-source">first instruction</a> specifies the expected <code>monerod</code>
+branch foreach <code>monero-lws</code> branch.</p>
+<p>The process skips the submodule init and specifies the monero tree manually:</p>
+<pre><code class="language-bash">git clone https://github.com/vtnerd/monero-lws.git
+git checkout origin/release-v0.3_0.18
+mkdir monero-lws/build &amp;&amp; cd monero-lws/build
+cmake -DMONERO_SOURCE_DIR=/path/to/monero_0.18/source -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+</code></pre>
+<p>Again, replace <code>-j$(nproc)</code> on macOS with appropriate core count. This should
+produce three executables in the <code>monero-lws/build/src</code> directory. Move onto
+<a href="/monero-lws/usage/">usage</a> portion.</p>
+<h3 id="other-build-options">Other Build Options</h3>
+<p>Advanced users/developers may wish to specify additional build-time options
+supported by the project. The easiest is specifying <code>-DSTATIC=ON</code> at the
+cmake stage, which tries to use static libraries where possible.</p>
+<p>The other available option is <code>-DBUILD_TESTS=ON</code> which can also be specified at
+the cmake stage. This creates an executable <code>tests/unit/monero-lws-unit</code>.</p>
+<p>The last option is <code>-DSANITIZER=address</code> which can be specified at the cmake
+stage. This builds both monero source tree and lws source tree with the address
+sanitizer.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../.." class="btn btn-neutral float-left" title="Overview"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../docker/" class="btn btn-neutral float-right" title="Docker">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../.." style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../docker/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

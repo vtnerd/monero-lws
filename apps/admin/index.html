@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/apps/admin/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>admin - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "admin";
+        var mkdocs_page_input_path = "apps/admin.md";
+        var mkdocs_page_url = "/apps/admin/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">admin</a>
+    <ul class="current">
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Processes</li>
+      <li class="breadcrumb-item active">admin</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/apps/admin.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="admin">Admin</h1>
+<p>The <code>monero-lws-admin</code> executable or <code>--admin-rest-server</code> option in the
+<code>monero-lws-daemon</code> executable can be used to administer the database
+used by <code>monero-lws-daemon</code>. Any number of <code>monero-lws-admin</code> instances can run
+concurrently with a single <code>monero-lws-daemon</code> instance on the same database.
+Administration is necessary to authorize new accounts and rescan requests
+submitted from the <a href="/api/wallet">wallet API</a>. The admin executable can also be
+used to list the contents of the LMDB file for debugging purposes.</p>
+<h1 id="monero-lws-admin">monero-lws-admin</h1>
+<p>The <code>monero-lws-admin</code> utility is structured around command-line arguments with
+JSON responses printed to <code>stdout</code>. Each administration command takes arguments
+by position. Every available administration command and required+optional
+arguments are listed when the <code>--help</code> flag is given to the executable.</p>
+<p>The <a href="https://stedolan.github.io/jq/"><code>jq</code></a> utility is recommended if using
+<code>monero-lws-admin</code> in a shell environment. The <code>jq</code> program can be used for
+indenting the output to make it more readable, and can be used to
+search+filter the JSON output from the command.</p>
+<h1 id="admin-rest-api">Admin REST API</h1>
+<p>The <code>monero-lws-daemon</code> can be started with 1+ <code>--admin-rest-server</code> parameters
+that specify a listening location for <a href="/api/admin">admin API</a> clients. By
+default, there is no admin REST server and no available admin accounts.</p>
+<p>An admin REST server can be merged with a regular REST server if path prefixes
+are specified, such as
+<code>--rest-server https://0.0.0.0:8443/basic --admin-rest-server https://0.0.0.0:8443/admin</code>.
+This will start a server listening on one port, 8443, and requires clients to
+specify <code>/basic/command</code> or <code>/admin/admin/command</code> when making a
+request.</p>
+<p>An admin account account can be created via <code>monero-lws-admin create_admin</code>
+<em>only</em> (this command is not available via REST for security purposes). The
+<code>key</code> value returned in the <code>create_admin</code> JSON object becomes the <code>auth</code>
+parameter in the admin REST API. A new admin account is put into the
+<code>hidden</code> state - the account is <em>not</em> scanned for transactions and is <em>not</em>
+available to the normal REST API, but is available to the admin REST API.</p>
+<p>Running <code>monero-lws-admin list_admin</code> will display all current admin
+accounts, and their current state ("active", "inactive", or "hidden"). If
+an admin account needs to be revoked, use the <code>modify_account</code> command
+to put the account into the "inactive" state. Deleting accounts is not
+currently supported.</p>
+<p>Every admin REST request must be a <code>POST</code> that contains a JSON object with
+an <code>auth</code> field (in default settings) and an optional <code>params</code> field:</p>
+<pre><code class="language-json">{
+  &quot;auth&quot;:&quot;...&quot;,
+  &quot;params&quot;:{...}
+ }
+</code></pre>
+<p>where the <code>params</code> object is specified below. The <code>auth</code> field can be omitted
+if <code>--disable-admin-auth</code> is specified in the CLI arguments for the REST
+server.</p>
+<h2 id="commands-of-admin-rest-api">Commands (of Admin REST API)</h2>
+<p>A subset of admin commands are available via <a href="/api/admin">admin REST API</a> - the
+remainder are initially omitted for security purposes. The commands available
+via REST are:</p>
+<ul>
+<li><a href="#accept_requests"><strong>accept_requests</strong></a>: <code>{"type": "import"|"create", "addresses":[...]}</code></li>
+<li><a href="#add_account"><strong>add_account</strong></a>: <code>{"address": ..., "key": ...}</code></li>
+<li><a href="#list_accounts"><strong>list_accounts</strong></a>: <code>{}</code></li>
+<li><a href="#list_requests"><strong>list_requests</strong></a>: <code>{}</code></li>
+<li><a href="#modify_account_status"><strong>modify_account_status</strong></a>: <code>{"status": "active"|"hidden"|"inactive", "addresses":[...]}</code></li>
+<li><a href="#reject_requests"><strong>reject_requests</strong></a>: <code>{"type": "import"|"create", "addresses":[...]}</code></li>
+<li><a href="#rescan"><strong>rescan</strong></a>: <code>{"height":..., "addresses":[...]}</code></li>
+<li><a href="#validate"><strong>validate</strong></a>: <code>{"spend_public_hex":..., "view_public_hex":..., "view_key_hex":...}</code></li>
+<li><a href="#webhook_add"><strong>webhook_add</strong></a>: <code>{"type":"tx-confirmation", "address":"...", "url":"...", ...}</code> with optional fields:<ul>
+<li><strong>token</strong>: A string to be returned when the webhook is triggered</li>
+<li><strong>payment_id</strong>: 16 hex characters representing a unique identifier for a transaction</li>
+</ul>
+</li>
+<li><a href="#webhook_delete"><strong>webhook_delete</strong></a>: <code>{"addresses":[...]}</code></li>
+<li><a href="#webhook_delete_uuid"><strong>webhook_delete_uuid</strong></a>: <code>{"event_ids": [...]}</code></li>
+<li><a href="#webhook_list"><strong>webhook_list</strong></a>: <code>{}</code></li>
+</ul>
+<p>where the listed object must be the <code>params</code> field above.</p>
+<h3 id="accept_requests">accept_requests</h3>
+<p>Accepts new account and rescan from block 0 requests in the incoming
+queue.</p>
+<h3 id="add_account">add_account</h3>
+<p>Add account for view-key scanning. An example of the JSON:</p>
+<pre><code class="language-json">{
+  &quot;params&quot;: {
+    &quot;address&quot;: &quot;9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j&quot;,
+    &quot;key&quot;: &quot;deadbeef&quot;
+  },
+  &quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;
+}
+</code></pre>
+<h3 id="list_accounts">list_accounts</h3>
+<p>Request a listing of all active accounts in the database. The request
+should look like:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{}' http://127.0.0.1:8081/list_accounts
+</code></pre>
+<p>when auth is disabled, and when enabled:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{&quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;}' http://127.0.0.1:8081/list_accounts
+</code></pre>
+<p>The response will look something like:</p>
+<pre><code class="language-json">{
+  &quot;active&quot;: [
+    {
+      &quot;address&quot;: &quot;9wRAu3giCtKhSsVnkZJ7LLE6zqzrmMKpPg39S8aoC7T6F6GobeDpz8TcvVfTQT3ucW82oTYKG8v3ZMAeh8SZVXWwMdvwZew&quot;,
+      &quot;scan_height&quot;: 2220875,
+      &quot;access_time&quot;: 1681244149
+    }
+  ]
+}
+</code></pre>
+<h3 id="list_requests">list_requests</h3>
+<p>This is a listing of all pending new account requests and all requests
+to import from genesis block requests. When auth is disabled usage
+looks like:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{}' http://127.0.0.1:8081/list_requests
+</code></pre>
+<p>and with auth enabled looks like:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{&quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;}' http://127.0.0.1:8081/list_requests
+</code></pre>
+<h3 id="modify_account_status">modify_account_status</h3>
+<p>This can change an account status to <code>active</code>, <code>inactive</code> or <code>hidden</code>. The
+<code>active</code> state is the normal state - the account is being scanned and
+returned by the API. The <code>inactive</code> state is still returned by the API,
+but is no longer being scanned. The <code>hidden</code> is the current way to
+"delete" an account - it is not scanned nor returned by the API. Accounts
+cannot currently be deleted due to internal DB requirements.</p>
+<h3 id="reject_requests">reject_requests</h3>
+<p>This is the opposite of <a href="#accept_requests"><code>accept_requests</code></a> above. See
+information from that endpoint on how to use this one.</p>
+<h3 id="rescan">rescan</h3>
+<p>This tells the scanner to rescan specific account(s) from the specified
+height.</p>
+<h3 id="validate">validate</h3>
+<p>This takes the spend_public, view_public, and view key all as hex, and then
+does basic validation for the caller: (1) that each value is 64 hex-ascii
+characters, (2) that the public keys are valid ed25519 points, and that (3)
+the view_key matches the view_public.</p>
+<p>The return value is the <code>address</code> on success, and <code>error</code> object on
+validation failure:</p>
+<h4 id="example-request">Example Request</h4>
+<pre><code class="language-json">{
+  &quot;params&quot;: {
+    &quot;view_public_hex&quot;: &quot;3e77c1ee5a396cd6c3f68ce343882b2a09317649d6501078911fb17a1adac0b6&quot;,
+    &quot;spend_public_hex&quot;: &quot;7028d918af2cc4f1cfa499cca2ef014e57124982b99004e9630caf0b25c13954&quot;,
+    &quot;view_key_hex&quot;: &quot;80...&quot;
+  },
+  &quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;
+}
+</code></pre>
+<h4 id="example-failure-return">Example Failure Return</h4>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;field&quot;: &quot;view_public_hex&quot;,
+    &quot;details&quot;: &quot;Invalid public key format&quot;
+  }
+}
+</code></pre>
+<p>HTTP error codes are still returned if the JSON itself is invalid.</p>
+<h4 id="example-success-return">Example Success Return</h4>
+<pre><code class="language-json">{
+  &quot;address&quot;: &quot;9wRAu3giCtKhSsVnkZJ7LLE6zqzrmMKpPg39S8aoC7T6F6GobeDpz8TcvVfTQT3ucW82oTYKG8v3ZMAeh8SZVXWwMdvwZew&quot;
+}
+</code></pre>
+<h3 id="webhook_add">webhook_add</h3>
+<p>This is used to track events happening in the database: (1) a new payment to
+an optional payment_id, or (2) a new account creation. This endpoint always
+requires a URL for callback purposes.</p>
+<p>When the event type is <code>tx-confirmation</code>, this endpoint requires a web address
+for callback purposes, a primary (not integrated!) address, and finally the
+type ("tx-confirmation"). The event will remain in the database until one of
+the delete commands (<a href="#webhook_delete_uuid">webhook_delete_uuid</a> or
+<a href="#webhook_delete">webhook_delete</a>) is used to remove it.</p>
+<p>When the event type is <code>new-account</code>, this endpoint requires a web address
+for callback purposes, and the type ("new-account"). Spurious information
+will be returned for this endpoint to simplify the server implementation (i.e.
+several fields returned in the initial call are not useful to new account
+creations).</p>
+<blockquote>
+<p>The provided URL will use SSL/TLS if <code>https://</code> is prefixed in the URL and
+will use plaintext if <code>http://</code> is prefixed in the URL. If <code>zmq</code> is provided
+as the callback, notifications are performed <em>only</em> over the ZMQ pub socket.
+SSL/TLS connections will use the system certificate authority (root-CAs) by
+default, and will ignore all authority checks if
+<code>--webhook-ssl-verification none</code> is provided on the command line when
+starting <code>monero-lws-daemon</code>. The webhook will fail if there is a mismatch of
+<code>http</code> and <code>https</code> between the two servers, and will also fail if <code>https</code>
+verification is mismatched. The rule is: (1) if the callback server has
+SSL/TLS disabled, the webhook should use <code>http://</code>, (2) if the callback server
+has a self-signed certificate, <code>https://</code> and <code>--webhook-ssl-verification none</code>
+should be used, and (3) if the callback server is using "Let's Encrypt"
+(or similar), then <code>https://</code> with no additional command line flag should be
+used.</p>
+</blockquote>
+<h4 id="tx-confirmation"><code>tx-confirmation</code></h4>
+<h5 id="initial-request-to-server">Initial Request to server</h5>
+<p>Example where admin authentication is required (<code>--disable-admin-auth</code> NOT
+set on start which is the default):</p>
+<pre><code class="language-json">{
+  &quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;,
+  &quot;params&quot;: {
+    &quot;type&quot;: &quot;tx-confirmation&quot;,
+    &quot;url&quot;: &quot;http://127.0.0.1:7000&quot;,  
+    &quot;payment_id&quot;: &quot;df034c176eca3296&quot;,
+    &quot;token&quot;: &quot;1234&quot;,
+    &quot;address&quot;: &quot;9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j&quot;
+  }
+}
+</code></pre>
+<p>Example where admin authentication is not required (<code>--disable-admin-auth</code> set on start):</p>
+<pre><code class="language-json">{
+  &quot;params&quot;: {
+    &quot;type&quot;: &quot;tx-confirmation&quot;,
+    &quot;url&quot;: &quot;http://127.0.0.1:7000&quot;,  
+    &quot;payment_id&quot;: &quot;df034c176eca3296&quot;,
+    &quot;token&quot;: &quot;1234&quot;,
+    &quot;address&quot;: &quot;9uTcr6T9GURRt7UADQc2rhjg5oMYBDyoQ5jgx8nAvVvs757WwDkc2vHLPJhwZfCnfVdnWNvuuKzJe8eMVTKwadYzBrYRG5j&quot;
+  }
+}
+</code></pre>
+<p>As noted above - <code>payment_id</code> and <code>token</code> are both optional - <code>token</code> will
+default to the empty string, and <code>payment_id</code> will default to zero.</p>
+<h5 id="initial-response-from-server">Initial Response from Server</h5>
+<p>The server will replay all values back to the user for confirmation. An               <br />
+additional field - <code>event_id</code> - is also returned which contains a globally
+unique value (internally this is a 128-bit <code>UUID</code>).</p>
+<p>Example response:</p>
+<pre><code class="language-json">{
+  &quot;payment_id&quot;: &quot;df034c176eca3296&quot;,
+  &quot;event_id&quot;: &quot;fa10a4db485145f1a24dc09c19a79d43&quot;,
+  &quot;token&quot;: &quot;1234&quot;,
+  &quot;confirmations&quot;: 1,
+  &quot;url&quot;: &quot;http://127.0.0.1:7000&quot;
+}
+</code></pre>
+<p>If you use the <code>debug_database</code> command provided by the <code>monero-lws-admin</code>
+executable, the event should be listed in the
+<code>webhooks_by_account_id,payment_id</code> field of the returned JSON object. The
+event will remain in the database until an explicit
+<a href="#webhook_delete_uuid"><code>webhook_delete_uuid</code></a> is invoked.</p>
+<h5 id="callback-from-server">Callback from Server</h5>
+<p>When the event "fires" due to a transaction, the provided URL is invoked
+with a JSON payload that looks like the below:</p>
+<pre><code class="language-json">{
+  &quot;event&quot;: &quot;tx-confirmation&quot;,
+  &quot;payment_id&quot;: &quot;df034c176eca3296&quot;,
+  &quot;token&quot;: &quot;1234&quot;,
+  &quot;confirmations&quot;: 1,
+  &quot;id&quot;: &quot;fa10a4db485145f1a24dc09c19a79d43&quot;,
+  &quot;tx_info&quot;: {
+    &quot;id&quot;: {
+      &quot;high&quot;: 0,
+      &quot;low&quot;: 5550229
+    },
+    &quot;block&quot;: 2192100,
+    &quot;index&quot;: 0,
+    &quot;amount&quot;: 4949570000,
+    &quot;timestamp&quot;: 1678324181,
+    &quot;tx_hash&quot;: &quot;901f9a2a919b6312131537ff6117d56ce2c0dc1f1341b845d7667299e1ef892f&quot;,
+    &quot;tx_prefix_hash&quot;: &quot;89685cb7acb836fde30fae8be5d8b884e92706df086960d0508e146979ef80dc&quot;,
+    &quot;tx_public&quot;: &quot;54c153792e47c1da8ceb3979560c424c1928b7b4a089c1c8b3ce99c563e1d240&quot;,
+    &quot;rct_mask&quot;: &quot;f3449407dc3721299b5309c0c336a17daeebce55165ddd447ba28bbd1f46c201&quot;,
+    &quot;payment_id&quot;: &quot;df034c176eca3296&quot;,
+    &quot;unlock_time&quot;: 0,
+    &quot;mixin_count&quot;: 15,
+    &quot;coinbase&quot;: false
+  }
+}
+</code></pre>
+<p>which is the same information provided by the user API. The database will
+contain an entry in the <code>webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id</code>
+field of the JSON object provided by the <code>debug_database</code> command. The
+entry will be removed when the number of confirmations has been reached.</p>
+<h4 id="new-account"><code>new-account</code></h4>
+<h5 id="initial-request-to-server_1">Initial Request to server</h5>
+<p>Example where admin authentication is required (<code>--disable-admin-auth</code> NOT
+set on start which is the default):</p>
+<pre><code class="language-json">{
+  &quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;,
+  &quot;params&quot;: {
+    &quot;type&quot;: &quot;new-account&quot;,
+    &quot;url&quot;: &quot;http://127.0.0.1:7001&quot;,
+    &quot;token&quot;: &quot;1234&quot;
+  }
+}
+</code></pre>
+<p>Example where admin authentication is not required (<code>--disable-admin-auth</code> set on start):</p>
+<pre><code class="language-json">{
+  &quot;params&quot;: {
+    &quot;type&quot;: &quot;new-account&quot;,
+    &quot;url&quot;: &quot;http://127.0.0.1:7001&quot;,
+    &quot;token&quot;: &quot;1234&quot;
+  }
+}
+</code></pre>
+<p>As noted above - <code>token</code> is optional - it will default to the empty string.</p>
+<h5 id="initial-response-from-server_1">Initial Response from Server</h5>
+<p>The server will replay all values back to the user for confirmation. An
+additional field - <code>event_id</code> - is also returned which contains a globally
+unique value (internally this is a 128-bit <code>UUID</code>). The fields
+<code>confirmations</code>, and <code>payment_id</code> are sent to simplify the backend, and
+can be ignored when the type is <code>new-account</code>.</p>
+<p>Example response:</p>
+<pre><code class="language-json">{
+  &quot;payment_id&quot;: &quot;0000000000000000&quot;,
+  &quot;event_id&quot;: &quot;c5a735e71b1e4f0a8bfaeff661d0b38a&quot;&quot;,
+  &quot;token&quot;: &quot;1234&quot;,
+  &quot;confirmations&quot;: 1,
+  &quot;url&quot;: &quot;http://127.0.0.1:7000&quot;
+}
+</code></pre>
+<p>If you use the <code>debug_database</code> command provided by the <code>monero-lws-admin</code>
+executable, the event should be listed in the
+<code>webhooks_by_account_id,payment_id</code> field of the returned JSON object. The
+event will remain in the database until an explicit
+<a href="#webhook_delete_uuid"><code>webhook_delete_uuid</code></a> is invoked.</p>
+<h5 id="callback-from-server_1">Callback from Server</h5>
+<p>When the event "fires" due to a new account creation, the provided URL is
+invoked with a JSON payload that looks like the below:</p>
+<pre><code class="language-json">{
+  &quot;event_id&quot;: &quot;c5a735e71b1e4f0a8bfaeff661d0b38a&quot;,
+  &quot;token&quot;: &quot;&quot;,
+  &quot;address&quot;: &quot;9zGwnfWRMTF9nFVW9DNKp46aJ43CRtQBWNFvPqFVSN3RUKHuc37u2RDi2GXGp1wRdSRo5juS828FqgyxkumDaE4s9qyyi9B&quot;
+}
+</code></pre>
+<h3 id="webhook_delete">webhook_delete</h3>
+<p>Deletes all webhooks associated with a specific Monero primary address.</p>
+<h3 id="webhook_delete_uuid">webhook_delete_uuid</h3>
+<p>Deletes all references to a specific webhook referenced by its UUID
+(<code>event_id</code>)</p>
+<h3 id="webhook_list">webhook_list</h3>
+<p>This will list every webhook that is currently "listening" for
+incoming transactions. If the server has auth disabled, the
+request is simply:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{}' http://127.0.0.1:8081/webhook_list
+</code></pre>
+<p>and with auth enabled looks like:</p>
+<pre><code class="language-bash">curl -v -H &quot;Content-Type: application/json&quot; -d '{&quot;auth&quot;: &quot;f50922f5fcd186eaa4bd7070b8072b66fea4fd736f06bd82df702e2314187d09&quot;}' http://127.0.0.1:8081/webhook_list
+</code></pre>
+<p>which returns a JSON object that looks like:</p>
+<pre><code class="language-json">{
+  &quot;webhooks&quot;: [
+    {
+      &quot;key&quot;: {
+        &quot;user&quot;: 1,
+        &quot;type&quot;: &quot;tx-confirmation&quot;
+      },
+      &quot;value&quot;: [
+        {
+          &quot;payment_id&quot;: &quot;9bc1a59b34253896&quot;,
+          &quot;event_id&quot;: &quot;4dc201838af54dfe88686bea7e2b599f&quot;,
+          &quot;token&quot;: &quot;12345&quot;,
+          &quot;confirmations&quot;: 5,
+          &quot;url&quot;: &quot;http://127.0.0.1:8082&quot;
+        },
+        {
+          &quot;payment_id&quot;: &quot;9bc1a59b34253896&quot;,
+          &quot;event_id&quot;: &quot;615171e477464401a1a23cdb45b3b433&quot;,
+          &quot;token&quot;: &quot;12345&quot;,
+          &quot;confirmations&quot;: 5,
+          &quot;url&quot;: &quot;http://127.0.0.1:8082&quot;
+        },
+        {
+          &quot;payment_id&quot;: &quot;9bc1a59b34253896&quot;,
+          &quot;event_id&quot;: &quot;e64be3ad6d1647618fbd292be0485901&quot;,
+          &quot;token&quot;: &quot;this is a fresh test&quot;,
+          &quot;confirmations&quot;: 1,
+          &quot;url&quot;: &quot;http://127.0.0.1:8082/foobar&quot;
+        },
+        {
+          &quot;payment_id&quot;: &quot;9bc1a59b34253896&quot;,
+          &quot;event_id&quot;: &quot;fe692cdf7de1453898ad453d8fabce42&quot;,
+          &quot;token&quot;: &quot;12345&quot;,
+          &quot;confirmations&quot;: 5,
+          &quot;url&quot;: &quot;http://127.0.0.1:8082/foobar&quot;
+        }
+      ]
+    }
+  ]
+}
+</code></pre>
+<h1 id="examples">Examples</h1>
+<h2 id="admin-rest-api_1">Admin REST API</h2>
+<h3 id="default-settings">Default Settings</h3>
+<pre><code class="language-json">{
+  &quot;auth&quot;:&quot;6d732245002a9499b3842c0a7f9fc6b2d657c77bd612dbefa4f7f9357d08530a&quot;,
+  &quot;params&quot;:{
+    &quot;status&quot;: &quot;inactive&quot;,
+    &quot;addresses&quot;: [&quot;9sAejnQ9EBR1111111111111111111111111111111111AdYmVTw2Tv6L9KYkHjJ2wd737ov8ZL5QU7CJ4zV6basGP9fyno&quot;]
+  }
+ }
+</code></pre>
+<p>will put the listed address into the "inactive" state.</p>
+<h3 id="-disable-admin-auth-setting"><code>--disable-admin-auth</code> Setting</h3>
+<pre><code class="language-json">{
+  &quot;params&quot;:{
+    &quot;status&quot;: &quot;inactive&quot;,
+    &quot;addresses&quot;: [&quot;9sAejnQ9EBR1111111111111111111111111111111111AdYmVTw2Tv6L9KYkHjJ2wd737ov8ZL5QU7CJ4zV6basGP9fyno&quot;]
+  }
+ }
+</code></pre>
+<h2 id="monero-lws-admin_1">monero-lws-admin</h2>
+<p><strong>List every active Monero address on a newline:</strong>
+  <code>bash
+  monero-lws-admin list_accounts | jq -r '.active | .[] | .address'</code></p>
+<p><strong>Auto-accept every pending account creation request:</strong>
+  <code>bash
+  monero-lws-admin accept_requests create $(monero-lws-admin list_requests | jq -j '.create? | .[]? | .address?+" "')</code></p>
+<h1 id="debugging">Debugging</h1>
+<p><code>monero-lws-admin</code> has a debug mode that dumps everything stored in the
+database, except the blockchain hashes are always truncated and viewkeys are
+omitted by default (a command-line flag can enable viewkey output). Most of
+the array outputs are sorted to accelerate <code>jq</code> filtering and search queries.</p>
+<h2 id="indexes">Indexes</h2>
+<ul>
+<li><strong>blocks_by_id</strong> - array of objects sorted by block height.</li>
+<li><strong>accounts_by_status,id</strong> - A single object where account status names are
+   keys. Each value is an array of objects sorted by account id.</li>
+<li><strong>accounts_by_address</strong> - A single object where account addresses are keys.
+   Each value is an object containing the status and account id for the account
+   for lookup in <code>accounts_by_status,id</code>. The majority of account lookups should
+   be done by this id (an integer).</li>
+<li><strong>accounts_by_height,id</strong> - An array of objects sorted by block height. These
+   objects contain another array of objects sorted by account id.</li>
+<li><strong>outputs_by_account_id,block_id,tx_hash,output_id</strong> - An object where keys
+   are account ids. Each value is an array of objects sorted by block height,
+   transaction hash, then by output number.</li>
+<li><strong>spends_by_account_id,block_id,tx_hash,image</strong> - An object where keys are
+   account ids. Each value is an array of objects sorted by block height,
+   transaction hash, then by key image.</li>
+<li><strong>requests_by_type,address</strong> - An object where keys are request type, and
+   each value is an array of objects sorted by address.</li>
+</ul>
+<h2 id="examples_1">Examples</h2>
+<p><strong>List every key-image associated with every account:</strong>
+  <code>bash
+  monenero-lws-admin debug_database | jq '."spends_by_account_id,block_id,tx_hash,output_id" | map_values([.[] | .image])'</code>
+will output something like:
+  <code>json
+  {"1":["image1", "image2",...],"2":["image1","image2"...],...}</code></p>
+<p><strong>List every account that received XMR in a given transaction hash:</strong>
+  <code>bash
+  monenero-lws-admin debug_database | jq '."outputs_by_account_id,block_id,tx_hash,output_id" | map_values(select([.[] | .tx_hash == "hash"] | any)) | keys'</code>
+will output somethng like:
+  <code>json
+  {"1",...}</code></p>
+<p><strong>Add total received XMR for every account</strong>:
+  <code>bash
+  monenero-lws-admin debug_database | jq '."outputs_by_account_id,block_id,tx_hash,output_id" | map_values([.[] | .amount] | add)'</code>
+will output something like:
+  <code>json
+  {"1":6346,"2":45646}</code></p>
+<h1 id="extending-administration-in-monero-lws">Extending Administration in monero-lws</h1>
+<h2 id="json-via-stdin">JSON via <code>stdin</code></h2>
+<p>Some commands take sensitive information such as private view keys, and
+therefore reading arguments from <code>stdin</code> via JSON array would also be useful for
+those situations. This should be a relatively straightforward adaptation given
+the design of the positional arguments.</p>
+<h2 id="administration-via-zeromq">Administration via ZeroMQ</h2>
+<p>The LMDB database does account lookups by view-public only, so that CurveZMQ
+(which uses curve25519) can be used to authenticate an administration account
+without additional protocol overhead. The parameters to administration commands
+can be sent via JSON or MsgPack array since the functions already use positional
+arguments.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../daemon/" class="btn btn-neutral float-left" title="daemon"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../client/" class="btn btn-neutral float-right" title="client">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../daemon/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../client/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

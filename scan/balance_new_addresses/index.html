@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/scan/balance_new_addresses/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Balance New Addresses - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Balance New Addresses";
+        var mkdocs_page_input_path = "scan/balance_new_addresses.md";
+        var mkdocs_page_url = "/scan/balance_new_addresses/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Balance New Addresses</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#motivation">Motivation</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#configuration">Configuration</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#usage">Usage</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#algorithm">Algorithm</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#thread-selection-criteria">Thread Selection Criteria</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#scan-height-tracking">Scan Height Tracking</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#scope">Scope</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#example">Example</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#comparison-with-round-robin">Comparison with Round-Robin</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#when-new-addresses-are-added">When New Addresses Are Added</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#benefits">Benefits</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#limitations">Limitations</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../block_depth_threading/">Block Depth Threading</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Scan Algorithms</li>
+      <li class="breadcrumb-item active">Balance New Addresses</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/scan/balance_new_addresses.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="balance-new-addresses">Balance New Addresses</h1>
+<h2 id="overview">Overview</h2>
+<p>The <code>--balance-new-addresses</code> option changes how new addresses are assigned to scanner threads while the scanner is actively running. Instead of using round-robin distribution, addresses are assigned to threads based on their current scanning progress, ensuring better workload distribution and faster synchronization.</p>
+<h2 id="motivation">Motivation</h2>
+<p>The default round-robin algorithm assigns new addresses sequentially to threads without considering their current state. This can lead to:
+- New addresses being assigned to threads that are far behind, causing unnecessary delays
+- Imbalanced workload when addresses with different scan heights are added
+- Inefficient thread utilization when threads finish at different times</p>
+<p>The balance-new-addresses algorithm addresses these issues by intelligently matching new addresses to threads based on their scanning progress.</p>
+<h2 id="configuration">Configuration</h2>
+<ul>
+<li><code>--balance-new-addresses</code>: Enable balanced assignment of new addresses to threads (default: false)</li>
+</ul>
+<h2 id="usage">Usage</h2>
+<p>Enable balanced new address assignment:</p>
+<pre><code class="language-bash">monero-lws-daemon --balance-new-addresses [other options]
+</code></pre>
+<p>Or in config file:</p>
+<pre><code>balance-new-addresses=true
+</code></pre>
+<h2 id="algorithm">Algorithm</h2>
+<h3 id="thread-selection-criteria">Thread Selection Criteria</h3>
+<p>When a new address is added (e.g., an inactive account becomes active), the algorithm selects a thread using the following priority:</p>
+<ol>
+<li><strong>Primary preference</strong>: Thread with the highest scan height that is <strong>not above</strong> the account's scan height</li>
+<li>
+<p>If multiple threads meet this criteria, choose the one with the fewest addresses</p>
+</li>
+<li>
+<p><strong>Fallback</strong>: If all threads are above the account's scan height, choose the thread with the <strong>lowest</strong> scan height</p>
+</li>
+<li>This minimizes backtracking when all threads have already passed the account's starting point</li>
+<li>If multiple threads have the same lowest height, choose the one with the fewest addresses</li>
+</ol>
+<h3 id="scan-height-tracking">Scan Height Tracking</h3>
+<p>Each thread maintains a <code>current_min_height</code> value representing the minimum scan height of all accounts currently assigned to that thread. This value is:
+- Updated when new accounts are added to the thread (if the new account has a lower scan height)
+- Updated periodically as the thread processes blocks and advances its scanning progress
+- Used by the algorithm to determine which thread is best suited for a new account</p>
+<h3 id="scope">Scope</h3>
+<ul>
+<li><strong>Only affects local threads</strong>: The algorithm only applies to threads running on the local daemon. When enabled and local threads are available, <strong>all new addresses are assigned exclusively to local threads</strong>. Remote scanner clients will not receive any new addresses unless there are zero local threads available.</li>
+<li><strong>Only affects new addresses</strong>: This algorithm is used when addresses are added dynamically (e.g., inactive accounts becoming active). Initial thread assignment at startup uses the standard block-depth-threading or round-robin algorithms.</li>
+<li><strong>Works with other threading options</strong>: Can be used alongside <code>--block-depth-threading</code> and <code>--split-synced</code> options.</li>
+</ul>
+<h2 id="example">Example</h2>
+<p>Consider a scenario with 3 local threads and a new account that needs to be assigned:</p>
+<p><strong>Thread states:</strong>
+- Thread 0: scanning at height 3,000,000 (5 accounts)
+- Thread 1: scanning at height 3,100,000 (3 accounts)
+- Thread 2: scanning at height 2,900,000 (7 accounts)</p>
+<p><strong>Scenario 1: New account at height 3,050,000</strong>
+- Thread 0: height 3,000,000 ≤ 3,050,000 ✓
+- Thread 1: height 3,100,000 &gt; 3,050,000 ✗
+- Thread 2: height 2,900,000 ≤ 3,050,000 ✓
+- <strong>Result</strong>: Thread 0 is selected (highest height ≤ account height, and fewer accounts than Thread 2)</p>
+<p><strong>Scenario 2: New account at height 2,800,000 (all threads are above)</strong>
+- Thread 0: height 3,000,000 &gt; 2,800,000 ✗
+- Thread 1: height 3,100,000 &gt; 2,800,000 ✗
+- Thread 2: height 2,900,000 &gt; 2,800,000 ✗
+- <strong>Result</strong>: Thread 2 is selected (lowest height among all threads, minimizing backtracking)</p>
+<p><strong>Scenario 3: New account at height 3,200,000 (all threads are below)</strong>
+- Thread 0: height 3,000,000 ≤ 3,200,000 ✓
+- Thread 1: height 3,100,000 ≤ 3,200,000 ✓
+- Thread 2: height 2,900,000 ≤ 3,200,000 ✓
+- <strong>Result</strong>: Thread 1 is selected (highest height ≤ account height, and fewer accounts than Thread 0)</p>
+<h2 id="comparison-with-round-robin">Comparison with Round-Robin</h2>
+<p><strong>Round-Robin Algorithm</strong> (default):
+- Assigns addresses sequentially: Thread 0, Thread 1, Thread 2, Thread 0, ...
+- Does not consider thread state or account scan height
+- Simple and predictable, but can lead to suboptimal assignments</p>
+<p><strong>Balance New Addresses Algorithm</strong>:
+- Considers each thread's current scanning progress
+- Matches accounts to threads based on scan height compatibility
+- More complex, but provides better workload distribution and faster synchronization</p>
+<h2 id="when-new-addresses-are-added">When New Addresses Are Added</h2>
+<p>The balance-new-addresses algorithm is triggered when:
+- An inactive account becomes active (status changes from inactive to active)
+- New accounts are detected during periodic checks (every 10 seconds)</p>
+<p>It is <strong>not</strong> triggered by:
+- Initial thread assignment at startup (uses block-depth-threading or round-robin)
+- Full account reassignment (e.g., after rescan operations)
+- Accounts assigned to remote scanner clients</p>
+<h2 id="benefits">Benefits</h2>
+<ul>
+<li><strong>Faster synchronization</strong>: New addresses are assigned to threads that are already at or near their scan height</li>
+<li><strong>Reduced backtracking</strong>: Minimizes cases where threads need to scan backwards to process new accounts</li>
+<li><strong>Better workload distribution</strong>: Accounts are distributed based on actual thread progress rather than arbitrary rotation</li>
+<li><strong>Improved thread utilization</strong>: Threads that are ahead receive new work more efficiently</li>
+</ul>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li><strong>Remote threads excluded</strong>: When enabled and local threads are available, remote scanner clients will not receive any new addresses. Remote threads only receive work if there are zero local threads available.</li>
+<li>Does not affect initial thread assignment at startup</li>
+<li>Requires tracking thread scan heights, which adds minimal overhead</li>
+<li>May not provide benefits if all threads are at similar heights</li>
+<li><strong>Important</strong>: If you have remote scanner clients and want them to receive new addresses, do not enable this option, or ensure you have zero local scanner threads configured</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../round_robin/" class="btn btn-neutral float-left" title="Round Robin"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../block_depth_threading/" class="btn btn-neutral float-right" title="Block Depth Threading">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../round_robin/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../block_depth_threading/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
