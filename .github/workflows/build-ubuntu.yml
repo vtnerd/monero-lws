@@ -3,8 +3,10 @@ name: unix-ci
 on:
   push:
     branches: [ "master", "develop", "release-*" ]
+    paths-ignore: [ "docs/**", "mkdocs.yml" ]
   pull_request:
     branches: [ "master", "develop", "release-*" ]
+    paths-ignore: [ "docs/**", "mkdocs.yml" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
