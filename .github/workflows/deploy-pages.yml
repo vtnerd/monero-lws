@@ -1,0 +1,29 @@
+name: docs
+
+on:
+  push:
+    branches: [ "master" ]
+    paths: [ "docs/**" ]
+  pull_request:
+    branches: [ "develop" ]
+    paths: [ "docs/**" ]
+
+jobs:
+  deploy:
+    steps:
+      - name: Checkout LWS Source
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v6
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install mkdocs
+          python3 -m pip install mkdocs-swagger-ui-tag
+          python3 -m pip install mkdocs-schema-reader
+          python3 mkdocs build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site

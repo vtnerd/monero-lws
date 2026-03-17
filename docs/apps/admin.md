@@ -1,11 +1,11 @@
-# monero-lws Administration
+# Admin
 The `monero-lws-admin` executable or `--admin-rest-server` option in the
 `monero-lws-daemon` executable can be used to administer the database
 used by `monero-lws-daemon`. Any number of `monero-lws-admin` instances can run
 concurrently with a single `monero-lws-daemon` instance on the same database.
 Administration is necessary to authorize new accounts and rescan requests
-submitted from the REST API. The admin executable can also be used to list
-the contents of the LMDB file for debugging purposes.
+submitted from the [wallet API](/api/wallet). The admin executable can also be
+used to list the contents of the LMDB file for debugging purposes.
 
 # monero-lws-admin
 
@@ -21,14 +21,14 @@ search+filter the JSON output from the command.
 
 # Admin REST API
 The `monero-lws-daemon` can be started with 1+ `--admin-rest-server` parameters
-that specify a listening location for admin REST clients. By default, there is
-no admin REST server and no available admin accounts.
+that specify a listening location for [admin API](/api/admin) clients. By
+default, there is no admin REST server and no available admin accounts.
 
 An admin REST server can be merged with a regular REST server if path prefixes
 are specified, such as
 `--rest-server https://0.0.0.0:8443/basic --admin-rest-server https://0.0.0.0:8443/admin`.
 This will start a server listening on one port, 8443, and requires clients to
-specify `/basic/command` or `/admin/admin_command` when making a
+specify `/basic/command` or `/admin/admin/command` when making a
 request.
 
 An admin account account can be created via `monero-lws-admin create_admin`
@@ -58,9 +58,10 @@ if `--disable-admin-auth` is specified in the CLI arguments for the REST
 server.
 
 ## Commands (of Admin REST API)
-A subset of admin commands are available via admin REST API - the remainder
-are initially omitted for security purposes. The commands available via REST
-are:
+A subset of admin commands are available via [admin REST API](/api/admin) - the
+remainder are initially omitted for security purposes. The commands available
+via REST are:
+
   * [**accept_requests**](#accept_requests): `{"type": "import"|"create", "addresses":[...]}`
   * [**add_account**](#add_account): `{"address": ..., "key": ...}`
   * [**list_accounts**](#list_accounts): `{}`

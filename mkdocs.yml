@@ -1,0 +1,27 @@
+site_name: docs.monerolws.com
+site_url: https://docs.monerolws.com
+site_description: Documentation for Monero-LWS
+nav:
+  - Overview: index.md 
+  - Installation:
+    - From Source: installation/source.md
+    - Docker: installation/docker.md
+  - Processes:
+    - daemon: apps/daemon.md
+    - admin: apps/admin.md
+    - client: apps/client.md
+  - Scan Algorithms:
+    - Round Robin: scan/round_robin.md
+    - Balance New Addresses: scan/balance_new_addresses.md
+    - Block Depth Threading: scan/block_depth_threading.md
+    - Split Synced Threads: scan/split_synced_threads.md
+  - API:
+    - Wallet: api/wallet.md
+    - Admin: api/admin.md
+    - Webhooks/ZeroMQ: api/zmq.md
+    - RabbitMQ: api/rmq.md
+plugins:
+  - swagger-ui-tag
+theme: readthedocs
+repo_url: https://github.com/vtnerd/monero-lws
+edit_uri: edit/develop/docs
