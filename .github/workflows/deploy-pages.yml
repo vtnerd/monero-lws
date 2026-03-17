@@ -3,10 +3,7 @@ name: docs
 on:
   push:
     branches: [ "master" ]
-    paths: [ "docs/**" ]
-  pull_request:
-    branches: [ "develop" ]
-    paths: [ "docs/**" ]
+    paths: [ "docs/**", "mkdocs.yml" ]
 
 jobs:
   deploy:
