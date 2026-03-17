@@ -10,6 +10,7 @@ on:
 
 jobs:
   deploy:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout LWS Source
         uses: actions/checkout@v4
