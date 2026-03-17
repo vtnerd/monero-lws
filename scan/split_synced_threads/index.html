@@ -3,22 +3,22 @@
 <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/split_synced_threads/" />
-      <link rel="shortcut icon" href="../img/favicon.ico" />
-    <title>Split Synced Threading - docs.monerolws.com</title>
-    <link rel="stylesheet" href="../css/theme.css" />
-    <link rel="stylesheet" href="../css/theme_extra.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/scan/split_synced_threads/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Split Synced Threads - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
     
       <script>
         // Current page data
-        var mkdocs_page_name = "Split Synced Threading";
-        var mkdocs_page_input_path = "split_synced_threads.md";
-        var mkdocs_page_url = "/split_synced_threads/";
+        var mkdocs_page_name = "Split Synced Threads";
+        var mkdocs_page_input_path = "scan/split_synced_threads.md";
+        var mkdocs_page_url = "/scan/split_synced_threads/";
       </script>
     
     <!--[if lt IE 9]>
-      <script src="../js/html5shiv.min.js"></script>
+      <script src="../../js/html5shiv.min.js"></script>
     <![endif]-->
       <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
       <script>hljs.highlightAll();</script> 
@@ -30,49 +30,73 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
     <div class="wy-side-scroll">
       <div class="wy-side-nav-search">
-          <a href=".." class="icon icon-home"> docs.monerolws.com
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
         </a>
       </div>
 
       <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <ul>
-                <li class="toctree-l1"><a class="reference internal" href="..">Overview</a>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
                 </li>
               </ul>
               <p class="caption"><span class="caption-text">Installation</span></p>
               <ul>
-                  <li class="toctree-l1"><a class="reference internal" href="../installation/source/">From Source</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../installation/docker/">Docker</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
                   </li>
               </ul>
               <p class="caption"><span class="caption-text">Processes</span></p>
               <ul>
-                  <li class="toctree-l1"><a class="reference internal" href="../apps/daemon/">daemon</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../apps/admin/">admin</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../apps/client/">client</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
                   </li>
               </ul>
               <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
-              <ul>
-                  <li class="toctree-l1"><a class="reference internal" href="../scan/round_robin/">Round Robin</a>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../round_robin/">Round Robin</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../scan/balance_new_addresses/">Balance New Addresses</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../balance_new_addresses/">Balance New Addresses</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../scan/block_depth_threading/">Block Depth Threading</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../block_depth_threading/">Block Depth Threading</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Split Synced Threads</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#requirements">Requirements</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#arguments">Arguments</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#behavior">Behavior</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#address-classification">Address Classification</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#thread-allocation-algorithm">Thread Allocation Algorithm</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#edge-cases">Edge Cases</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#example">Example</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#benefits">Benefits</a>
+    </li>
+    </ul>
                   </li>
               </ul>
               <p class="caption"><span class="caption-text">API</span></p>
               <ul>
-                  <li class="toctree-l1"><a class="reference internal" href="../api/wallet/">Wallet</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../api/admin/">Admin</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../api/zmq/">Webhooks/ZeroMQ</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
                   </li>
-                  <li class="toctree-l1"><a class="reference internal" href="../api/rmq/">RabbitMQ</a>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
                   </li>
               </ul>
       </div>
@@ -82,16 +106,17 @@
     <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
       <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
           <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
-          <a href="..">docs.monerolws.com</a>
+          <a href="../..">docs.monerolws.com</a>
         
       </nav>
       <div class="wy-nav-content">
         <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
   <ul class="wy-breadcrumbs">
-    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
-      <li class="breadcrumb-item active">Split Synced Threading</li>
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Scan Algorithms</li>
+      <li class="breadcrumb-item active">Split Synced Threads</li>
     <li class="wy-breadcrumbs-aside">
-          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/split_synced_threads.md" class="icon icon-github"> Edit on GitHub</a>
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/scan/split_synced_threads.md" class="icon icon-github"> Edit on GitHub</a>
     </li>
   </ul>
   <hr/>
@@ -176,6 +201,10 @@
               
             </div>
           </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../block_depth_threading/" class="btn btn-neutral float-left" title="Block Depth Threading"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../api/wallet/" class="btn btn-neutral float-right" title="Wallet">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
 
   <hr/>
 
@@ -201,13 +230,17 @@
         </span>
     
     
+      <span><a href="../block_depth_threading/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../api/wallet/" style="color: #fcfcfc">Next &raquo;</a></span>
     
   </span>
 </div>
-    <script src="../js/jquery-3.6.0.min.js"></script>
-    <script>var base_url = "..";</script>
-    <script src="../js/theme_extra.js"></script>
-    <script src="../js/theme.js"></script>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
     <script>
         jQuery(function () {
             SphinxRtdTheme.Navigation.enable(true);
