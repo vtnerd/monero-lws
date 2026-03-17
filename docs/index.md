@@ -8,7 +8,7 @@ wallet, and is non-custodial (the "spend" keys are never sent to server). It is
 compatible with [Skylight wallet](https://skylight.magicgrants.org), and 
 [lwcli](https://github.com/cifro-codes/lwcli).
 
-## Background
+## Background-
 
 Monero wallets require complex scanning/decryption against _every_ transaction
 to determine if funds were sent to that wallet. This process can be offloaded
