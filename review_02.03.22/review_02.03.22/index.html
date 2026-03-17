@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://docs.monerolws.com/review_02.03.22/review_02.03.22/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Review 02.03.22 - docs.monerolws.com</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Review 02.03.22";
+        var mkdocs_page_input_path = "review_02.03.22/review_02.03.22.md";
+        var mkdocs_page_url = "/review_02.03.22/review_02.03.22/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> docs.monerolws.com
+        </a>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Overview</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Installation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/source/">From Source</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../installation/docker/">Docker</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Processes</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/daemon/">daemon</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/admin/">admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../apps/client/">client</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Scan Algorithms</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/round_robin/">Round Robin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/balance_new_addresses/">Balance New Addresses</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/block_depth_threading/">Block Depth Threading</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../scan/split_synced_threads/">Split Synced Threads</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">API</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/wallet/">Wallet</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/admin/">Admin</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/zmq/">Webhooks/ZeroMQ</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../api/rmq/">RabbitMQ</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">docs.monerolws.com</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Review 02.03.22</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/vtnerd/monero-lws/edit/develop/docs/review_02.03.22/review_02.03.22.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h2 id="overview">Overview</h2>
+<p>This review is meant to serve as an informal audit of <code>monero-lws</code> as of
+February 3, 2022. It is divided into 3 parts:</p>
+<ol>
+<li>How does <code>monero-lws</code> work?</li>
+<li>The code</li>
+<li>Suggestions</li>
+</ol>
+<p>It was put together as part of <a href="https://ccs.getmonero.org/proposals/j-berman-3-months-full-time.html">a CCS proposal</a>
+with the intention of getting <code>monero-lws</code> further along (and potentially 
+included in the <a href="https://github.com/monero-project">Monero project github</a>).</p>
+<p>Note that this report does not contain documentation for all code in
+<code>monero-lws</code>, and has to-do's for a number of folders and files. </p>
+<p>In my review, I did not find anything that would compromise <code>monero-lws</code> when
+examining from the lens of the following threat model:</p>
+<pre><code>A user who is running `monerod` + `monero-lws` on a machine only the user has 
+access to does not leak any information about their Monero transactions to a 3rd 
+party through normal usage. Examples of leaks would be:
+
+- a backdoor that sends sensitive data from `monero-lws` out to a 3rd party
+- `get_random_outs` responds with decoys that compromise the user's transactions 
+when stored on chain
+- calls to the exchange rate API reveal information to the service provider
+</code></pre>
+<p>Disclaimer: I wouldn't call this audit definitively conclusive that the above
+threat model is successfully defended, but I hope that it does inspire more
+confidence in this fine piece of software, and serves as a useful document for
+curious users, potential contributors, or any future auditors of <code>monero-lws</code>.
+I reviewed (and tried to provide documentation for) nooks and crannies across
+the code, and so at the very least can say with confidence there aren't any
+obvious backdoors.</p>
+<h2 id="how-does-monero-lws-work">How does <code>monero-lws</code> work?</h2>
+<p>Monero wallets need to scan all transactions in the blockchain to find which 
+ones belong to a user. <code>monero-lws</code> ("Monero light wallet server") is designed 
+to offload scanning for a user's transactions from the client to a server. As 
+stated in the <a href="/README.md">README.md</a>, it is an implementation of the 
+<a href="https://github.com/monero-project/meta/blob/master/api/lightwallet_rest.md">Monero light wallet REST API</a>, and is therefore compatible with e.g. a 
+<a href="https://github.com/mymonero/mymonero-app-js">MyMonero frontend</a>. A user may use
+a MyMonero app (or any other compatible frontend) to connect with their own
+running <code>monero-lws</code> instance, so that when the user revisits the app, the app
+is immediately ready to use for spending. <code>monero-lws</code> works by taking in a 
+user's address and view key, and perpetually scanning for transactions received
+and plausibly spent by the user.</p>
+<p>The primary risk to a user using <code>monero-lws</code> as their backend is that the
+device where it runs is an additional target for someone malicious to compromise
+a user's privacy. A user should assume that someone with access to wherever the 
+<code>monero-lws</code> backend is hosted will be able to determine all outputs received to
+the user, and in most cases today, the outputs spent by the user as well. This
+also includes <strong>amounts</strong> received to and spent by the user. If a <code>monero-lws</code> 
+instance is compromised, user funds are still SAFU since the private spend key
+is never sent to <code>monero-lws</code>. Ongoing research may improve this risk profile
+further, but the above should be users' default assumptions today.</p>
+<p>Whoever hosts a <code>monero-lws</code> instance can run the server via the
+<code>monero-lws-daemon</code> as described in the <a href="/README.md#running-monero-lws-daemon">README.md</a>
+("Running monero-lws-daemon"). The daemon is expected to run 24/7 and
+perpetually scan for transactions recevied to (and plausibly spent from) the
+addresses known to the server in real-time.</p>
+<p>Whoever hosts a <code>monero-lws</code> instance can perform administrative tasks via the
+<code>monero-lws-admin</code> program, as described in
+<a href="/docs/administration.md">administration.md</a>. The <code>monero-lws-daemon</code> does not
+need to be running in order for the admin to execute commands via
+<code>monero-lws-admin</code>.</p>
+<p>Both <code>monero-lws-daemon</code> and <code>monero-lws-admin</code> read/write from/to an LMDB
+database on the same machine hosting <code>monero-lws</code>.</p>
+<p><code>monero-lws-daemon</code> can also fetch exchange rates from a 3rd party API provider
+if an administrator wants. This is turned off by default.</p>
+<p>Here is a simplified diagram of the <code>monero-lws</code> architecture:</p>
+<p><br/></p>
+<p align="center"><img align="center" src="./architecture.png"></p>
+<p><br/></p>
+<p>In the <a href="#the-code">next section</a>, the code will be explained folder-by-folder,
+file-by-file, and in some cases where appropriate, function-by-function. The
+<a href="#areas-worth-exploring">final section</a> will highlight suggestions to
+potentially improve <code>monero-lws</code>.</p>
+<h2 id="the-code">The code</h2>
+<h3 id="src">/src</h3>
+<p>This is where the source code lives. The starter file for <code>monero-lws-daemon</code> is
+<a href="/src/server_main.cpp">/src/server_main.cpp</a>. The starter file for
+<code>monero-lws-admin</code> is <a href="/src/admin_main.cpp">/src/admin_main.cpp</a>. Both use
+a lot of shared code across the repo.</p>
+<h4 id="srcserver_maincpp">/src/server_main.cpp</h4>
+<p>Starts in <code>main()</code> initializing logs and loading tools, then passes command line
+args to a function <code>get_program()</code> to parse the args and construct the program
+to run. The resulting program is then passed to <code>run()</code>. Failures are caught 
+gracefully.</p>
+<p>Passing <code>--help</code> to <code>monero-lws-daemon</code> is the one exception that does not run
+a program, and instead outputs the following (note the configurable defaults):</p>
+<pre><code>Usage: [options]
+Options:
+  --db-path arg (=~/.bitmonero/light_wallet_server)
+                                        Folder for LMDB files
+  --network arg (=main)                 &lt;&quot;main&quot;|&quot;stage&quot;|&quot;test&quot;&gt; - Blockchain 
+                                        net type
+  --help                                Produce help message
+  --daemon arg (=tcp://127.0.0.1:18082) &lt;protocol&gt;://&lt;address&gt;:&lt;port&gt; of a 
+                                        monerod ZMQ RPC
+  --sub arg                             tcp://address:port or ipc://path of a 
+                                        monerod ZMQ Pub
+  --rest-server arg (=https://0.0.0.0:8443)
+                                        [(https|http)://&lt;address&gt;:]&lt;port&gt; for 
+                                        incoming connections, multiple 
+                                        declarations allowed
+  --rest-ssl-key arg                    &lt;path&gt; to PEM formatted SSL key for 
+                                        https REST server
+  --rest-ssl-certificate arg            &lt;path&gt; to PEM formatted SSL certificate
+                                        (chains supported) for https REST 
+                                        server
+  --rest-threads arg (=1)               Number of threads to process REST 
+                                        connections
+  --scan-threads arg (=8)               Maximum number of threads for account 
+                                        scanning
+  --access-control-origin arg           Specify a whitelisted HTTP control 
+                                        origin domain
+  --confirm-external-bind               Allow listening for external 
+                                        connections
+  --create-queue-max arg (=10000)       Set pending create account requests 
+                                        maximum
+  --exchange-rate-interval arg (=0)     Retrieve exchange rates in minute 
+                                        intervals from cryptocompare.com if 
+                                        greater than 0
+  --log-level arg (=1)                  Log level [0-4]
+</code></pre>
+<p>Note that <code>scan-threads</code> defaults to the maxmimum number of available threads
+on the host machine.</p>
+<p>Also note that the <code>rest-server</code> defaults to being served over https.</p>
+<p>Here are sample logs when you start the default program with <code>log-level</code> 4.</p>
+<pre><code>2022-01-11 07:56:42.713 I Using monerod ZMQ RPC at tcp://127.0.0.1:18082
+2022-01-11 07:56:42.713 I Starting blockchain sync with daemon
+2022-01-11 07:56:42.715 I [PARSE URI] regex not matched for uri: ^((.*?)://)?(\[(.*)\](:(\d+))?)(.*)?
+2022-01-11 07:56:42.715 I Binding on 0.0.0.0 (IPv4):8443
+2022-01-11 07:56:42.715 I Generating SSL certificate
+2022-01-11 07:56:43.092 D start accept (IPv4)
+2022-01-11 07:56:43.092 D Spawned connection #0 to 0.0.0.0 currently we have sockets count:1
+2022-01-11 07:56:43.092 D test, connection constructor set m_connection_type=1
+2022-01-11 07:56:43.092 I Run net_service loop( 1 threads)...
+2022-01-11 07:56:43.092 D Run server thread name: NET
+2022-01-11 07:56:43.092 D Reiniting OK.
+2022-01-11 07:56:43.092 I Listening for REST clients at https://0.0.0.0:8443
+</code></pre>
+<p>When <code>get_program()</code> calls <code>run()</code>, this creates the LMDB environment and 
+initializes all tables in the db, syncs <code>monero-lws</code> with the running <code>monerod</code> 
+daemon, subscribes to the monero ZMQ RPC, initializes an http client to query
+for exchange rates from cryptocompare.com, initializes the REST server so that
+it can start listening for requests, and starts the scanner so that it will 
+perpetually scan for users' transactions.</p>
+<h4 id="srcrest_servercpp-srcrest_serverh">/src/rest_server.cpp + /src/rest_server.h</h4>
+<p>The REST server exposes the following 7 endpoints:</p>
+<ul>
+<li><code>/login</code></li>
+<li><code>/import_wallet_request</code></li>
+<li><code>/get_address_info</code></li>
+<li><code>/get_address_txs</code></li>
+<li><code>/get_random_outs</code></li>
+<li><code>/get_unspent_outs</code></li>
+<li><code>/submit_raw_tx</code></li>
+</ul>
+<p>It handles requests via the function <code>handle_http_request()</code>, which does 
+standard validation such as whether the endpoint is implemented, if the request 
+is appropriately sized (each endpoint has sane default byte size allowances), 
+if the request is an HTTP POST request. Then executes the respective endpoint
+passing in params included in the request, then handles any errors and responds
+accordingly, or returns with a standard success response and body.</p>
+<h5 id="authentication">Authentication</h5>
+<p>Every endpoint that accepts an <code>address</code> and <code>view_key</code> as params
+(<code>/login</code>, <code>/get_address_info</code>, <code>/get_address_txs</code>, <code>/get_unspent_outs</code>, and
+<code>/import_wallet_request</code>) also enforces that the public view key included in 
+the <code>address</code> is derived from the private <code>view_key</code> provided in the request
+(via the <code>key_check()</code> function). Additionally, addresses are indexed in the db
+by the public view key. Thus, even if the public view key <em>is</em> derived from the
+private view key, if the public view key is not stored in the db, then the 
+response will fail. This way if a malicious user provides an honest user's
+public spend key, and also provides a public view key that is derived from some
+random private view key, the account would not be found in the db.  This
+ensures that only the user with the correct <code>address</code> and <code>view_key</code> pair 
+can access their own data on the server through the REST API.</p>
+<h5 id="exchange-rates">Exchange Rates</h5>
+<p><code>/get_address_info</code> is the only endpoint that responds with exchange rates iff 
+the server has exchange rates enabled. The server serves the latest cached
+exchange rates, rather than makes requests to the exchange rate API provider 
+every time exchange rates are included in a response. The server requests
+exchange rates and caches them in intervals of <code>exchange-rate-interval</code>, which 
+is an arg the admin can set when starting the <code>monero-lws-daemon</code>. This caching
+in set intervals strategy is a good privacy-respecting approach, otherwise the 
+exchange rate API provider could collect usage stats on how often a user calls 
+<code>/get_address_info</code>.</p>
+<h5 id="login">/login</h5>
+<blockquote>
+<p>Check for the existence of an account or create a new one.</p>
+</blockquote>
+<p>The very first thing done is authentication on the provided <code>address</code> and
+<code>view_key</code> as described above. On failure, it returns <code>bad_view_key</code>, which is 
+great. Next, it queries the db for the <code>account</code> with the given <code>address</code>. If
+the account is found, it checks if the account has status <code>hidden</code>, which is
+a status the admin can set via <code>monero-lws-admin</code>. If hidden, it will return
+<code>account_not_found</code>. Otherwise, if it exists, it will simply return with
+<code>create_account</code> set to false (account was already created), and with whatever
+<code>generated_locally</code> flag was set at account creation. If the account does not
+exist and the user is not attempting to <code>create_account</code>, or there was an error
+reading the db, then it will return with an error. Finally, if the account does
+not already exist, and the user is attempting to <code>create_account</code>, then the
+server will write a "creation request" to the db, which is just a request to
+create an account with that <code>address</code> and <code>view_key</code> pair (and provided flags).
+The admin will need to then manually approve the creation request via
+<code>monero-lws-admin</code> in order to add the address to the server.</p>
+<h5 id="import_wallet_request">/import_wallet_request</h5>
+<blockquote>
+<p>Request an account scan from the genesis block.</p>
+</blockquote>
+<p>This first calls <code>open_account()</code>, which authenticates the <code>address</code> and
+<code>view_key</code>, then retrieves the account from the db by address. Just like above,
+this function returns with <code>account_not_found</code> if hidden or not found, or
+returns with the account. If the account's starting scanning height 
+(<code>start_height</code>) is already 0, then the import request returns as fulfilled. 
+Otherwise, it checks for the existence of another import request.
+If one already exists, then the endpoint returns saying <code>Waiting for Approval</code>.
+If not, then it says <code>Accepted, waiting for approval</code>.</p>
+<h5 id="get_address_info">/get_address_info</h5>
+<blockquote>
+<p>Returns the minimal set of information needed to calculate a wallet balance. The server cannot calculate when a spend occurs without the spend key, so a list of candidate spends is returned.</p>
+</blockquote>
+<p>First calls <code>open_account()</code>. Then, using the account's unique identifier in the
+db, queries for all the user's received outputs and candidate spends. Then
+checks the db for the latest height the server knows. Then starts constructing
+height metadata for response. Then iterates over all received outputs, collects
+spend metadata for each, and totals up <code>total_received</code> and <code>locked_funds</code>. 
+Then iterates over candidate spends, retrieves spend metadata collected in 
+prior step, and totals up <code>total_sent</code>. Finally, retrieves exchange rates
+if the exchange rate interval is set. Then returns the constructed response.</p>
+<h5 id="get_address_txs">/get_address_txs</h5>
+<blockquote>
+<p>Returns information needed to show transaction history. The server cannot calculate when a spend occurs without the spend key, so a list of candidate spends is returned.</p>
+</blockquote>
+<p>First calls <code>open_account()</code>. Then queries db for received outputs, candidate
+spends, and latest height data. Constructs the same height metadata as above.
+Then, iterates over all received and candidates spends at one time, placing
+candidate spends in an array inside each received output.</p>
+<p>Note there is some more work done before sending the final response over the
+wire in <code>/src/rpc/light_wallet.cpp</code> that will be explained further later on.</p>
+<h5 id="get_random_outs">/get_random_outs</h5>
+<blockquote>
+<p>Selects random outputs to use in a ring signature of a new transaction. If the <code>amount</code> is <code>0</code> then the <code>monerod</code> RPC <code>get_output_distribution</code> should be used to locally select outputs using a gamma distribution as described in "An Empirical Analysis of Traceability in the Monero Blockchain". If the <code>amount</code> is not <code>0</code>, then the <code>monerod</code> RPC <code>get_output_histogram</code> should be used to locally select outputs using a triangular distribution (<code>uint64_t dummy_out = histogram.total * sqrt(float64(random_uint53) / float64(2^53))</code>).</p>
+</blockquote>
+<p>First, limits requests to a max mixin (ring size) of 50, or max amounts 
+requested (the number of different rings) to 20 to avoid overloading the server 
+with a single request. Sets up daemon RPC client to query for output data. Then 
+for all non-0 amounts, retrieives output histograms and places in an array. A 
+relevant query parameter to highlight here is the <code>recent_cutoff</code> when 
+requesting histograms; the recent cutoff was used in wallet2 to bias toward 
+recent outputs when selecting decoys for <strong>pre</strong>-RingCT outputs. However, 
+pre-RingCT outputs are infrequent enough today that it should no longer yield 
+practical privacy benefits to try and select more recent pre-RingCT outputs in 
+higher frequency. Thus, it is ok that <code>monero-lws</code> sets this <code>recent_cutoff</code> 
+param to 0, so that the query wastes no time in factoring in recency for 
+pre-RingCT outputs.</p>
+<p>After retrieving histograms for pre-RingCT outputs, retrieves the output
+distribution of RingCT outputs across the whole chain (if 0 amount outputs 
+are requested). This distribution is later passed into a <code>lws:gamma_picker</code> 
+declaration, where it's used to select RingCT decoys. </p>
+<p>Then sets up a constructor to fetch output public keys over RPC (accepts output
+id's as param).</p>
+<p>Final step, the function passes in all data (and fetch function) needed
+to actually make decoy selections from the distribution/histograms. This
+function is called <code>pick_random_outputs</code> and will be explained in greater
+detail later.</p>
+<p>The response from <code>pick_random_outputs</code> is the final response to 
+<code>/get_random_outs</code>.</p>
+<p>Note: it should be noted here that any server that records the selected decoys 
+and cross-references them with the outputs included in a transaction can easily 
+tell which output is real (the one not included as a decoy in the response).
+Thus, a user should expect that if they are using a light wallet server to
+construct transactions, the server can trivially tell which outputs are
+spent in the user's transactions, no heuristics needed.</p>
+<h5 id="get_unspent_outs">/get_unspent_outs</h5>
+<blockquote>
+<p>Returns a list of received outputs. The client must determine when the output was actually spent.</p>
+</blockquote>
+<p>First calls <code>open_account()</code>. Then makes an RPC request to <code>monerod</code> for the
+dynamic fee estimate. A relevant query parameter to highlight here is
+<code>num_grace_blocks</code>, which is the
+<a href="https://github.com/monero-project/monero/blob/298c9a357f6e57eccf28db1f3e734eb6da080d9a/src/cryptonote_core/blockchain.h#L646">"number of blocks we want the fee to be valid for"</a>.
+It is set to <code>10</code>, which matches <a href="https://github.com/monero-project/monero/blob/319b831e65437f1c8e5ff4b4cb9be03f091f6fc6/src/wallet/wallet2.cpp#L118">wallet2</a>.
+It is important this estimate matches what other Monero ecosystem users would 
+use, since if the fee were different, it would cause transactions constructed
+with the different fee to be fingerprintable. Thus, matching <code>num_grace_blocks</code>
+is good.</p>
+<p>The endpoint then gets all of a user's received outputs and for all outputs that 
+are &gt;= requested <code>dust_threshold</code>, or are in tx's with ring sizes &gt;= requested 
+<code>mixin_count</code>, gets their associated key images, then tacks the final <code>output</code> 
+object onto what will eventually become the <code>outputs</code> array in the response.</p>
+<p>Finally, calculates the <code>per_kb_fee</code> factoring in <code>size_scale</code> and <code>fee_mask</code>
+returned by the daemon. Note that <code>per_kb_fee</code> has been deprecated in the
+light wallet REST API, and this should be updated to <code>per_byte_fee</code>. See <a href="https://github.com/vtnerd/monero-lws/issues/25">this
+issue</a> for more.</p>
+<p>Note there is some more work done before sending the final response over the
+wire in <code>/src/rpc/light_wallet.cpp</code> that will be explained further later on.</p>
+<h5 id="submit_raw_tx">/submit_raw_tx</h5>
+<blockquote>
+<p>Submit raw transaction to be relayed to monero network.</p>
+</blockquote>
+<p>Very simple. Just relays the transaction over the daemon RPC <code>send_raw_tx_hex</code>
+endpoint. Returns error if not relayed successfully.</p>
+<h4 id="srcscannercpp-srcscannerh">/src/scanner.cpp + /src/scanner.h</h4>
+<p>This code handles scanning the blockchain for users' transactions while 
+<code>monero-lws-daemon</code> is running. It makes sure <code>monero-lws</code> is in sync with the
+chain, stays in sync, and just keeps scanning all the time.</p>
+<h5 id="lwsscannerstop">lws::scanner::stop()</h5>
+<p>Stops the scanner, naturally.</p>
+<p>Sets the <code>monero-lws-daemon</code>'s <code>running</code> state to false. It is called from
+<code>server_main.cpp</code>, which is listening for a SIGINT signal in order to trigger
+<code>lws::scanner::stop()</code>.</p>
+<h5 id="lwsscannersync">lws::scanner::sync()</h5>
+<p>Syncs the running <code>monero-lws-daemon</code> with the blockchain, making sure 
+<code>monero-lws-daemon</code> knows what blocks still need to be scanned.</p>
+<p>First thing this function does is reads the <code>monero-lws</code> db to find the most
+recent known block hashes. Then it requests block hashes from the running
+<code>monerod</code> daemon via RPC endpoint <code>/get_hashes_fast</code>, providing the known hashes
+as a param. Uses while loops to wait on daemon response and times out or exits
+if admin signals to end the program via SIGINT. Once daemon returns the
+response, if the daemon has already synced to the top of the chain, the <code>sync()</code>
+function returns successfully. If not, writes the returned new hashes to the
+<code>monero-lws</code> db, and rolls back/updates the chain if a reorg has been detected.
+If there are still more hashes to request from the daemon, continues loop
+requesting from the daemon. Otherwise, breaks and the function returns.</p>
+<h5 id="lwsscannerrun">lws::scanner::run()</h5>
+<p>Runs the scanner in a perpetual loop, so that it continues scanning for users' 
+transactions while <code>monero-lws-daemon</code> is running. Also updates exchange rates
+held in the cache.</p>
+<p>First retrieives all active accounts and their received outputs from the 
+<code>monero-lws</code> db. If no active accounts, sleeps for a bit. Otherwise, proceeds
+to scan for transactions for all active accounts inside <code>check_loop()</code>. Then,
+checks if the scanner has stopped and should exit <code>run()</code>, otherwise continues.
+Next initializes an rpc client connection to the daemon if one already not
+initialized. Then calls <code>lws::scanner::sync()</code> to make sure <code>monero-lws</code> is
+still in sync with <code>monerod</code>. Finally, if there is a sync error that is not a
+timeout, throws; if not timeout, warns in a log. Continues looping until
+there are users to scan transactions for.</p>
+<h6 id="check_loop">check_loop()</h6>
+<p>Relevant comments:</p>
+<blockquote>
+<p>Launches <code>thread_count</code> threads to run <code>scan_loop</code>, and then polls for active account changes in background</p>
+</blockquote>
+<pre><code>The algorithm here is extremely basic. Users are divided evenly amongst
+the configurable thread count, and grouped by scan height. If an old
+account appears, some accounts (grouped on that thread) will be delayed
+in processing waiting for that account to catch up. Its not the greatest,
+but this &quot;will have to do&quot; for the first cut.
+Its not expected that many people will be running
+&quot;enterprise level&quot; of nodes where accounts are constantly added.
+
+Another &quot;issue&quot; is that each thread works independently instead of more
+cooperatively for scanning. This requires a bit more synchronization, so
+was left for later. Its likely worth doing to reduce the number of
+transfers from the daemon, and the bottleneck on the writes into LMDB.
+
+If the active user list changes, all threads are stopped/joined, and
+everything is re-started.
+</code></pre>
+<p>Exactly as described, the first thing it does is sorts all users by 
+<code>scan_height</code>, so that it can send batches of users at a time into threads
+that execute <code>scan_loop()</code> over those users (so that users with similar heights
+are processed together). Then it enters a while loop that updates exchange rates
+over the exchange rate interval, and then perpetually checks for changes to
+the users stored in the <code>monero-lws</code> db. If it finds that there is a change
+in active users stored, <code>check_loop()</code> returns so that <code>lws::scanner::run()</code>
+can do another loop, collecting all active users again and re-entering
+<code>check_loop()</code> with the updated list.</p>
+<h6 id="scan_loop">scan_loop()</h6>
+<p>TO-DO</p>
+<h4 id="srcadmin_maincpp">/src/admin_main.cpp</h4>
+<h4 id="srccmakeliststxt">/src/CMakeLists.txt</h4>
+<h4 id="srcconfigcpp">/src/config.cpp</h4>
+<h4 id="srcconfigh">/src/config.h</h4>
+<h4 id="srcerrorcpp">/src/error.cpp</h4>
+<h4 id="srcerrorh">/src/error.h</h4>
+<h4 id="srcfwdh">/src/fwd.h</h4>
+<h4 id="srcoptionsh">/src/options.h</h4>
+<h4 id="srcwireh">/src/wire.h</h4>
+<h4 id="srcdb">/src/db</h4>
+<h5 id="srcdbaccountcpp">/src/db/account.cpp</h5>
+<h5 id="srcdbaccounth">/src/db/account.h</h5>
+<h5 id="srcdbcmakeliststxt">/src/db/CMakeLists.txt</h5>
+<h5 id="srcdbdatacpp">/src/db/data.cpp</h5>
+<h5 id="srcdbdatah">/src/db/data.h</h5>
+<h5 id="srcdbfwdh">/src/db/fwd.h</h5>
+<h5 id="srcdbstoragecpp">/src/db/storage.cpp</h5>
+<h5 id="srcdbstorageh">/src/db/storage.h</h5>
+<h5 id="srcdbstringcpp">/src/db/string.cpp</h5>
+<h5 id="srcdbstringh">/src/db/string.h</h5>
+<h4 id="srcrpc">/src/rpc</h4>
+<h5 id="srcrpcclientcpp">/src/rpc/client.cpp</h5>
+<h5 id="srcrpcclienth">/src/rpc/client.h</h5>
+<h5 id="srcrpccmakeliststxt">/src/rpc/CMakeLists.txt</h5>
+<h5 id="srcrpcdaemon_pubcpp">/src/rpc/daemon_pub.cpp</h5>
+<h5 id="srcrpcdaemon_pubh">/src/rpc/daemon_pub.h</h5>
+<h5 id="srcrpcdaemon_zmqcpp">/src/rpc/daemon_zmq.cpp</h5>
+<h5 id="srcrpcdaemon_zmqh">/src/rpc/daemon_zmq.h</h5>
+<h5 id="srcrpcfwdh">/src/rpc/fwd.h</h5>
+<h5 id="srcrpcjsonh">/src/rpc/json.h</h5>
+<h5 id="srcrpcligt_walletcpp">/src/rpc/ligt_wallet.cpp</h5>
+<h5 id="srcrpcligt_walleth">/src/rpc/ligt_wallet.h</h5>
+<h5 id="srcrpcratescpp">/src/rpc/rates.cpp</h5>
+<h5 id="srcrpcratesh">/src/rpc/rates.h</h5>
+<h4 id="srcutil">/src/util</h4>
+<h4 id="srcwire">/src/wire</h4>
+<h3 id="cmakeliststxt">/CMakeLists.txt</h3>
+<h2 id="suggestions">Suggestions</h2>
+<ul>
+<li>
+<p>Consider indexing addresses by a hash of the private view key instead of just
+public view key, so that timing analysis under perfect conditions cannot reveal
+whether an address is stored.</p>
+</li>
+<li>
+<p>See the current state of subaddress support
+<a href="https://github.com/monero-project/meta/pull/647">over here</a>.</p>
+</li>
+<li>
+<p>Share a guide on hosting <code>monero-lws</code> behind a .onion, and enable a frontend
+to make calls to it.</p>
+</li>
+<li>
+<p>The exchange rate API defaults to off. When turned on, it fetches prices in a
+custom interval over the clearnet. <code>monero-lws</code> could be bundled with tor or
+another anonymity network, so that queries for exchange rates are made over the
+anonymity network by default.</p>
+</li>
+<li>
+<p>Consider suggesting a particular interval to admins who wish to turn on the
+exchange rate interval or requiring intervals at particular windows (e.g. 10 
+seconds, 30 seconds, 60 seconds, etc.), to prevent an admin from fingerprinting 
+themselves via the exchange rate interval they choose to set.</p>
+</li>
+<li>
+<p>Allow users to add addresses and import requests in a secure way without 
+needing manual input from the admin, for example, by using a special auth token
+(or username/password combo) that allows a user to make as many requests as <br />
+they want (or comes with special rules). This minimizes need for out-of-band 
+solutions to automate this process in a potentially insecure way (e.g. 
+auto-accepting all requests).</p>
+</li>
+<li>
+<p>Be mindful that even if an account has a <code>hidden</code> status, someone would be
+able to still tell that account is stored on the server since <code>/login</code> will
+always return <code>account_not_found</code>, even if trying to create the account. This
+is not a big deal, because you'd need the <code>address</code> and <code>view_key</code> to be able
+to reach this point. Just worth being mindful of.</p>
+</li>
+</ul>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/vtnerd/monero-lws" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
