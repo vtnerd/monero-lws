@@ -152,6 +152,43 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(result.empty());
     }
 
+    SECTION("webhooks with empty outs")
+    {
+      const boost::uuids::uuid id = boost::uuids::random_generator{}();
+      const boost::uuids::uuid id2 = boost::uuids::random_generator{}();
+      {
+        lws::db::webhook_value value{
+          lws::db::webhook_dupsort{0, id},
+          lws::db::webhook_data{"http://the_url_spend", "the_token_spend"}
+        };
+        lws::db::webhook_value value2{
+          lws::db::webhook_dupsort{0, id2},
+          lws::db::webhook_data{"http://the_url_spend", "the_token_spend"}
+        };
+        MONERO_UNWRAP(
+          db.add_webhook(lws::db::webhook_type::tx_spend, account, std::move(value))
+        );
+        MONERO_UNWRAP(
+          db.add_webhook(lws::db::webhook_type::tx_confirmation, account, std::move(value2))
+        );
+      }
+
+      const auto scan_height = lws::db::block_id(lmdb::to_native(last_block.id) + 1);
+      crypto::hash chain[2] = {
+        last_block.hash,
+        crypto::rand<crypto::hash>()
+      };
+
+      lws::account full_account = lws::db::test::make_account(account, view);
+      full_account.updated(last_block.id);
+
+      auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
+      EXPECT(updated.has_value());
+      EXPECT(updated->spend_pubs.empty());
+      EXPECT(updated->accounts_updated == 1);
+      EXPECT(updated->confirm_pubs.size() == 0);
+    }
+
     SECTION("storage::update(...) one at a time")
     {
       lws::account full_account = lws::db::test::make_account(account, view);
@@ -436,7 +473,7 @@ LWS_CASE("db::storage::*_webhook")
       EXPECT(spends.size() == 1);
 
       const auto updated = db.update(last_block.id, chain, {std::addressof(full_account), 1}, nullptr);
-      EXPECT(!updated.has_error());
+      EXPECT(updated.error() == std::error_code{});
       EXPECT(updated->accounts_updated == 1);
       EXPECT(updated->confirm_pubs.size() == 3);
       EXPECT(updated->spend_pubs.size() == 1);
