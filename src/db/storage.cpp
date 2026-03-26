@@ -2649,12 +2649,21 @@ namespace db
     expect<void> check_spends(std::vector<webhook_tx_spend>& out, MDB_cursor& webhooks_cur, MDB_cursor& outputs_cur, const lws::account& user)
     {
       const account_id user_id = user.id();
-      const webhook_key hook_key{user_id, webhook_type::tx_spend};
-      MDB_val key = lmdb::to_val(hook_key);
+      MDB_val key = lmdb::to_val(user_id);
       MDB_val value{};
+      int err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_SET_KEY);
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          return success();
+        return log_lmdb_error(err, __LINE__, __FILE__);
+      }
+
+      const webhook_key hook_key{user_id, webhook_type::tx_spend};
+      key = lmdb::to_val(hook_key);
 
       // Find a tx_spend for user id
-      int err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_SET_KEY);
+      err = mdb_cursor_get(&webhooks_cur, &key, &value, MDB_SET_KEY);
       for (;;)
       {
         if (err)
@@ -2670,10 +2679,7 @@ namespace db
           out.reserve(user.spends().size());
           for (const spend& s : user.spends())
           {
-            key = lmdb::to_val(user_id);
-            value = lmdb::to_val(s.link.height);
-            err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_GET_BOTH_RANGE);
-
+            err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_FIRST_DUP);
             expect<output::spend_meta_> meta{common_error::kInvalidArgument};
             for (;;)
             {
@@ -2684,7 +2690,14 @@ namespace db
                 return meta.error();
               if (meta->id == s.source)
                 break;
-              err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_PREV_DUP);
+
+              const auto height = outputs.get_value<MONERO_FIELD(output, link.height)>(value);
+              if (!height)
+                return height.error();
+              if (s.link.height < *height)
+                return log_lmdb_error(MDB_NOTFOUND, __LINE__, __FILE__);
+
+              err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_NEXT_DUP);
             }
 
             out.push_back(
