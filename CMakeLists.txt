@@ -56,6 +56,13 @@ if(NOT SANITIZER STREQUAL "OFF")
   endif()
 endif()
 
+option(DEAD_FUNCTION_REMOVAL "Attempt gcc dead code elimination" OFF)
+if (DEAD_FUNCTION_REMOVAL)
+  add_compile_options("-ffunction-sections")
+  add_compile_options("-fdata-sections")
+  add_link_options("-Wl,--gc-sections")
+endif()
+
 if(STATIC)
   if(MSVC)
     set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .dll.a .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -210,6 +217,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # boost
+
 set(Boost_NO_BOOST_CMAKE ON)
 if(STATIC)
   set(Boost_USE_STATIC_LIBS ON)
