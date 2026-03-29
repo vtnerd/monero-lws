@@ -45,11 +45,11 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7_3/expat-2.7.3.tar.bz2 && \
-    echo "59c31441fec9a66205307749eccfee551055f2d792f329f18d97099e919a3b2f expat-2.7.3.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.7.3.tar.bz2 && \
-    rm expat-2.7.3.tar.bz2 && \
-    cd expat-2.7.3 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7_5/expat-2.7.5.tar.bz2 && \
+    echo "386a423d40580f1e392e8b512b7635cac5083fe0631961e74e036b0a7a830d77 expat-2.7.5.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.7.5.tar.bz2 && \
+    rm expat-2.7.5.tar.bz2 && \
+    cd expat-2.7.5 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
@@ -72,7 +72,7 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
     tar -xzf zeromq-4.3.5.tar.gz && \
     rm zeromq-4.3.5.tar.gz && \
     cd zeromq-4.3.5 && \
-    ./configure --disable-shared --enable-static --with-libsodium --disable-libunwind --with-pic && \
+    ./configure --disable-shared --enable-static --without-libsodium --disable-libunwind --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
 
@@ -88,24 +88,6 @@ RUN set -ex && wget https://archives.boost.io/release/1.90.0/source/boost_1_90_0
       --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
       --with-program_options --with-regex --with-serialization --with-serialization install
 
-# Switch to Monero source directory
-WORKDIR /monero
-
-# Git pull Monero source at specified tag/branch and compile monerod binary
-RUN git clone --recursive \
-    https://github.com/monero-project/monero . \
-    && git checkout ${MONERO_COMMIT_HASH} \
-    && git submodule init && git submodule update \
-    && mkdir -p build/release && cd build/release \
-    # Create make build files manually for release-static-linux-${TARGETARCH}
-    && case ${TARGETARCH:-amd64} in \
-        "arm64") cmake -D STATIC=ON -D ARCH="armv8-a" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=Release -D BUILD_TAG="linux-armv8" ../.. ;; \
-        "amd64") cmake -D STATIC=ON -D ARCH="x86-64" -D BUILD_64=ON -D CMAKE_BUILD_TYPE=Release -D BUILD_TAG="linux-x64" ../.. ;; \
-        *) echo "Dockerfile does not support this platform"; exit 1 ;; \
-    esac \
-    # Build only monerod binary using number of available threads
-    && cd /monero && nice -n 19 ionice -c2 -n7 make -j${NPROC:-$(nproc)} -C build/release daemon lmdb_lib multisig
-
 # Switch to monero-lws source directory
 WORKDIR /monero-lws
 
@@ -113,10 +95,10 @@ COPY . .
 
 ARG NPROC
 RUN set -ex \
-    && git submodule init && git submodule update \
+    && git submodule update --init --recursive \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON -D MONERO_SOURCE_DIR=/monero -D MONERO_BUILD_DIR=/monero/build/release .. \
-    && make -j${NPROC:-$(nproc)} \
+    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D LWS_DEAD_FUNCTION_REMOVAL=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON .. \
+    && make -j${NPROC:-$(nproc)} monero-lws-admin monero-lws-daemon monero-lws-unit \
     && ./tests/unit/monero-lws-unit
 
 # Begin final image build
