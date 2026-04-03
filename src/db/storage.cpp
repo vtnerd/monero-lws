@@ -769,7 +769,7 @@ namespace db
 
       const auto v0_requests = requests_v0.open(*txn);
       if (v0_requests)
-        MONERO_UNWRAP(convert_table<v0::request_info, request_info>(*txn, *v0_accounts, tables.requests));
+        MONERO_UNWRAP(convert_table<v0::request_info, request_info>(*txn, *v0_requests, tables.requests));
       else if (v0_requests != lmdb::error(MDB_NOTFOUND))
         MONERO_THROW(v0_requests.error(), "Error open old requests table");
 
