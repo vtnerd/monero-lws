@@ -18,6 +18,47 @@ tags:
   - name: subaddress
   - name: transaction
 paths:
+  /daemon_status:
+    get:
+      tags:
+        - transaction
+      summary: Monerod connection and sync status
+      description: |
+        Returns the current connection and sync status of the monero daemon.
+      operationId: daemon_status_get
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/daemon_status_response'
+        '405':
+          description: HTTP method is not GET or POST.
+        '500':
+          description: General errors.
+        '503':
+          description: ZMQ/daemon unavailable, timeout, or overload.
+    post:
+      tags:
+        - transaction
+      summary: Same as GET
+      description: |
+        Same handler as GET.
+      operationId: daemon_status_post
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/daemon_status_response'
+        '405':
+          description: HTTP method is not GET or POST.
+        '500':
+          description: General errors.
+        '503':
+          description: ZMQ/daemon unavailable, timeout, or overload.
   /get_address_info:
     post:
       tags:
@@ -757,6 +798,38 @@ paths:
           description: Unable to read from database
 components:
   schemas:
+    daemon_status_response:
+      type: object
+      properties:
+        outgoing_connections_count:
+          $ref: '#/components/schemas/uint64'
+        incoming_connections_count:
+          $ref: '#/components/schemas/uint64'
+        height:
+          $ref: '#/components/schemas/uint64'
+        target_height:
+          $ref: '#/components/schemas/uint64'
+        network:
+          type: string
+          enum:
+            - main
+            - test
+            - stage
+            - fake
+        state:
+          type: string
+          enum:
+            - ok
+            - no_connections
+            - synchronizing
+            - unavailable
+      required:
+        - outgoing_connections_count
+        - incoming_connections_count
+        - height
+        - target_height
+        - network
+        - state
     base58-address:
       type: string
       description: "Standard Monero address in base58"
