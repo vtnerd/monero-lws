@@ -57,7 +57,9 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "common/error.h"          // monero/src
@@ -75,6 +77,7 @@
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "net/net_ssl.h"           // monero/contrib/epee/include
 #include "net/net_utils_base.h"    // monero/contrib/epee/include
+#include "net/rate_limiter.h"
 #include "net/zmq.h"               // monero/src
 #include "net/zmq_async.h"
 #include "rpc/admin.h"
@@ -94,15 +97,48 @@ namespace lws
   struct runtime_options
   {
     const std::uint32_t max_subaddresses;
+    const unsigned rate_limit;
     const epee::net_utils::ssl_verification_t webhook_verify;
     const bool disable_admin_auth;
     const bool auto_accept_creation;
     const bool auto_accept_import;
-  };
 
+    explicit runtime_options(const rest_server::configuration& config) noexcept
+      : max_subaddresses(config.max_subaddresses),
+        rate_limit(config.rate_limit),
+        webhook_verify(config.webhook_verify),
+        disable_admin_auth(config.disable_admin_auth),
+        auto_accept_creation(config.auto_accept_creation),
+        auto_accept_import(config.auto_accept_import)
+    {}
+  };
+ 
   struct rest_server_data
   {
+    struct ip_tracking
+    {
+      std::map<boost::asio::ip::address, std::weak_ptr<net::rate_limiter>> active;
+      boost::mutex sync;
+
+      ip_tracking()
+        : active(), sync()
+      {}
+    };
+
+    struct account_tracking
+    {
+      std::unordered_map<crypto::public_key, std::weak_ptr<net::rate_limiter>> active;
+      boost::mutex sync;
+
+      account_tracking()
+        : active(), sync()
+      {}
+    };
+
     boost::asio::io_context io;
+    const std::shared_ptr<ip_tracking> active_ips;
+    const std::shared_ptr<account_tracking> active_accounts;
+    const std::shared_ptr<net::rate_limiter::window> tracker;
     const db::storage disk;
     const rpc::client client;
     const runtime_options options;
@@ -112,14 +148,56 @@ namespace lws
 
     rest_server_data(db::storage disk, rpc::client client, runtime_options options)
       : io(),
+        active_ips(options.rate_limit ? std::make_shared<ip_tracking>() : nullptr),
+        active_accounts(options.rate_limit ? std::make_shared<account_tracking>() : nullptr),
+        tracker(options.rate_limit ? net::rate_limiter::make_tracker(io) : nullptr),
         disk(std::move(disk)),
         client(std::move(client)),
         options(std::move(options)),
-        webhook_client(options.webhook_verify),
         clients(),
+        webhook_client(options.webhook_verify),
         sync()
     {}
 
+    template<typename T, typename U>
+    std::shared_ptr<net::rate_limiter> track(std::shared_ptr<T> map, const U& src)
+    {
+      if (!map)
+        throw std::logic_error{"rest_server_data::track unexpected nullptr"};
+
+      std::shared_ptr<net::rate_limiter> out;
+      const boost::lock_guard<boost::mutex> lock{map->sync};
+      std::weak_ptr<net::rate_limiter>& active = map->active[src];
+      if (!(out = active.lock()))
+      {
+        std::weak_ptr<T> weak = map;
+        active = out = std::shared_ptr<net::rate_limiter>{
+          new net::rate_limiter{}, [src, weak = std::move(weak)] (net::rate_limiter* const ptr) {
+            const std::unique_ptr<net::rate_limiter> cleanup{ptr};
+            const auto map = weak.lock();
+            if (map)
+            {
+              const boost::lock_guard<boost::mutex> lock{map->sync};
+              const auto elem = map->active.find(src);
+              if (elem != map->active.end() && elem->second.expired())
+                map->active.erase(elem);
+            }
+        }};
+        net::rate_limiter::track(tracker, out);
+      }
+      return out;
+    }
+
+    std::shared_ptr<net::rate_limiter> track_ip(const boost::asio::ip::address& src)
+    {
+      return track(active_ips, src);
+    }
+
+    std::shared_ptr<net::rate_limiter> track_account(const crypto::public_key& src)
+    {
+      return track(active_accounts, src);
+    }
+ 
     expect<net::zmq::async_client> get_async_client()
     {
       boost::unique_lock<boost::mutex> lock{sync};
@@ -157,20 +235,117 @@ namespace lws
     constexpr const unsigned max_ring_size = 20;
     constexpr const unsigned max_rings = 150;
 
-    struct connection_data
+    class connection_data
     {
-      rest_server_data* const global; //!< Valid for lifetime of server
-      boost::beast::http::verb last_verb; 
-      bool passed_login; //!< True iff a login via viewkey was successful
+      rest_server_data* const global_; //!< Valid for lifetime of server
+      std::shared_ptr<net::rate_limiter> calls_;
+      boost::beast::http::verb last_verb_;
+      boost::optional<crypto::public_key> view_;
 
-      explicit connection_data(rest_server_data* global) noexcept
-        : global(global), last_verb(boost::beast::http::verb::unknown), passed_login(false)
+      static bool is_private(const boost::asio::ip::address_v4& src) noexcept
+      {
+        const auto bytes = src.to_bytes();
+        const unsigned first = std::get<0>(bytes);
+        const unsigned second = std::get<1>(bytes);
+
+        // 10.x.x.x || 192.168.x.x
+        if (first == 10 || (first == 192 && second == 168))
+          return true;
+        // 172.16.0.0 - 172.31.255.255
+        if (first == 172 && (second & 0xf0) == 16)
+          return true;
+        return false;
+      }
+
+      static bool is_private(const boost::asio::ip::address_v6& src) noexcept
+      {
+        // FC00::/8 || FD00::/8
+        const auto bytes = src.to_bytes();
+        return (std::get<0>(bytes) & 0xfe) == 0xfc;
+      }
+
+      static bool is_private(const boost::asio::ip::address& src) noexcept
+      {
+        if (src.is_v4())
+          return is_private(src.to_v4());
+        else if (src.is_v6() && src.to_v6().is_v4_mapped())
+          return is_private(boost::asio::ip::make_address_v4(boost::asio::ip::v4_mapped, src.to_v6()));
+        else if (src.is_v6())
+          return is_private(src.to_v6());
+        return false;
+      }
+
+      unsigned get_max_calls() const noexcept
+      {
+        unsigned rc = global()->options.rate_limit;
+        if (!logged_in())
+          rc /= 4;
+        return rc;
+      }
+
+    public:
+      explicit connection_data(rest_server_data* const global) noexcept
+        : global_(global), calls_(), last_verb_(boost::beast::http::verb::unknown), view_()
       {}
+
+      connection_data(const connection_data&) = delete;
+      ~connection_data() noexcept = default;
+      connection_data& operator=(const connection_data&) = delete;
+
+      rest_server_data* global() const noexcept { return global_; }
+      bool logged_in() const noexcept { return bool(view_); }
+
+      void last_verb(boost::beast::http::verb value) noexcept { last_verb_ = value; }
+      boost::beast::http::verb last_verb() const noexcept { return last_verb_; }
+
+      void login(const crypto::public_key& src)
+      {
+        if (!view_ || *view_ != src)
+        {
+          view_ = src;
+          if (config::rate::max_calls_per_second && global()->options.rate_limit)
+          {
+            const std::shared_ptr<net::rate_limiter> calls = calls_;
+            calls_ = global()->track_account(src);
+            assert(calls_);
+            calls_->add_calls(calls);
+          }
+        }
+      }
+
+      bool rate_limited(const boost::asio::ip::address& src)
+      {
+        if (!config::rate::max_calls_per_second || !global()->options.rate_limit)
+          return false;
+        if (!calls_)
+        {
+          if (src.is_loopback() || is_private(src))
+          {
+            // per connection, avoid make_shared due to add_calls
+            calls_ = std::shared_ptr<net::rate_limiter>{new net::rate_limiter{}};
+            net::rate_limiter::track(global()->tracker, calls_);
+          }
+          else
+            calls_ = global()->track_ip(src);
+        }
+        assert(calls_);
+        return calls_->rate_limited(get_max_calls(), 1);
+      }
+
+      bool rate_limited(const unsigned weight) const
+      {
+        if (!config::rate::max_calls_per_second || !global()->options.rate_limit)
+          return false;
+        assert(calls_); // expectation is that ip address tracking is started
+        if (calls_)
+          return calls_->rate_limited(get_max_calls(), weight);
+        return false;
+      }
 
       //! \return Next request timeout, based on login status
       std::chrono::seconds get_request_timeout() const noexcept
       {
-        return passed_login ?
+        return logged_in() ?
           rest_request_timeout_login : rest_request_timeout_initial;
       }
     };
@@ -274,7 +449,7 @@ namespace lws
         const auto major = to_uint(lookahead.maj_i);
         if (std::numeric_limits<std::uint32_t>::max() < major / minor)
           return false;
-        return major * minor <= data.global->options.max_subaddresses;
+        return major * minor <= data.global()->options.max_subaddresses;
       }
       return true;
     }
@@ -364,7 +539,8 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
-          if (config::daemon_wait_queue_max < active->resumers.size())
+          static_assert(0 < config::rate::daemon_wait_queue_max / 4);
+          if (config::rate::daemon_wait_queue_max < active->resumers.size() || (!data.logged_in() && config::rate::daemon_wait_queue_max / 4 < active->resumers.size()))
             return {error::load};
 
           active->resumers.push_back(std::move(resume));
@@ -491,11 +667,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.global->get_async_client();
+        expect<net::zmq::async_client> client = data.global()->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(*data.global, std::move(*client));
+        active = std::make_shared<frame>(*data.global(), std::move(*client));
         cache.result = nullptr;
         cache.status = active;
         active->resumers.push_back(std::move(resume));
@@ -514,11 +690,11 @@ namespace lws
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = open_account(req, data.global()->disk.clone());
         if (!user)
           return user.error();
 
-        data.passed_login = true;
+        data.login(req.address.view_public); // track abuse, etc
         response resp{};
 
         auto outputs = user->second.get_outputs(user->first.id);
@@ -576,7 +752,7 @@ namespace lws
         }
 
         // `get_rates()` nevers does I/O, so handler can remain synchronous
-        resp.rates = data.global->client.get_rates();
+        resp.rates = data.global()->client.get_rates();
         if (!resp.rates && !rates_error_once.test_and_set(std::memory_order_relaxed))
           MWARNING("Unable to retrieve exchange rates: " << resp.rates.error().message());
 
@@ -591,11 +767,11 @@ namespace lws
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = open_account(req, data.global()->disk.clone());
         if (!user)
           return user.error();
 
-        data.passed_login = true;
+        data.login(req.address.view_public); // track abuse, etc
         auto outputs = user->second.get_outputs(user->first.id);
         if (!outputs)
           return outputs.error();
@@ -725,6 +901,9 @@ namespace lws
         if (max_ring_size < req.count || max_rings < req.amounts.values.size())
           return {lws::error::exceeded_rest_request_limit};
 
+        if (data.rate_limited(config::rate::get_random_outs_weight))
+          return {error::rate_limited};
+
         std::sort(req.amounts.values.begin(), req.amounts.values.end(), std::greater<>{});
 
         struct frame
@@ -760,7 +939,8 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
-          if (config::get_random_outs_max < active->resumers.size())
+          static_assert(0 < config::rate::get_random_outs_max / 4);
+          if (config::rate::get_random_outs_max < active->resumers.size() || (!data.logged_in() && config::rate::get_random_outs_max / 4 < active->resumers.size()))
             return {error::load};
 
           active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1032,11 +1212,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.global->get_async_client();
+        expect<net::zmq::async_client> client = data.global()->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(*data.global, std::move(*client));
+        active = std::make_shared<frame>(*data.global(), std::move(*client));
         cache.status = active;
 
         active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1066,11 +1246,11 @@ namespace lws
 
       static expect<response> handle(request const& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = open_account(req, data.global()->disk.clone());
         if (!user)
           return user.error();
 
-        data.passed_login = true;
+        data.login(req.address.view_public); // track abuse, etc
         auto subaddrs = user->second.get_subaddresses(user->first.id);
         if (!subaddrs)
           return subaddrs.error();
@@ -1193,13 +1373,14 @@ namespace lws
         {
           rpc_command::Response result = cache.result;
           lock.unlock();
-          return generate_response(std::move(req), std::move(result), data.global->disk.clone());
+          return generate_response(std::move(req), std::move(result), data.global()->disk.clone());
         }
 
         auto active = cache.status.lock();
         if (active)
         {
-          if (config::daemon_wait_queue_max < active->resumers.size())
+          static_assert(0 < config::rate::daemon_wait_queue_max / 4);
+          if (config::rate::daemon_wait_queue_max < active->resumers.size() && (!data.logged_in() && config::rate::daemon_wait_queue_max / 4 < active->resumers.size()))
             return {error::load};
 
           active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1316,11 +1497,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.global->get_async_client();
+        expect<net::zmq::async_client> client = data.global()->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(*data.global, std::move(*client));
+        active = std::make_shared<frame>(*data.global(), std::move(*client));
         cache.result = rpc_command::Response{};
         cache.status = active;
         active->resumers.emplace_back(std::move(req), std::move(resume));
@@ -1341,7 +1522,7 @@ namespace lws
       {
         lws::db::block_id height{};
         {
-          auto reader = data.global->disk.start_read();
+          auto reader = data.global()->disk.start_read();
           if (reader)
           {
             auto db_height = reader->get_last_block();
@@ -1355,7 +1536,7 @@ namespace lws
         }
 
         // response constructor fills remaining fields
-        return response{height, data.global->options.max_subaddresses};
+        return response{height, data.global()->options.max_subaddresses};
       }
     };
 
@@ -1370,11 +1551,11 @@ namespace lws
         bool fulfilled = false;
         db::address_index lookahead{};
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = open_account(req.creds, data.global()->disk.clone());
           if (!user)
             return user.error();
 
-          data.passed_login = true;
+          data.login(req.creds.address.view_public); // track abuse, etc
           if (!check_lookahead(data, req.lookahead))
             return {lws::error::max_subaddresses};
 
@@ -1409,7 +1590,7 @@ namespace lws
                 // if not same
                 if (user->first.lookahead.maj_i != req.lookahead.maj_i && user->first.lookahead.min_i != req.lookahead.min_i)
                 {
-                  MONERO_CHECK(data.global->disk.clone().shrink_lookahead(req.creds.address, req.lookahead));
+                  MONERO_CHECK(data.global()->disk.clone().shrink_lookahead(req.creds.address, req.lookahead));
                   lookahead = req.lookahead;
                 }
               }
@@ -1421,12 +1602,12 @@ namespace lws
 
         if (new_request)
         {
-          auto disk = data.global->disk.clone();
+          auto disk = data.global()->disk.clone();
           MONERO_CHECK(disk.import_request(req.creds.address, db::block_id(req.from_height), req.lookahead));
 
-          if (data.global->options.auto_accept_import)
+          if (data.global()->options.auto_accept_import)
           {
-            const auto accepted = disk.accept_requests(db::request::import_scan, {std::addressof(req.creds.address), 1}, data.global->options.max_subaddresses);
+            const auto accepted = disk.accept_requests(db::request::import_scan, {std::addressof(req.creds.address), 1}, data.global()->options.max_subaddresses);
             if (!accepted)
             {
               MERROR("Failed to import account " << db::address_string(req.creds.address) << ": " << accepted.error());
@@ -1456,7 +1637,7 @@ namespace lws
         if (!key_check(req.creds))
           return {lws::error::bad_view_key};
 
-        auto disk = data.global->disk.clone();
+        auto disk = data.global()->disk.clone();
         {
           auto reader = disk.start_read();
           if (!reader)
@@ -1471,7 +1652,7 @@ namespace lws
               return {lws::error::account_not_found};
 
             // Do not count a request for account creation as login
-            data.passed_login = true;
+            data.login(req.creds.address.view_public); // track abuse, etc
             return response{false, bool(account->second.flags & db::account_generated_locally), account->second.lookahead};
           }
           else if (!req.create_account || account != lws::error::account_not_found)
@@ -1481,21 +1662,24 @@ namespace lws
         if (!check_lookahead(data, req.lookahead))
           return {lws::error::max_subaddresses};
 
+        if (data.rate_limited(config::rate::account_creation_weight))
+          return {error::rate_limited};
+
         const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
         const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags, req.lookahead);
         if (!hooks)
           return hooks.error();
 
-        if (data.global->options.auto_accept_creation)
+        if (data.global()->options.auto_accept_creation)
         {
-          const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1}, data.global->options.max_subaddresses);
+          const auto accepted = disk.accept_requests(db::request::create, {std::addressof(req.creds.address), 1}, data.global()->options.max_subaddresses);
           if (!accepted)
           {
             MERROR("Failed to move account " << db::address_string(req.creds.address) << " to available state: " << accepted.error());
             req.lookahead = {};
           }
           else
-            data.passed_login = true;
+            data.login(req.creds.address.view_public); // track abuse, etc
         }
         else
           req.lookahead = {};
@@ -1506,7 +1690,7 @@ namespace lws
           // log errors when it fails
 
           rpc::send_webhook_async(
-            data.global->io, data.global->client, data.global->webhook_client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:"
+            data.global()->io, data.global()->client, data.global()->webhook_client, epee::to_span(*hooks), "json-full-new_account_hook:", "msgpack-full-new_account_hook:"
           );
         }
 
@@ -1526,13 +1710,13 @@ namespace lws
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = open_account(req.creds, data.global()->disk.clone());
           if (!user)
             return user.error();
           id = user->first.id;
         }
 
-        data.passed_login = true;
+        data.login(req.creds.address.view_public); // track abuse, etc
         const std::uint32_t major_i = req.maj_i.value_or(0);
         const std::uint32_t minor_i = req.min_i.value_or(0);
         const std::uint32_t n_major = req.n_maj.value_or(50);
@@ -1545,7 +1729,7 @@ namespace lws
         {
           if (std::numeric_limits<std::uint32_t>::max() / n_major < n_minor)
             return {lws::error::max_subaddresses};
-          if (data.global->options.max_subaddresses < n_major * n_minor)
+          if (data.global()->options.max_subaddresses < n_major * n_minor)
             return {lws::error::max_subaddresses};
 
           std::vector<db::subaddress_dict> ranges;
@@ -1556,7 +1740,7 @@ namespace lws
               db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
-          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global->options.max_subaddresses);
+          auto upserted = data.global()->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global()->options.max_subaddresses);
           if (!upserted)
             return upserted.error();
           new_ranges = std::move(*upserted);
@@ -1565,7 +1749,7 @@ namespace lws
         if (get_all)
         {
           // must start a new read after the last write
-          auto disk = data.global->disk.clone();
+          auto disk = data.global()->disk.clone();
           auto reader = disk.start_read();
           if (!reader)
             return reader.error();
@@ -1631,7 +1815,8 @@ namespace lws
         auto active = cache.status.lock();
         if (active)
         {
-          if (std::numeric_limits<std::size_t>::max() - msg.size() < active->outstanding || config::submit_tx_max < msg.size() + active->outstanding)
+          static_assert(0 < config::rate::submit_tx_max / 4);
+          if (std::numeric_limits<std::size_t>::max() - msg.size() < active->outstanding || config::rate::submit_tx_max < msg.size() + active->outstanding || (!data.logged_in() && config::rate::submit_tx_max / 4 < msg.size() + active->outstanding))
             return {error::load};
 
           active->outstanding += msg.size(); 
@@ -1760,11 +1945,11 @@ namespace lws
           }
         };
 
-        expect<net::zmq::async_client> client = data.global->get_async_client();
+        expect<net::zmq::async_client> client = data.global()->get_async_client();
         if (!client)
           return client.error();
 
-        active = std::make_shared<frame>(*data.global, std::move(*client));
+        active = std::make_shared<frame>(*data.global(), std::move(*client));
         cache.status = active;
 
         active->outstanding += msg.size();
@@ -1784,30 +1969,30 @@ namespace lws
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!data.global->options.max_subaddresses)
+        if (!data.global()->options.max_subaddresses)
           return {lws::error::max_subaddresses};
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = open_account(req.creds, data.global()->disk.clone());
           if (!user)
             return user.error();
           id = user->first.id;
         }
 
-        data.passed_login = true;
+        data.login(req.creds.address.view_public); // track abuse, etc
         const bool get_all = req.get_all.value_or(true);
 
         std::vector<db::subaddress_dict> all_ranges;
-        auto disk = data.global->disk.clone();
+        auto disk = data.global()->disk.clone();
         auto new_ranges =
-          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global->options.max_subaddresses);
+          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global()->options.max_subaddresses);
         if (!new_ranges)
           return new_ranges.error();
 
         if (get_all)
         {
-          auto reader = data.global->disk.start_read();
+          auto reader = data.global()->disk.start_read();
           if (!reader)
             return reader.error();
           auto rc = reader->get_subaddresses(id);
@@ -1833,7 +2018,7 @@ namespace lws
       request req{};
       if (!std::is_empty<request>())
       {
-        if (data.last_verb != boost::beast::http::verb::post)
+        if (data.last_verb() != boost::beast::http::verb::post)
           return {error::bad_verb};
         std::error_code error = wire::json::from_bytes(std::move(root), req);
         if (error)
@@ -1869,7 +2054,7 @@ namespace lws
     {
       using request = typename E::request;
 
-      if (data.last_verb != boost::beast::http::verb::post)
+      if (data.last_verb() != boost::beast::http::verb::post)
         return {error::bad_verb};
       
       admin<request> req{};
@@ -1879,9 +2064,9 @@ namespace lws
           return error;
       }
 
-      rpc::add_values(req.params, data.global->options); // add max_subaddresses
-      db::storage disk = data.global->disk.clone();
-      if (!data.global->options.disable_admin_auth)
+      rpc::add_values(req.params, data.global()->options); // add max_subaddresses
+      db::storage disk = data.global()->disk.clone();
+      if (!data.global()->options.disable_admin_auth)
       {
         if (!req.auth)
           return {error::account_not_found};
@@ -2117,6 +2302,12 @@ namespace lws
       MDEBUG("Destroying connection " << this);
     }
 
+    bool rate_limited()
+    {
+      // cannot pass ip in constructor because remote endpoint is not finalized
+      return data_.rate_limited(sock().remote_endpoint().address());
+    }
+
     template<typename F>
     void bad_request(const boost::beast::http::status status, F&& resume)
     {
@@ -2145,6 +2336,8 @@ namespace lws
         return bad_request(boost::beast::http::status::forbidden, std::forward<F>(resume));
       else if (error == lws::error::max_subaddresses)
         return bad_request(boost::beast::http::status::conflict, std::forward<F>(resume));
+      else if (error == lws::error::rate_limited)
+        return bad_request(boost::beast::http::status::too_many_requests, std::forward<F>(resume));
       else if (error.default_error_condition() == std::errc::timed_out || error.default_error_condition() == std::errc::no_lock_available)
         return bad_request(boost::beast::http::status::service_unavailable, std::forward<F>(resume));
       return bad_request(boost::beast::http::status::internal_server_error, std::forward<F>(resume));
@@ -2233,6 +2426,10 @@ namespace lws
 
       MDEBUG("Received HTTP request from " << self_.get() << " to target " << target);
 
+      // try to short-circuit the checks early if build-time disabled
+      if (config::rate::max_calls_per_second && self_->rate_limited())
+        return self_->bad_request(boost::beast::http::status::too_many_requests, std::forward<F>(resume));
+
       // Checked access for `parser_` on first use
       endpoint const* const handler = self_->parent_->get_endpoint(target);
       if (!handler)
@@ -2275,7 +2472,7 @@ namespace lws
       }
 
       MDEBUG("Running REST handler " << handler->name << " on " << self_.get());
-      self_->data_.last_verb = verb;
+      self_->data_.last_verb(verb);
       auto body = handler->run(std::move(self_->parser_->get()).body(), self_->data_, std::move(resumer));
       if (!body)
         return self_->bad_request(body.error(), std::forward<F>(resume));
@@ -2399,7 +2596,7 @@ namespace lws
   }
 
   rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation, config.auto_accept_import})),
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config})),
       ports_(),
       workers_()
   {

@@ -68,6 +68,7 @@ namespace lws
     signal_abort_scan,          //!< In process ZMQ PUB to abort the scan was received
     signal_unknown,             //!< An unknown in process ZMQ PUB was received
     system_clock_invalid_range, //!< System clock is out of range for storage format
+    rate_limited,               //!< IP or account has been rate limited
     rmq_failure,                //!< Error within RMQ library
     tx_relay_failed             //!< Daemon failed to relayed tx from REST client
   };

@@ -109,6 +109,8 @@ namespace lws
         return "An unknown in-process message was received";
       case error::system_clock_invalid_range:
         return "System clock is out of range for account storage format";
+       case error::rate_limited:
+        return "IP or account has been rate limited";
       case error::rmq_failure:
         return "Failure within the RMQ library";
       case error::tx_relay_failed:

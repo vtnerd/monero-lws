@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,57 +27,42 @@
 
 #pragma once
 
-#include <boost/thread/thread.hpp>
-#include <cstdint>
-#include <list>
+#include <boost/asio/io_context.hpp>
+#include <boost/container/flat_set.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/thread/mutex.hpp>
+#include <chrono>
 #include <memory>
-#include <string>
-#include <vector>
+#include <utility>
 
-#include "db/storage.h"
-#include "net/net_ssl.h"
-#include "rpc/client.h"
-#include "span.h"
-
-namespace lws
+namespace net
 {
-  struct rest_server_data;
-  class rest_server
+  //! Tracks weighted calls over a fixed time interval for rate limiting.
+  class rate_limiter
   {
-    struct internal;
-    template<typename> struct connection;
-    template<typename> struct handler_loop;
-    template<typename> struct accept_loop;
-
-    std::unique_ptr<rest_server_data> global_;
-    std::list<internal> ports_;
-    std::vector<boost::thread> workers_;
-
-    void run_io();
+    std::chrono::steady_clock::time_point start_;
+    boost::container::flat_set<std::weak_ptr<const rate_limiter>, std::owner_less<std::weak_ptr<const rate_limiter>>> merged;
+    unsigned calls_;
+    boost::mutex sync_;
+ 
+    unsigned calls_per_second(const std::chrono::steady_clock::time_point now) noexcept;
+    unsigned adjust_window(const std::chrono::steady_clock::time_point now) noexcept;
+    void do_add_calls(std::shared_ptr<rate_limiter> more);
 
   public:
-    struct configuration
+    struct window;
+
+    explicit rate_limiter();
+
+    static std::shared_ptr<window> make_tracker(boost::asio::io_context& io);
+    static void track(std::shared_ptr<window> tracker, std::shared_ptr<rate_limiter> self);
+
+    void add_calls(std::shared_ptr<rate_limiter> more)
     {
-      epee::net_utils::ssl_authentication_t auth;
-      std::vector<std::string> access_controls;
-      std::size_t threads;
-      std::uint32_t max_subaddresses;
-      unsigned rate_limit;
-      epee::net_utils::ssl_verification_t webhook_verify;
-      bool allow_external;
-      bool disable_admin_auth;
-      bool auto_accept_creation;
-      bool auto_accept_import;
-    };
-
-    explicit rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config);
-
-    rest_server(rest_server&&) = delete;
-    rest_server(rest_server const&) = delete;
-
-    ~rest_server() noexcept;
-
-    rest_server& operator=(rest_server&&) = delete;
-    rest_server& operator=(rest_server const&) = delete;
+      if (more)
+        do_add_calls(std::move(more));
+    }
+  
+    bool rate_limited(unsigned max_calls, unsigned weight);
   };
-}
+} // net
