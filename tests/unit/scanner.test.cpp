@@ -549,12 +549,13 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
 
       const lws::db::block_id new_last_block_id = lws::db::block_id(std::uint64_t(last_block.id) + 2);
+      const crypto::hash& block_hash = hashes[3];
       EXPECT(get_account().scan_height == new_last_block_id);
       {
         const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
           {
             {lws::db::output_id{0, 100}, 35184372088830}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_keys.at(0)
               },
@@ -572,7 +573,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 101}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
               },
@@ -590,7 +591,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
 	        {
             {lws::db::output_id{0, 102}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
               },
@@ -608,7 +609,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
               },
@@ -626,7 +627,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
               },
@@ -644,7 +645,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
               },
@@ -662,7 +663,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
               },
@@ -872,6 +873,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       }
 
       hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
+      crypto::hash block_hash = crypto::rand<crypto::hash>();
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
 
       const lws::db::block_id new_last_block_id = lws::db::block_id(std::uint64_t(last_block.id) + 2);
@@ -880,7 +882,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         const std::map<std::pair<lws::db::output_id, std::uint32_t>, lws::db::output> expected{
           {
             {lws::db::output_id{0, 100}, 35184372088830}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 100}, 35184372088830, 0, 0, tx.pub_keys.at(0)
               },
@@ -898,7 +900,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 101}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx2.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 101}, 8000, 15, 0, tx2.pub_keys.at(0)
               },
@@ -916,7 +918,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
 	        {
             {lws::db::output_id{0, 102}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx3.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 102}, 8000, 15, 0, tx3.pub_keys.at(0)
               },
@@ -934,7 +936,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 8000, 15, 0, tx4.pub_keys.at(0)
               },
@@ -952,7 +954,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 8000, 15, 1, tx4.pub_keys.at(0)
               },
@@ -970,7 +972,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 200}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 200}, 2000, 15, 0, tx4.pub_keys.at(0)
               },
@@ -988,7 +990,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 201}, 2000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx4.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 201}, 2000, 15, 1, tx4.pub_keys.at(0)
               },
@@ -1006,7 +1008,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 300}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 300}, 8000, 15, 0, tx5.pub_keys.at(0)
               },
@@ -1024,7 +1026,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 301}, 8000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 301}, 8000, 15, 1, tx5.pub_keys.at(0)
               },
@@ -1042,7 +1044,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 300}, 1000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 300}, 1000, 15, 0, tx5.pub_keys.at(0)
               },
@@ -1060,7 +1062,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           },
           {
             {lws::db::output_id{0, 301}, 1000}, lws::db::output{
-              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx)},
+              lws::db::transaction_link{new_last_block_id, cryptonote::get_transaction_hash(tx5.tx), block_hash},
               lws::db::output::spend_meta_{
                 lws::db::output_id{0, 301}, 1000, 15, 1, tx5.pub_keys.at(0)
               },
