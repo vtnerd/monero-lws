@@ -1,4 +1,4 @@
-// Copyright (c) 2023, The Monero Project
+// Copyright (c) 2025, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -27,20 +27,13 @@
 
 #pragma once
 
-#include <boost/filesystem/path.hpp>
-#include "crypto/crypto.h" // monero/src/
-#include "db/account.h"
-#include "db/data.h"
-#include "db/storage.h"
+#include <type_traits>
 
-namespace lws { namespace db { namespace test
+#include "carrot_core/core_types.h" // monero/src
+#include "wire/traits.h"
+
+namespace wire
 {
-  struct cleanup_db
-  {
-    ~cleanup_db();
-  };
-
-  lws::db::storage get_fresh_db();
-  lws::db::account make_db_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
-  lws::account make_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
-}}} // lws // db // test
+  WIRE_DECLARE_BLOB(carrot::encrypted_janus_anchor_t);
+  WIRE_DECLARE_BLOB(carrot::view_tag_t);
+}

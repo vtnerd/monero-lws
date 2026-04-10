@@ -41,7 +41,7 @@ LWS_CASE("lws::account serialization")
   lws::db::account db_account{
     lws::db::account_id(44),
     lws::db::account_time(500000),
-    lws::db::account_address{
+    lws::db::account_pubs{
       keys.m_account_address.m_view_public_key,
       keys.m_account_address.m_spend_public_key
     },
@@ -64,7 +64,7 @@ LWS_CASE("lws::account serialization")
   };
   const std::vector<crypto::public_key> pubs{crypto::rand<crypto::public_key>()};
 
-  lws::account account{db_account, spendable, pubs};
+  lws::account account{db_account, spendable, {}, pubs};
   EXPECT(account);
 
   const lws::db::transaction_link link{
@@ -119,8 +119,8 @@ LWS_CASE("lws::account serialization")
 
   const std::string account_address = account.address();
   EXPECT(account.id() == db_account.id);
-  EXPECT(account.view_public() == db_account.address.view_public);
-  EXPECT(account.spend_public() == db_account.address.spend_public);
+  EXPECT(account.view_public() == db_account.pubs.view_public);
+  EXPECT(account.spend_public() == db_account.pubs.flex_public);
   EXPECT(account.view_key() == keys.m_view_secret_key);
   EXPECT(account.scan_height() == db_account.scan_height);
   {
@@ -175,8 +175,8 @@ LWS_CASE("lws::account serialization")
   EXPECT(copy);
   EXPECT(copy.address() == account_address);
   EXPECT(copy.id() == db_account.id);
-  EXPECT(copy.view_public() == db_account.address.view_public);
-  EXPECT(copy.spend_public() == db_account.address.spend_public);
+  EXPECT(copy.view_public() == db_account.pubs.view_public);
+  EXPECT(copy.spend_public() == db_account.pubs.flex_public);
   EXPECT(copy.view_key() == keys.m_view_secret_key);
   EXPECT(copy.scan_height() == db_account.scan_height);
   {

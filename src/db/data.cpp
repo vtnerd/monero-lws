@@ -28,14 +28,20 @@
 
 #include <cstring>
 #include <memory>
+#include <optional>
 
+#include "carrot_core/account_secrets.h"     // monero/src
+#include "carrot_core/destination.h"         // monero/src
+#include "carrot_core/device_ram_borrowed.h" // monero/src
 #include "cryptonote_config.h" // monero/src
+#include "db/carrot.h"
 #include "db/string.h"
 #include "int-util.h"          // monero/contribe/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "ringct/rctTypes.h"   // monero/src
 #include "wire.h"
 #include "wire/adapted/array.h"
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/json/write.h"
 #include "wire/msgpack.h"
@@ -74,9 +80,35 @@ namespace db
     {
       wire::object(format, WIRE_FIELD_ID(0, spend_public), WIRE_FIELD_ID(1, view_public));
     }
+
+    template<typename F, typename T>
+    void map_account_pubs(F& format, T& self)
+    {
+      wire::object(format, WIRE_FIELD_ID(0, view_public), WIRE_FIELD_ID(1, flex_public));
+    }
   }
   WIRE_DEFINE_OBJECT(account_address, map_account_address);
+  WIRE_DEFINE_OBJECT(account_pubs, map_account_pubs);
 
+  account_address::account_address(const account& acct)
+    : account_address(acct.pubs, acct.get_balance_secrets())
+  {}
+
+  account_address::account_address(const request_info& info)
+    : account_address(info.pubs, info.get_balance_secrets())
+  {}
+
+  account_address::account_address(const account_pubs& pubs, carrot::balance_secrets const* const secrets)
+    : account_address(pubs, secrets ? &secrets->kgi : nullptr)
+  {}
+
+  account_address::account_address(const account_pubs& pubs, crypto::secret_key const* const kgi)
+    : view_public(pubs.view_public), spend_public(pubs.flex_public)
+  {
+    if (kgi)
+      spend_public = rct2pk(addKeys(scalarmultBase(rct::sk2rct(*kgi)), rct::pk2rct(spend_public)));
+  }
+  
   namespace
   {
     template<typename F, typename T>
@@ -163,6 +195,19 @@ namespace db
     return rct::rct2pk(rct::addKeys(rct::pk2rct(base.spend_public), rct::pk2rct(M)));
   }
 
+  crypto::public_key address_index::get_spend_public(carrot::account const& base, crypto::secret_key const& sga) const
+  {
+    if (is_zero())
+      return base.spend_public;
+
+    ::carrot::CarrotDestinationV1 out{};
+    const ::carrot::generate_address_secret_ram_borrowed_device address_device{sga};
+    ::carrot::make_carrot_subaddress_v1(
+      base.spend_public, base.view_public, address_device, std::uint32_t(maj_i), std::uint32_t(min_i), out
+    );
+    return out.address_spend_pubkey; 
+  }
+
   namespace
   {
     template<typename F, typename T>
@@ -170,8 +215,23 @@ namespace db
     {
       wire::object(format, WIRE_FIELD_ID(0, subaddress), WIRE_FIELD_ID(1, index));
     }
+
+    std::unique_ptr<carrot::balance_secrets> compute_secrets(const account_flags flags, const account_pubs& pubs, const db::view_key& key)
+    {
+      if (!(flags & db::view_balance_key))
+        return nullptr;
+
+      crypto::secret_key balance;
+      unwrap(unwrap(balance)) = key;
+      return std::make_unique<carrot::balance_secrets>(pubs, balance);
+    }
   }
   WIRE_DEFINE_OBJECT(subaddress_map, map_subaddress_map);
+
+  std::unique_ptr<carrot::balance_secrets> account::get_balance_secrets() const
+  {
+    return compute_secrets(flags, pubs, key);    
+  }
 
   void write_bytes(wire::writer& dest, const account& self, const bool show_key)
   {
@@ -183,7 +243,7 @@ namespace db
     wire::object(dest,
       WIRE_FIELD(id),
       wire::field("access_time", self.access),
-      WIRE_FIELD(address),
+      WIRE_FIELD(pubs),
       wire::optional_field("view_key", key),
       WIRE_FIELD(scan_height),
       WIRE_FIELD(start_height),
@@ -255,8 +315,10 @@ namespace db
   void read_bytes(wire::reader& source, output& self)
   {
     bool coinbase = false;
-    boost::optional<rct::key> rct;
-    boost::optional<std::vector<std::uint8_t>> payment_id;
+    std::optional<rct::key> rct;
+    std::optional<std::vector<std::uint8_t>> payment_id;
+    std::optional<crypto::key_image> first_image;
+    std::optional<::carrot::encrypted_janus_anchor_t> anchor;
 
     wire::object(source,
       wire::optional_field<0>("id", wire::defaulted(std::ref(self.spend_meta.id), output_id::txpool())),
@@ -274,7 +336,9 @@ namespace db
       wire::field<12>("coinbase", std::ref(coinbase)),
       wire::field<13>("fee", std::ref(self.fee)),
       wire::field<14>("recipient", std::ref(self.recipient)),
-      wire::field<15>("pub", std::ref(self.pub))
+      wire::field<15>("pub", std::ref(self.pub)),
+      wire::optional_field<16>("first_image", std::ref(first_image)),
+      wire::optional_field<17>("janus_enc", std::ref(anchor))
     );
 
     std::uint8_t pay_length = 0;
@@ -299,6 +363,14 @@ namespace db
     if (rct)
       flags = extra(lws::db::ringct_output | flags);
     self.extra = db::pack(flags, pay_length);
+
+    if (self.spend_meta.is_carrot())
+    {
+      if (!first_image || !anchor)
+        WIRE_DLOG_THROW(wire::error::schema::binary, "expected first_image and anchor");
+      self.first_image = *first_image;
+      self.anchor = *anchor;
+    }
   }
 
   void write_bytes(wire::writer& dest, const output& self)
@@ -320,6 +392,14 @@ namespace db
     const auto payment_id = payment_bytes.empty() ?
       nullptr : std::addressof(payment_bytes);
 
+    crypto::key_image const* first = nullptr;
+    ::carrot::encrypted_janus_anchor_t const* anchor = nullptr;
+    if (self.spend_meta.is_carrot())
+    {
+      first = std::addressof(self.first_image);
+      anchor = std::addressof(self.anchor);
+    }
+
     // defaulted will omit "id" and "block" when the output is in the
     // txpool with no valid values.
     wire::object(dest,
@@ -338,7 +418,9 @@ namespace db
       wire::field<12>("coinbase", coinbase),
       wire::field<13>("fee", self.fee),
       wire::field<14>("recipient", self.recipient),
-      wire::field<15>("pub", std::cref(self.pub))
+      wire::field<15>("pub", std::cref(self.pub)),
+      wire::optional_field<16>("first_image", first),
+      wire::optional_field<17>("janus_enc", anchor)
     );
   }
 
@@ -395,6 +477,11 @@ namespace db
   }
   WIRE_DEFINE_OBJECT(key_image, map_key_image);
 
+  std::unique_ptr<carrot::balance_secrets> request_info::get_balance_secrets() const
+  {
+    return compute_secrets(creation_flags, pubs, key);    
+  } 
+
   void write_bytes(wire::writer& dest, const request_info& self, const bool show_key)
   {
     db::view_key const* const key =
@@ -402,7 +489,7 @@ namespace db
     const bool generated = (self.creation_flags & lws::db::account_generated_locally);
 
     wire::object(dest,
-      WIRE_FIELD(address),
+      WIRE_FIELD(pubs),
       wire::optional_field("view_key", key),
       WIRE_FIELD(start_height),
       wire::field("generated_locally", generated),
