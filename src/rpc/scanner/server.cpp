@@ -623,9 +623,9 @@ namespace lws { namespace rpc { namespace scanner
     std::sort(users.begin(), users.end(), by_height{});
     boost::asio::dispatch(
       self->strand_,
-      [self, users = std::move(users), blocks = std::move(blocks)] ()
+      [self, users = std::move(users), blocks = std::move(blocks)] () mutable
       {
-        if (!lws::user_data::store(self->strand_.context(), self->disk_, self->zclient_, self->webhook_, epee::to_span(blocks), epee::to_span(users), nullptr))
+        if (!lws::user_data::store(self->strand_.context(), self->disk_, self->zclient_, self->webhook_, epee::to_span(blocks), epee::to_mut_span(users), nullptr))
         {
           self->do_stop();
           self->strand_.context().stop();

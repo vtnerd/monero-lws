@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include "cryptonote_config.h"
 
@@ -8,6 +9,9 @@ namespace lws
 namespace config
 {
   extern cryptonote::network_type network;
+
+  //! Default inactivity timeout for `/feed` websocket connections
+  constexpr const std::chrono::minutes feed_timeout{4};
 
   //! Max queued clients when waiting for cacheable daemon response
   constexpr const std::size_t daemon_wait_queue_max = 25000;

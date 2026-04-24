@@ -29,6 +29,13 @@
 #include <system_error>
 #include <type_traits>
 
+#define LWS_VERIFY(x) \
+  do \
+  { \
+    if (!(x)) \
+      ::lws::throw_invalid_argument(__LINE__, __FILE__); \
+  } while (0)
+
 namespace lws
 {
   enum class error : int
@@ -72,6 +79,7 @@ namespace lws
     tx_relay_failed             //!< Daemon failed to relayed tx from REST client
   };
 
+  [[noreturn]] void throw_invalid_argument(int line, const char* file);
   std::error_category const& error_category() noexcept;
 
   inline std::error_code make_error_code(lws::error value) noexcept

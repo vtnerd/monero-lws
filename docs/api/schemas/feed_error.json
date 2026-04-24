@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://docs.monerolws.com/api/schemas/feed_error.json",
+  "type": "object",
+  "properties": {
+    "msg": {"type": "string"},
+    "code": {"$ref": "feed_base.json#/definitions/uint16"}
+  },
+  "required": ["msg", "code"]
+}

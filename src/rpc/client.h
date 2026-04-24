@@ -38,6 +38,8 @@
 #include "db/fwd.h"
 #include "common/expect.h" // monero/src
 #include "net/zmq.h"       // monero/src
+#include "net/zmq_async.h"
+#include "rpc/fwd.h"
 #include "rpc/message.h"   // monero/src
 #include "rpc/daemon_pub.h"
 #include "rpc/rates.h"
@@ -62,6 +64,37 @@ namespace rpc
   };
 
   expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc = {});
+
+  class account_sub
+  {
+    std::shared_ptr<const detail::context> ctx;
+    net::zmq::async_client sub;
+
+  public:
+    account_sub(std::shared_ptr<const detail::context> ctx, net::zmq::async_client sub)
+      : ctx(std::move(ctx)), sub(std::move(sub))
+    {}
+
+    account_sub(account_sub&&) = default;
+    account_sub(const account_sub&) = delete;
+    ~account_sub() = default;
+    account_sub& operator=(account_sub&&) = default;
+    account_sub& operator=(const account_sub&) = delete;
+
+    explicit operator bool() const noexcept { return !sub.close; }
+    net::zmq::async_client& get() noexcept { return sub; }
+
+    //! Subscribe to events from `address` and "warning:"
+    expect<std::uint32_t> watch(const std::string_view address) const;
+
+    //! Initiate complete shutdown on this sub
+    void shutdown(boost::system::error_code& ec)
+    {
+      sub.close = true;
+      if (sub.asock)
+        sub.asock->cancel(ec);
+    }
+  };
 
   //! Abstraction for ZMQ RPC client. All `const` and `static` methods are thread-safe.
   class client
@@ -138,6 +171,9 @@ namespace rpc
       return cryptonote::rpc::FullMessage::getRequest(name, message, 0);
     }
 
+    //! \return An async ZMQ_SUB socket that is bound to the account update publisher
+    expect<account_sub> make_account_sub(boost::asio::io_context& io) const;
+
     //! \return `async_client` to daemon. Thread safe.
     expect<net::zmq::async_client> make_async_client(boost::asio::io_context& io) const;
 
@@ -163,6 +199,10 @@ namespace rpc
       return publish(epee::byte_slice{std::move(bytes)});
     }
 
+    expect<void> push_update(const account& acct, const mempool_receive& src) const;
+    expect<void> push_updates(epee::span<account> accts, db::block_id new_height) const;
+    expect<void> push_warning(std::error_code error, db::block_id height) const;
+
     //! \return Next available RPC message response from server
     expect<std::string> get_message(std::chrono::seconds timeout);
 
@@ -179,7 +219,7 @@ namespace rpc
       \return Recent exchange rates. */
     expect<rates> get_rates() const;
   };
-
+ 
   //! Owns ZMQ context, and ZMQ PUB socket for signalling child `client`s.
   class context
   {
@@ -205,7 +245,7 @@ namespace rpc
       \param True if additional size constraints should be placed on
         daemon messages
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, bool push_updates);
 
     context(context&&) = default;
     context(context const&) = delete;
@@ -232,6 +272,9 @@ namespace rpc
     {
       return client::make(ctx);
     }
+
+    //! Push warning to all websocket push clients. Thread safe
+    expect<void> push_warning(std::error_code error) const;
 
     /*!
       All block `client::send`, `client::receive`, and `client::wait` calls
