@@ -35,13 +35,16 @@
 
 #include "common/error.h"    // monero/contrib/epee/include
 #include "db/account.h"
+#include "db/data.h"
 #include "error.h"
 #include "misc_log_ex.h"     // monero/contrib/epee/include
 #include "net/http_client.h" // monero/contrib/epee/include
 #include "net/zmq.h"         // monero/src
 #include "net/zmq_async.h"
+#include "rpc/light_wallet.h"
 #include "scanner.h"
 #include "serialization/json_object.h" // monero/src
+#include "wire/msgpack/write.h"
 #include "wire/json/write.h"
 #if MLWS_RMQ_ENABLED
   #include <amqp.h>
@@ -66,7 +69,7 @@ namespace rpc
   namespace
   {
     constexpr const char signal_endpoint[] = "inproc://signal";
-    constexpr const char account_endpoint[] = "inproc://account"; // append integer every new `account_push`
+    constexpr const char account_endpoint[] = "inproc://account";
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
@@ -268,10 +271,11 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, net::zmq::socket signal_pub, net::zmq::socket external_pub, rcontext rmq_src, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
+      explicit context(zcontext comm, net::zmq::socket signal_pub, net::zmq::socket external_pub, net::zmq::socket internal_pub, rcontext rmq_src, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , external_pub(std::move(external_pub))
+        , internal_pub(std::move(internal_pub))
         , rmq(std::move(rmq_src))
         , daemon_addr(std::move(daemon_addr))
         , sub_addr(std::move(sub_addr))
@@ -279,8 +283,10 @@ namespace rpc
         , cache_time()
         , cache_interval(interval)
         , cached{}
+        , warning_count(0)
         , sync_pub()
         , sync_rates()
+        , sync_internal_pub()
         , untrusted_daemon(untrusted_daemon)
         , rates_running()
       {
@@ -292,6 +298,7 @@ namespace rpc
       zcontext comm;
       net::zmq::socket signal_pub;
       net::zmq::socket external_pub;
+      const net::zmq::socket internal_pub;
       rcontext rmq;
       const std::string daemon_addr;
       const std::string sub_addr;
@@ -299,8 +306,10 @@ namespace rpc
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
       rates cached;
+      std::atomic<std::uint32_t> warning_count;
       boost::mutex sync_pub;
       boost::mutex sync_rates;
+      boost::mutex sync_internal_pub;
       const bool untrusted_daemon;
       std::atomic_flag rates_running;
     };
@@ -326,6 +335,18 @@ namespace rpc
     }
 
     return {lws::error::bad_daemon_response};
+  }
+
+  expect<std::uint32_t> account_sub::watch(const std::string_view address) const
+  {
+    MONERO_PRECOND(ctx);
+    MONERO_PRECOND(sub.zsock);
+
+    const std::string_view warning = feed_warning::prefix();
+    const std::uint32_t count = ctx->warning_count;
+    MONERO_ZMQ_CHECK(zmq_setsockopt(sub.zsock.get(), ZMQ_SUBSCRIBE, warning.data(), warning.size()));
+    MONERO_ZMQ_CHECK(zmq_setsockopt(sub.zsock.get(), ZMQ_SUBSCRIBE, address.data(), address.size()));
+    return count;
   }
 
   expect<net::zmq::socket> client::make_daemon(const std::shared_ptr<detail::context>& ctx) noexcept
@@ -481,6 +502,19 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
+  expect<account_sub> client::make_account_sub(boost::asio::io_context& io) const
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    net::zmq::socket sub{zmq_socket(ctx->comm.get(), ZMQ_SUB)};
+    if (!sub)
+      return {net::zmq::get_error_code()};
+    MONERO_ZMQ_CHECK(zmq_connect(sub.get(), account_endpoint));
+    auto client = net::zmq::async_client::make(io, std::move(sub));
+    if (!client)
+      return client.error();
+    return account_sub{ctx, std::move(*client)};
+  }
+
   expect<net::zmq::async_client> client::make_async_client(boost::asio::io_context& io) const
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -558,6 +592,114 @@ namespace rpc
     return rc;
   }
 
+  namespace
+  {
+    template<typename T>
+    expect<void> prep_message(epee::byte_stream& sink, const std::string_view prefix, const T& message)
+    {  
+      sink.write({prefix.data(), prefix.size()});
+      if (prefix.empty() || prefix.back() != u8':')
+        sink.push_back(':');
+
+      wire::msgpack_slice_writer dest{std::move(sink), true /* integer keys */};
+      try
+      {
+        wire_write::bytes(dest, message);
+      }
+      catch (const wire::exception& e)
+      {
+        return {e.code()};
+      }
+
+      sink = dest.take_sink();
+      return success();
+    }
+
+    template<typename T>
+    expect<epee::byte_slice> prep_message(const std::string_view prefix, const T& message)
+    {  
+      epee::byte_stream sink;
+      MONERO_CHECK(prep_message(sink, prefix, message));
+      return epee::byte_slice{std::move(sink)};
+    }
+  }
+
+  expect<void> client::push_update(const account& acct, const mempool_receive& src) const
+  {
+    if (ctx->internal_pub)
+    {
+      auto msg = prep_message(acct.address(), src);
+      if (!msg)
+        return msg.error();
+      const boost::lock_guard<boost::mutex> lock{ctx->sync_internal_pub};
+      net::zmq::send(std::move(*msg), ctx->internal_pub.get(), ZMQ_DONTWAIT);
+    }
+    return success();
+  }
+ 
+  expect<void> client::push_updates(const epee::span<account> accts, const db::block_id new_height) const
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    if (!ctx->internal_pub)
+    {
+      for (account& acct : accts)
+        acct.updated(new_height);
+      return success();
+    }
+
+    std::vector<std::size_t> offsets;
+    offsets.reserve(accts.size());
+    epee::byte_stream sink;
+
+    std::size_t last = 0;
+    expect<void> rc = success();
+    for (account& acct : accts)
+    {
+      if (new_height < acct.scan_height())
+        continue;
+ 
+      // make sure `updated` is called on every account even with errors
+      expect<void> msg = prep_message(sink, acct.address(), acct.updated(new_height));
+      if (!msg)
+        rc = msg;
+
+      offsets.push_back(sink.size() - last);
+      last = sink.size();
+    }
+
+    if (!rc)
+      return rc;
+
+    epee::byte_slice msgs{std::move(sink)};
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_internal_pub};
+    for (std::size_t offset : offsets)
+      net::zmq::send(msgs.take_slice(offset), ctx->internal_pub.get(), ZMQ_DONTWAIT);
+    return success();
+  }
+
+  namespace
+  {
+    expect<void> push_warning_(const std::shared_ptr<detail::context>& ctx, const std::error_code error, const db::block_id height)
+    {
+      MONERO_PRECOND(ctx != nullptr);
+      if (ctx->internal_pub)
+      {
+        const boost::lock_guard<boost::mutex> lock{ctx->sync_internal_pub};
+        expect<epee::byte_slice> msg =
+          prep_message(rpc::feed_warning::prefix(), rpc::feed_warning{error, ctx->warning_count++, height});
+        if (!msg)
+          return msg.error();
+        return net::zmq::send(std::move(*msg), ctx->internal_pub.get(), ZMQ_DONTWAIT);
+      }
+      return success();
+    }
+  }
+
+  expect<void> client::push_warning(const std::error_code error, const db::block_id height) const
+  {
+    return push_warning_(ctx, error, height);
+  }
+
   expect<rates> client::get_rates() const
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -571,7 +713,7 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, const bool push_updates)
   {
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
@@ -597,10 +739,20 @@ namespace rpc
     if (!rmq_info.address.empty() || !rmq_info.exchange.empty() || !rmq_info.routing.empty() || !rmq_info.credentials.empty())
       MONERO_THROW(error::configuration, "RabbitMQ support not enabled");
 #endif
+
+    net::zmq::socket internal_pub;
+    if (push_updates)
+    {
+      internal_pub.reset(zmq_socket(comm.get(), ZMQ_PUB));
+      if (internal_pub == nullptr)
+        MONERO_THROW(net::zmq::get_error_code(), "zmq_socket");
+      if (zmq_bind(internal_pub.get(), account_endpoint) < 0)
+        MONERO_THROW(net::zmq::get_error_code(), "zmq_bind");
+    }
  
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(external_pub), rcontext{std::move(rmq_info)}, std::move(daemon_addr), std::move(sub_addr), rates_interval, untrusted_daemon
+        std::move(comm), std::move(pub), std::move(external_pub), std::move(internal_pub), rcontext{std::move(rmq_info)}, std::move(daemon_addr), std::move(sub_addr), rates_interval, untrusted_daemon
       )
     };
   }
@@ -632,6 +784,11 @@ namespace rpc
     return ctx->cache_interval;
   }
 
+  expect<void> context::push_warning(const std::error_code error) const
+  {
+    return push_warning_(ctx, error, db::block_id::txpool);
+  }
+ 
   expect<void> context::raise_abort_scan() noexcept
   {
     MONERO_PRECOND(ctx != nullptr);

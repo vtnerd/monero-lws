@@ -18,6 +18,16 @@ tags:
   - name: subaddress
   - name: transaction
 paths:
+  /feed:
+    get:
+      tags: [transaction]
+      summary: Check/upgrade to websocket /feed
+      operationId: feed
+      responses:
+        '101':
+          description: Switching to websocket /feed protocol
+        '501':
+          description: /feed is enabled on websocket upgrade only
   /get_address_info:
     post:
       tags:

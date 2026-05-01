@@ -19,6 +19,7 @@ nav:
     - Wallet: api/wallet.md
     - Admin: api/admin.md
     - Webhooks/ZeroMQ: api/zmq.md
+    - Feed: api/feed.md
     - RabbitMQ: api/rmq.md
 plugins:
   - swagger-ui-tag

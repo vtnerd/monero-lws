@@ -92,6 +92,7 @@ namespace
     const command_line::arg_descriptor<double> split_sync_threads;
     const command_line::arg_descriptor<std::uint64_t> split_sync_depth;
     const command_line::arg_descriptor<bool> balance_new_addresses;
+    const command_line::arg_descriptor<std::chrono::seconds::rep> feed_timeout;
 
     static std::string get_default_zmq()
     {
@@ -147,6 +148,7 @@ namespace
       , split_sync_threads{"split-sync-threads", "Percentage of threads to use for fully synced accounts (0-1, requires --block-depth-threading, 0 to disable)", 0.0}
       , split_sync_depth{"split-sync-depth", "Maximum block depth for an address to be considered synced (defaults to 10)", 10}
       , balance_new_addresses{"balance-new-addresses", "Assign new addresses to thread with highest blockheight (or fewest addresses if tied)", false}
+      , feed_timeout{"feed-timeout", "Seconds for timing out inactive websocket '/feed' clients. val <= 0 disables '/feed'", std::chrono::seconds{lws::config::feed_timeout}.count()}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -190,6 +192,7 @@ namespace
       command_line::add_arg(description, split_sync_threads);
       command_line::add_arg(description, split_sync_depth);
       command_line::add_arg(description, balance_new_addresses);
+      command_line::add_arg(description, feed_timeout);
     }
   };
 
@@ -292,6 +295,7 @@ namespace
       lws::rest_server::configuration{
         {command_line::get_arg(args, opts.rest_ssl_key), command_line::get_arg(args, opts.rest_ssl_cert)},
         command_line::get_arg(args, opts.access_controls),
+        std::chrono::seconds{command_line::get_arg(args, opts.feed_timeout)},
         command_line::get_arg(args, opts.rest_threads),
 	      command_line::get_arg(args, opts.max_subaddresses),
         webhook_verify,
@@ -356,7 +360,15 @@ namespace
 
     boost::filesystem::create_directories(prog.db_path);
     auto disk = lws::db::storage::open(prog.db_path.c_str(), prog.create_queue_max);
-    auto ctx = lws::rpc::context::make(std::move(prog.daemon_rpc), std::move(prog.daemon_sub), std::move(prog.zmq_pub), std::move(prog.rmq), prog.rates_interval, prog.untrusted_daemon);
+    auto ctx = lws::rpc::context::make(
+      std::move(prog.daemon_rpc),
+      std::move(prog.daemon_sub),
+      std::move(prog.zmq_pub),
+      std::move(prog.rmq),
+      prog.rates_interval,
+      prog.untrusted_daemon,
+      std::chrono::seconds{0} < prog.rest_config.feed_timeout
+    );
 
     //! SIGINT handle registered by `scanner` constructor
     lws::scanner scanner{disk.clone(), prog.rest_config.webhook_verify};

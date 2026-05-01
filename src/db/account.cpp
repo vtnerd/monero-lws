@@ -51,6 +51,17 @@ namespace lws
         return std::memcmp(std::addressof(lhs), std::addressof(rhs), sizeof(lhs)) < 0;
       }
     };
+
+    template<typename F, typename T>
+    static void map_update(F& format, T& self)
+    {
+      wire::object(format,
+        wire::field<0>("spends", wire::trusted_array(std::ref(self.spends))),
+        wire::field<1>("outputs", wire::trusted_array(std::ref(self.outputs))),
+        WIRE_FIELD_ID(3, old_height),
+        WIRE_FIELD_ID(4, new_height)
+      );
+    }
   }
 
   struct account::internal
@@ -126,6 +137,15 @@ namespace lws
     );
   }
 
+  void account::update::read_bytes(::wire::msgpack_reader& source)
+  { map_update(source, *this); }
+
+  void account::update::write_bytes(::wire::msgpack_writer& dest) const
+  { map_update(dest, *this); }
+
+  void mempool_receive::write_bytes(::wire::msgpack_writer& dest) const
+  { map_update(dest, *this); }
+
   account::account() noexcept
     : immutable_(nullptr), spendable_(), pubs_(), spends_(), outputs_(), height_(db::block_id(0))
   {}
@@ -163,13 +183,15 @@ namespace lws
     return result;
   }
 
-  void account::updated(db::block_id new_height) noexcept
+  account::update account::updated(db::block_id new_height) noexcept
   {
+    update out{std::move(spends_), std::move(outputs_), height_, new_height};
+
     height_ = std::max(height_, new_height);
     spends_.clear();
-    spends_.shrink_to_fit();
     outputs_.clear();
-    outputs_.shrink_to_fit();
+
+    return out;
   }
 
   db::account_id account::id() const noexcept

@@ -27,11 +27,20 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace lws
 {
   namespace rpc
   {
+    struct account_credentials;
     class client;
+
+    namespace feed
+    {
+      enum class error;
+      enum class status : std::uint16_t;
+    }
   }
   struct rates;
   class scan_manager;  

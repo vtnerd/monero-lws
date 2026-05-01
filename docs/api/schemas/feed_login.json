@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://docs.monerolws.com/api/schemas/feed_login.json",
+  "type": "object",
+  "properties": {
+    "account": {
+      "type": "object",
+      "properties": {
+        "address": {"$ref": "#/definitions/base58-address"},
+        "view_key": {"$ref": "feed_base.json#/definitions/binary32"}
+      },
+      "required": ["address", "view_key"]
+    },
+    "tx_sync": {
+      "description": "Whether to include txes in 'tx_sync:' response",
+      "type": "boolean",
+      "default": true
+    },
+    "receives_only": {
+      "description": "Send only received outputs messages after 'tx_sync:' message",
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": ["account"],
+  "definitions": {
+    "base58-address": {
+      "type": "string",
+      "minLength": 95,
+      "maxLength": 95,
+      "pattern": "^[0-9A-Za-z]{95}$",
+      "example": "47nPhxp2cJeKN2NjamupNUNA13XgzcYPzQBCzzsKcj717s8M2UpFVmmdwSuYwgyy8kPDwU7hpEqTTDvfe5LAb9Aj6nwmEzf"
+    }
+  }
+}
+

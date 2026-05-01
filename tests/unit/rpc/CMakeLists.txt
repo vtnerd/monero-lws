@@ -26,7 +26,7 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_library(monero-lws-unit-rpc OBJECT admin.test.cpp)
+add_library(monero-lws-unit-rpc OBJECT admin.test.cpp pull.test.cpp pull.test.h)
 target_link_libraries(
   monero-lws-unit-rpc
   monero-lws-unit-db

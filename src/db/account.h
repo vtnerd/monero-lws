@@ -26,6 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <array>
 #include <boost/optional/optional.hpp>
 #include <cstdint>
 #include <memory>
@@ -40,7 +41,25 @@
 #include "wire/msgpack/fwd.h"
 
 namespace lws
-{ 
+{
+  //! Sent internallly, same wire format as `account::update`
+  struct mempool_receive
+  {
+    std::array<db::output, 1> outputs;
+    db::block_id old_height;
+    db::block_id new_height;
+    std::array<db::spend, 0> spends;
+
+    explicit mempool_receive(const db::output& receive) noexcept
+      : outputs{{receive}},
+        old_height(db::block_id::txpool),
+        new_height(db::block_id::txpool),
+        spends()
+    {}
+
+    void write_bytes(::wire::msgpack_writer& dest) const;
+  };
+
   //! Tracks a subset of DB account info for scanning/updating.
   class account
   {
@@ -61,6 +80,18 @@ namespace lws
 
   public:
 
+    //! Sent internally via ZMQ from scanner thread to websocket "push" thread
+    struct update
+    {
+      std::vector<db::spend> spends;
+      std::vector<db::output> outputs;
+      db::block_id old_height;
+      db::block_id new_height;
+
+      void read_bytes(::wire::msgpack_reader& source);
+      void write_bytes(::wire::msgpack_writer& dest) const;
+    };
+ 
     //! Construct an "invalid" account (for de-serialization)
     account() noexcept;
 
@@ -89,7 +120,7 @@ namespace lws
     account clone() const;
 
     //! \post `height() == max(new_height, height())`, `outputs().empty()`, and `spends.empty()`.
-    void updated(db::block_id new_height) noexcept;
+    update updated(db::block_id new_height) noexcept;
 
     //! \return Unique ID from the account database, possibly `db::account_id::kInvalid`.
     db::account_id id() const noexcept;

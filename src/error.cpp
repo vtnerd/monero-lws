@@ -26,6 +26,8 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "error.h"
 
+#include <cstring>
+#include <stdexcept>
 #include <string>
 
 namespace lws
@@ -143,6 +145,16 @@ namespace lws
       return std::error_condition{value, *this};
     }
   };
+
+  void throw_invalid_argument(const int line, const char* file)
+  {
+    if (!file)
+      file = "";
+    char const* const end = std::strrchr(file, '/');
+    if (end)
+      file = end + 1;
+    throw std::invalid_argument{"Failed pre-condition at " + std::string{file} + ":" + std::to_string(line)};
+  }
 
   std::error_category const& error_category() noexcept
   {
