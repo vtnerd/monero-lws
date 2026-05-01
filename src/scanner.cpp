@@ -284,6 +284,9 @@ namespace lws
             events.pop_back(); //cannot compute tx_hash
         }
         send_payment_hook(http_.io_, client_, http_.webhooks_, epee::to_span(events));
+        const expect<void> pushed = client_.push_update(user, mempool_receive{out});
+        if (!pushed)
+          MERROR("Failed to send mempool update to " << user.address() << ": " << pushed.error().message());
         return true;
       }
     };
@@ -314,13 +317,16 @@ namespace lws
       }
     };
 
-    void update_lookahead(const account& user, subaddress_reader& reader, const db::address_index& match, const db::block_id height)
+    void update_lookahead(const account& user, subaddress_reader& reader, const db::address_index& match, db::block_id height)
     {
       if (match.is_zero())
         return; // keep subaddress disabled servers quick
 
       if (!reader.disk)
         throw std::runtime_error{"Bad DB handle in scanner"};
+
+      if (height == db::block_id::txpool)
+        height = user.scan_height();
 
       auto upserted = reader.disk->update_lookahead(user.db_address(), height, match, reader.max_subaddresses);
       if (upserted)
@@ -339,7 +345,7 @@ namespace lws
       epee::span<lws::account> users,
       const db::block_id height,
       const std::uint64_t timestamp,
-      crypto::hash const& tx_hash,
+      crypto::hash const* tx_hash,
       cryptonote::transaction const& tx,
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader,
@@ -349,12 +355,23 @@ namespace lws
       if (2 < tx.version)
         throw std::runtime_error{"Unsupported tx version"};
 
+      crypto::hash tx_hash_lazy;
       cryptonote::tx_extra_pub_key key;
       boost::optional<crypto::hash> prefix_hash;
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
       std::pair<std::uint8_t, db::output::payment_id_> payment_id;
       cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
       std::vector<crypto::key_derivation> additional_derivations;
+
+      const auto get_tx_hash = [&] () -> const crypto::hash&
+      {
+        if (!tx_hash)
+        {
+          tx_hash_lazy = get_transaction_hash(tx);
+          tx_hash = std::addressof(tx_hash_lazy);
+        } 
+        return *tx_hash;
+      };
 
       {
         std::vector<cryptonote::tx_extra_field> extra;
@@ -426,7 +443,7 @@ namespace lws
               spend_action(
                 user,
                 db::spend{
-                  db::transaction_link{height, tx_hash},
+                  db::transaction_link{height, get_tx_hash()},
                   in_data->k_image,
                   db::output_id{in_data->amount, goffset},
                   timestamp,
@@ -533,7 +550,7 @@ namespace lws
             );
             if (!decrypted)
             {
-              MWARNING(user.address() << " failed to decrypt amount for tx " << tx_hash << ", skipping output");
+              MWARNING(user.address() << " failed to decrypt amount for tx " << get_tx_hash() << ", skipping output");
               continue; // to next output
             }
             amount = decrypted->first;
@@ -555,7 +572,7 @@ namespace lws
             reader.reader,
             user,
             db::output{
-              db::transaction_link{height, tx_hash},
+              db::transaction_link{height, get_tx_hash()},
               db::output::spend_meta_{
                 db::output_id{tx.version < 2 ? out.amount : 0, out_ids.at(index)},
                 amount,
@@ -591,7 +608,7 @@ namespace lws
       std::vector<std::uint64_t> const& out_ids,
       subaddress_reader& reader)
     {
-      scan_transaction_base(users, height, timestamp, tx_hash, tx, out_ids, reader, add_spend{}, add_output{});
+      scan_transaction_base(users, height, timestamp, std::addressof(tx_hash), tx, out_ids, reader, add_spend{}, add_output{});
     }
 
     void scan_transactions(std::string&& txpool_msg, epee::span<lws::account> users, db::storage const& disk, scanner_sync& self, rpc::client& client, const scanner_options& opts)
@@ -614,7 +631,7 @@ namespace lws
       subaddress_reader reader{std::optional<db::storage>{disk.clone()}, opts.max_subaddresses};
       send_webhook sender{disk, client, self};
       for (const auto& tx : parsed->txes)
-        scan_transaction_base(users, db::block_id::txpool, time, crypto::hash{}, tx, fake_outs, reader, null_spend{}, sender);
+        scan_transaction_base(users, db::block_id::txpool, time, nullptr, tx, fake_outs, reader, null_spend{}, sender);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
@@ -975,7 +992,7 @@ namespace lws
 
           MINFO("Thread " << thread_n << " processed " << blockchain.size() << " blocks(s) @ height " << fetched->start_height << " against " << users.size() << " account(s)");
 
-          if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_span(users), epee::to_span(new_pow)))
+          if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_mut_span(users), epee::to_span(new_pow)))
             return false;
 
           // TODO         
@@ -984,9 +1001,6 @@ namespace lws
             MINFO("On chain with hash " << blockchain.back() << " and difficulty " << diff << " at height " << fetched->start_height);
           }
 
-          for (account& user : users)
-            user.updated(db::block_id(fetched->start_height));
-          
           // Update queue with current minimum scan height (oldest account determines thread progress)
           queue.update_min_height(users.front().scan_height());
         }
@@ -1368,6 +1382,7 @@ namespace lws
       req.start_height = 0;
       req.known_hashes = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_chain_sync());
 
+      bool sent_warning = false;
       for (;;)
       {
         if (req.known_hashes.empty())
@@ -1384,6 +1399,9 @@ namespace lws
           return {std::move(client)};
 
         MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes), regtest));
+        if (!sent_warning)
+          MONERO_UNWRAP(client.push_warning(error::blockchain_reorg, db::block_id(resp->start_height)));
+        sent_warning = true;
 
         req.known_hashes.erase(req.known_hashes.begin(), --(req.known_hashes.end()));
         for (std::size_t num = 0; num < 10; ++num)
@@ -1408,6 +1426,7 @@ namespace lws
       req.block_ids = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_pow_sync());
       req.prune = true;
 
+      bool sent_warning = false;
       std::vector<crypto::hash> new_hashes{};
       std::vector<db::pow_sync> new_pow{};
       for (;;)
@@ -1439,7 +1458,7 @@ namespace lws
             return {error::bad_daemon_response};
           return {std::move(client)};
         }
-
+        
         // genesis block must be present as last entry
         req.block_ids.erase(req.block_ids.begin(), --(req.block_ids.end()));
 
@@ -1516,20 +1535,25 @@ namespace lws
         MONERO_CHECK(disk.sync_pow(db::block_id(resp->start_height), epee::to_span(new_hashes), epee::to_span(new_pow)));
         MINFO("Verified up to block " << (resp->start_height + new_hashes.size() - 1) << " with hash " << hash << " and difficulty " << diff);
 
+        if (!sent_warning)
+          MONERO_UNWRAP(client.push_warning(error::blockchain_reorg, db::block_id(resp->start_height)));
+        sent_warning = true;
+
       } // for until sync
 
       return {std::move(client)};
     }
   } // anonymous
 
-  bool user_data::store(boost::asio::io_context& io, db::storage& disk, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<const lws::account> users, const epee::span<const db::pow_sync> pow)
+  bool user_data::store(boost::asio::io_context& io, db::storage& disk, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow)
   {
     if (users.empty())
       return true;
-    if (!std::is_sorted(users.begin(), users.end(), by_height{}))
-      throw std::logic_error{"users must be sorted!"};
+    LWS_VERIFY(!chain.empty());
+    LWS_VERIFY(std::is_sorted(users.begin(), users.end(), by_height{}));
 
-    auto updated = disk.update(users[0].scan_height(), chain, users, pow);
+    const db::block_id base_height = users[0].scan_height();
+    auto updated = disk.update(base_height, chain, epee::to_span(users), pow);
     if (!updated)
     {
       if (updated == lws::error::blockchain_reorg)
@@ -1542,6 +1566,7 @@ namespace lws
 
     send_payment_hook(io, client, webhook, epee::to_span(updated->confirm_pubs));
     send_spend_hook(io, client, webhook, epee::to_span(updated->spend_pubs));
+    client.push_updates(users, db::block_id(to_uint(base_height) + chain.size() - 1));
     if (updated->accounts_updated != users.size())
     {
       MWARNING("Only updated " << updated->accounts_updated << " account(s) out of " << users.size() << ", resetting");
@@ -1556,7 +1581,7 @@ namespace lws
     return true;
   }
 
-  bool user_data::operator()(boost::asio::io_context& io, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<const lws::account> users, const epee::span<const db::pow_sync> pow)
+  bool user_data::operator()(boost::asio::io_context& io, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow)
   {
     return store(io, disk_, client, webhook, chain, users, pow);
   } 
@@ -1673,6 +1698,7 @@ namespace lws
           MONERO_THROW(synced.error(), "Unable to sync blockchain");
 
         MWARNING("Failed to connect to daemon at " << ctx.daemon_address());
+        MONERO_UNWRAP(ctx.push_warning(synced.error()));
       }
       else
         client = std::move(*synced);

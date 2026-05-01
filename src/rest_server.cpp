@@ -47,6 +47,7 @@
 #include <boost/beast/http/verb.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/beast/websocket/rfc6455.hpp>
 #include <boost/optional/optional.hpp>
 #include <boost/range/counting_range.hpp>
 #include <boost/thread/lock_guard.hpp>
@@ -80,7 +81,9 @@
 #include "rpc/admin.h"
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"   // monero/src
+#include "rpc/feed.h"
 #include "rpc/light_wallet.h"
+#include "rpc/login.h"
 #include "rpc/rates.h"
 #include "rpc/webhook.h"
 #include "util/gamma_picker.h"
@@ -93,11 +96,21 @@ namespace lws
 {
   struct runtime_options
   {
+    const std::chrono::seconds feed_timeout;
     const std::uint32_t max_subaddresses;
     const epee::net_utils::ssl_verification_t webhook_verify;
     const bool disable_admin_auth;
     const bool auto_accept_creation;
     const bool auto_accept_import;
+
+    explicit runtime_options(const rest_server::configuration& config)
+      : feed_timeout(config.feed_timeout),
+        max_subaddresses(config.max_subaddresses),
+        webhook_verify(config.webhook_verify),
+        disable_admin_auth(config.disable_admin_auth),
+        auto_accept_creation(config.auto_accept_creation),
+        auto_accept_import(config.auto_accept_import)
+    {}
   };
 
   struct rest_server_data
@@ -207,65 +220,7 @@ namespace lws
       return to_uint(tx_height) + CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > to_uint(last);
     }
 
-    std::vector<db::output::spend_meta_>::const_iterator
-    find_metadata(std::vector<db::output::spend_meta_> const& metas, db::output_id id)
-    {
-      struct by_output_id
-      {
-        bool operator()(db::output::spend_meta_ const& left, db::output_id right) const noexcept
-        {
-          return left.id < right;
-        }
-        bool operator()(db::output_id left, db::output::spend_meta_ const& right) const noexcept
-        {
-          return left < right.id;
-        }
-      };
-      return std::lower_bound(metas.begin(), metas.end(), id, by_output_id{});
-    }
-
-    bool is_hidden(db::account_status status) noexcept
-    {
-      switch (status)
-      {
-      case db::account_status::active:
-      case db::account_status::inactive:
-        return false;
-      default:
-      case db::account_status::hidden:
-        break;
-      }
-      return true;
-    }
-
-    bool key_check(const rpc::account_credentials& creds)
-    {
-      crypto::public_key verify{};
-      if (!crypto::secret_key_to_public_key(creds.key, verify))
-        return false;
-      if (verify != creds.address.view_public)
-        return false;
-      return true;
-    }
-
-    //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
-    expect<std::pair<db::account, db::storage_reader>> open_account(const rpc::account_credentials& creds, db::storage disk)
-    {
-      if (!key_check(creds))
-        return {lws::error::bad_view_key};
-
-      auto reader = disk.start_read();
-      if (!reader)
-        return reader.error();
-
-      const auto user = reader->get_account(creds.address);
-      if (!user)
-        return user.error();
-      if (is_hidden(user->first))
-        return {lws::error::account_not_found};
-      return {std::make_pair(user->second, std::move(*reader))};
-    }
-
+     
     bool check_lookahead(connection_data& data, const db::address_index lookahead)
     {
       const auto minor = to_uint(lookahead.min_i);
@@ -514,7 +469,7 @@ namespace lws
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = lws::rpc::open_account(req, data.global->disk);
         if (!user)
           return user.error();
 
@@ -553,7 +508,7 @@ namespace lws
           if (metas.empty() || metas.back().id < meta.id)
             metas.push_back(meta);
           else
-            metas.insert(find_metadata(metas, meta.id), meta);
+            metas.insert(rpc::get_address_txs_response::find_metadata(metas, meta.id), meta);
 
           resp.total_received = rpc::safe_uint64(std::uint64_t(resp.total_received) + meta.amount);
           if (is_locked(output.get_value<MONERO_FIELD(db::output, unlock_time)>(), last->id, output.get_value<MONERO_FIELD(db::output, link)>().height))
@@ -563,7 +518,7 @@ namespace lws
         resp.spent_outputs.reserve(spends->count());
         for (auto const& spend : spends->make_range())
         {
-          const auto meta = find_metadata(metas, spend.source);
+          const auto meta = rpc::get_address_txs_response::find_metadata(metas, spend.source);
           if (meta == metas.end() || meta->id != spend.source)
           {
             throw std::logic_error{
@@ -591,122 +546,12 @@ namespace lws
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = lws::rpc::open_account(req, data.global->disk);
         if (!user)
           return user.error();
 
         data.passed_login = true;
-        auto outputs = user->second.get_outputs(user->first.id);
-        if (!outputs)
-          return outputs.error();
-
-        auto spends = user->second.get_spends(user->first.id);
-        if (!spends)
-          return spends.error();
-
-        const expect<db::block_info> last = user->second.get_last_block();
-        if (!last)
-          return last.error();
-
-        response resp{};
-        resp.scanned_height = std::uint64_t(user->first.scan_height);
-        resp.scanned_block_height = resp.scanned_height;
-        resp.start_height = std::uint64_t(user->first.start_height);
-        resp.blockchain_height = std::uint64_t(last->id);
-        resp.transaction_height = resp.blockchain_height;
-        resp.lookahead_fail = to_uint(user->first.lookahead_fail);
-        resp.lookahead = user->first.lookahead;
-
-        // merge input and output info into a single set of txes.
-
-        auto output = outputs->make_iterator();
-        auto spend = spends->make_iterator();
-
-        std::vector<db::output::spend_meta_> metas{};
-
-        resp.transactions.reserve(outputs->count());
-        metas.reserve(resp.transactions.capacity());
-
-        db::transaction_link next_output{};
-        db::transaction_link next_spend{};
-
-        if (!output.is_end())
-          next_output = output.get_value<MONERO_FIELD(db::output, link)>();
-        if (!spend.is_end())
-          next_spend = spend.get_value<MONERO_FIELD(db::spend, link)>();
-
-        while (!output.is_end() || !spend.is_end())
-        {
-          if (!resp.transactions.empty())
-          {
-            db::transaction_link const& last = resp.transactions.back().info.link;
-
-            if ((!output.is_end() && next_output < last) || (!spend.is_end() && next_spend < last))
-            {
-              throw std::logic_error{"DB has unexpected sort order"};
-            }
-          }
-
-          if (spend.is_end() || (!output.is_end() && next_output <= next_spend))
-          {
-            std::uint64_t amount = 0;
-            if (resp.transactions.empty() || resp.transactions.back().info.link.tx_hash != next_output.tx_hash)
-            {
-              resp.transactions.push_back({*output});
-              amount = resp.transactions.back().info.spend_meta.amount;
-            }
-            else
-            {
-              amount = output.get_value<MONERO_FIELD(db::output, spend_meta.amount)>();
-              resp.transactions.back().info.spend_meta.amount += amount;
-            }
-
-            const db::output::spend_meta_ meta = output.get_value<MONERO_FIELD(db::output, spend_meta)>();
-            if (metas.empty() || metas.back().id < meta.id)
-              metas.push_back(meta);
-            else
-              metas.insert(find_metadata(metas, meta.id), meta);
-
-            resp.total_received = rpc::safe_uint64(std::uint64_t(resp.total_received) + amount);
-
-            ++output;
-            if (!output.is_end())
-              next_output = output.get_value<MONERO_FIELD(db::output, link)>();
-          }
-          else if (output.is_end() || (next_spend < next_output))
-          {
-            const db::output_id source_id = spend.get_value<MONERO_FIELD(db::spend, source)>();
-            const auto meta = find_metadata(metas, source_id);
-            if (meta == metas.end() || meta->id != source_id)
-            {
-              throw std::logic_error{
-                "Serious database error, no receive for spend"
-              };
-            }
-
-            if (resp.transactions.empty() || resp.transactions.back().info.link.tx_hash != next_spend.tx_hash)
-            {
-              resp.transactions.push_back({});
-              resp.transactions.back().spends.push_back({*meta, *spend});
-              resp.transactions.back().info.link.height = resp.transactions.back().spends.back().possible_spend.link.height;
-              resp.transactions.back().info.link.tx_hash = resp.transactions.back().spends.back().possible_spend.link.tx_hash;
-              resp.transactions.back().info.spend_meta.mixin_count =
-                resp.transactions.back().spends.back().possible_spend.mixin_count;
-              resp.transactions.back().info.timestamp = resp.transactions.back().spends.back().possible_spend.timestamp;
-              resp.transactions.back().info.unlock_time = resp.transactions.back().spends.back().possible_spend.unlock_time;
-            }
-            else
-              resp.transactions.back().spends.push_back({*meta, *spend});
-
-            resp.transactions.back().spent += meta->amount;
-
-            ++spend;
-            if (!spend.is_end())
-              next_spend = spend.get_value<MONERO_FIELD(db::spend, link)>();
-          }
-        }
-
-        return resp;
+        return response::load(user->second, user->first, false);
       }
     };
 
@@ -1066,7 +911,7 @@ namespace lws
 
       static expect<response> handle(request const& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = open_account(req, data.global->disk.clone());
+        auto user = lws::rpc::open_account(req, data.global->disk);
         if (!user)
           return user.error();
 
@@ -1090,7 +935,7 @@ namespace lws
         if (!rpc)
           return rpc.error();
 
-        auto user = open_account(req.creds, std::move(disk));
+        auto user = lws::rpc::open_account(req.creds, std::move(disk));
         if (!user)
           return user.error();
 
@@ -1370,7 +1215,7 @@ namespace lws
         bool fulfilled = false;
         db::address_index lookahead{};
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = lws::rpc::open_account(req.creds, data.global->disk);
           if (!user)
             return user.error();
 
@@ -1453,7 +1298,7 @@ namespace lws
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!key_check(req.creds))
+        if (!lws::rpc::key_check(req.creds))
           return {lws::error::bad_view_key};
 
         auto disk = data.global->disk.clone();
@@ -1467,7 +1312,7 @@ namespace lws
 
           if (account)
           {
-            if (is_hidden(account->first))
+            if (lws::rpc::is_hidden(account->first))
               return {lws::error::account_not_found};
 
             // Do not count a request for account creation as login
@@ -1526,7 +1371,7 @@ namespace lws
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = lws::rpc::open_account(req.creds, data.global->disk);
           if (!user)
             return user.error();
           id = user->first.id;
@@ -1789,7 +1634,7 @@ namespace lws
 
         db::account_id id = db::account_id::invalid;
         {
-          auto user = open_account(req.creds, data.global->disk.clone());
+          auto user = lws::rpc::open_account(req.creds, data.global->disk);
           if (!user)
             return user.error();
           id = user->first.id;
@@ -1922,10 +1767,11 @@ namespace lws
         current_max = std::max(current_max, start->max_size);
       return current_max;
     }
-
+ 
     constexpr const endpoint endpoints[] =
     {
       {"/daemon_status",         call<daemon_status>,          1024,  true},
+      {"/feed",                  nullptr,                         0, false},
       {"/get_address_info",      call<get_address_info>,   2 * 1024, false},
       {"/get_address_txs",       call<get_address_txs>,    2 * 1024, false},
       {"/get_random_outs",       call<get_random_outs>,    2 * 1024,  true},
@@ -1963,6 +1809,18 @@ namespace lws
     constexpr const unsigned max_endpoint_size =
       std::max(max_standard_endpoint_size, max_admin_endpoint_size);
 
+    constexpr const endpoint* get_endpoint(const std::string_view name) noexcept
+    {
+      const endpoint* current = std::begin(endpoints);
+      endpoint const* const end = std::end(endpoints);
+      for (; current != end; ++current)
+      {
+        if (current->name == name)
+          break;
+      }
+      return current;
+    }
+
     struct by_name_
     {
       bool operator()(endpoint const& left, endpoint const& right) const noexcept
@@ -1985,39 +1843,6 @@ namespace lws
       }
     };
     constexpr const by_name_ by_name{};
-
-    struct slice_body
-    {
-      using value_type = epee::byte_slice;
-
-      static std::size_t size(const value_type& source) noexcept
-      {
-        return source.size();
-      }
-
-      struct writer
-      {
-        epee::byte_slice body_;
-
-        using const_buffers_type = boost::asio::const_buffer;
-
-        template<bool is_request, typename Fields>
-        explicit writer(boost::beast::http::header<is_request, Fields> const&, value_type const& body)
-          : body_(body.clone())
-        {}
-
-        void init(boost::beast::error_code& ec)
-        {
-          ec = {};
-        }
-
-        boost::optional<std::pair<const_buffers_type, bool>> get(boost::beast::error_code& ec)
-        {
-          ec = {};
-          return {{const_buffers_type{body_.data(), body_.size()}, false}};
-        }
-      };
-    };
   } // anonymous
 
   struct rest_server::internal
@@ -2232,11 +2057,28 @@ namespace lws
       const auto target = self_->parser_.value().get().target();
 
       MDEBUG("Received HTTP request from " << self_.get() << " to target " << target);
-
+ 
       // Checked access for `parser_` on first use
       endpoint const* const handler = self_->parent_->get_endpoint(target);
       if (!handler)
         return self_->bad_request(boost::beast::http::status::not_found, std::forward<F>(resume));
+
+      static constexpr endpoint const* const feed = get_endpoint("/feed");
+      if (handler == feed)
+      {
+        rest_server_data* const from = self_->data_.global;
+        const auto feed_timeout = from->options.feed_timeout;
+        const bool feed_disabled = feed_timeout <= std::chrono::seconds{0};
+        if (!feed_disabled && boost::beast::websocket::is_upgrade(self_->parser_->get()))
+        {
+          MDEBUG("Attempting websocket '" << feed->name << "' on " << self_.get());
+          if (!rpc::feed::start(std::move(self_->sock()), from->io, from->client, self_->parser_->get(), from->disk, feed_timeout))
+            return self_->bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
+          return; // else a websocket has I/O queued on `io`.
+        }
+        else if (feed_disabled)
+          return self_->bad_request(boost::beast::http::status::not_found, std::forward<F>(resume));
+      }
 
       if (handler->run == nullptr)
         return self_->bad_request(boost::beast::http::status::not_implemented, std::forward<F>(resume));
@@ -2399,7 +2241,7 @@ namespace lws
   }
 
   rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config.max_subaddresses, config.webhook_verify, config.disable_admin_auth, config.auto_accept_creation, config.auto_accept_import})),
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config})),
       ports_(),
       workers_()
   {

@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020, The Monero Project
+// Copyright (c) 2026, The Monero Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -25,48 +25,56 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "login.h"
 
-#include <cstdint>
+#include "crypto/crypto.h" // monero/src
+#include "db/data.h"
+#include "db/storage.h"
+#include "error.h"
+#include "rpc/light_wallet.h"
 
-namespace lws
+namespace lws { namespace rpc
 {
-  class account;
-  class mempool_receive;
+  bool is_hidden(db::account_status status) noexcept
+  {
+    switch (status)
+    {
+    case db::account_status::active:
+    case db::account_status::inactive:
+      return false;
+    default:
+    case db::account_status::hidden:
+      break;
+    }
+    return true;
+  }
 
-namespace db
-{
-  enum account_flags : std::uint8_t;
-  enum class account_id : std::uint32_t;
-  enum class account_status : std::uint8_t;
-  enum class block_id : std::uint64_t;
-  enum extra : std::uint8_t;
-  enum class extra_and_length : std::uint8_t;
-  enum class major_index : std::uint32_t;
-  enum class minor_index : std::uint32_t;
-  enum class request : std::uint8_t;
-  enum class webhook_type : std::uint8_t; 
+  bool key_check(const rpc::account_credentials& creds)
+  {
+    crypto::public_key verify{};
+    if (!crypto::secret_key_to_public_key(creds.key, verify))
+      return false;
+    if (verify != creds.address.view_public)
+      return false;
+    return true;
+  }
 
-  struct account;
-  struct account_address;
-  struct address_index;
-  struct block_info;
-  struct key_image;
-  struct output;
-  struct output_id;
-  struct request_info;
-  struct spend;
-  class storage;
-  class storage_reader;
-  struct subaddress_map;
-  struct transaction_link;
-  struct view_key;
-  struct webhook_data;
-  struct webhook_dupsort;
-  struct webhook_event;
-  struct webhook_key;
-  struct webhook_new_account;
-  struct webhook_output;
-  struct webhook_tx_confirmation;
-} // db
-} // lws
+  //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
+  expect<std::pair<db::account, db::storage_reader>> open_account(const account_credentials& creds, const db::storage& disk)
+  {
+    if (!key_check(creds))
+      return {lws::error::bad_view_key};
+
+    auto reader = disk.start_read();
+    if (!reader)
+      return reader.error();
+
+    const auto user = reader->get_account(creds.address);
+    if (!user)
+      return user.error();
+    if (is_hidden(user->first))
+      return {lws::error::account_not_found};
+    return {std::make_pair(user->second, std::move(*reader))};
+  }
+
+}} // lws // rpc
