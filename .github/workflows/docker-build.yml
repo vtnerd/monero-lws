@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
     - name: Build Docker image
       run: docker build --no-cache --tag vtnerd/monero-lws:latest .
     - name: Add additional tags
@@ -21,7 +21,7 @@ jobs:
         docker image tag vtnerd/monero-lws:latest ghcr.io/vtnerd/monero-lws:0.3
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -30,7 +30,7 @@ jobs:
       run: docker push -a ghcr.io/vtnerd/monero-lws
 
     - name: Login to Docker.io
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         username: ${{ github.actor }}
         password: ${{ secrets.DOCKER_VTNERD_TOKEN }}
