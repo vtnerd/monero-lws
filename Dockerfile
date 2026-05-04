@@ -46,22 +46,22 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_7_3/expat-2.7.3.tar.bz2 && \
-    echo "59c31441fec9a66205307749eccfee551055f2d792f329f18d97099e919a3b2f expat-2.7.3.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.7.3.tar.bz2 && \
-    rm expat-2.7.3.tar.bz2 && \
-    cd expat-2.7.3 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8_0/expat-2.8.0.tar.bz2 && \
+    echo "586494499ac3ad46d87f3beda7b1f770c1c8026a9b60e151593f8b29089a52ca expat-2.8.0.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.8.0.tar.bz2 && \
+    rm expat-2.8.0.tar.bz2 && \
+    cd expat-2.8.0 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.24.2.tar.gz && \
-    echo "44e7b53e008a6dcaec03032769a212b46ab5c23c105284aa05a4f3af78e59cdb unbound-1.24.2.tar.gz" | sha256sum -c && \
-    tar -xzf unbound-1.24.2.tar.gz && \
-    rm unbound-1.24.2.tar.gz && \
-    cd unbound-1.24.2 && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.25.0.tar.gz && \
+    echo "062a6eda723fe2f041bee4079b76981569f1d12e066bbd74800242fc1ebddec7 unbound-1.25.0.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.25.0.tar.gz && \
+    rm unbound-1.25.0.tar.gz && \
+    cd unbound-1.25.0 && \
     ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
@@ -79,11 +79,11 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
 
 # Build boost for latest security updates
 WORKDIR /tmp
-RUN set -ex && wget https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.bz2 && \
-    echo "49551aff3b22cbc5c5a9ed3dbc92f0e23ea50a0f7325b0d198b705e8ee3fc305 boost_1_90_0.tar.bz2" | sha256sum -c && \
-    tar -xf boost_1_90_0.tar.bz2 && \
-    rm boost_1_90_0.tar.bz2 && \
-    cd boost_1_90_0 && \
+RUN set -ex && wget https://archives.boost.io/release/1.90.0/source/boost_1_91_0.tar.bz2 && \
+    echo "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5 boost_1_91_0.tar.bz2" | sha256sum -c && \
+    tar -xf boost_1_91_0.tar.bz2 && \
+    rm boost_1_91_0.tar.bz2 && \
+    cd boost_1_91_0 && \
     ./bootstrap.sh && \
     ./b2 -j${NPROC:-$(nproc)} runtime-link=static link=static threading=multi variant=release \
       --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
