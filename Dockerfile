@@ -78,7 +78,7 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
 
 # Build boost for latest security updates
 WORKDIR /tmp
-RUN set -ex && wget https://archives.boost.io/release/1.90.0/source/boost_1_91_0.tar.bz2 && \
+RUN set -ex && wget https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.bz2 && \
     echo "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5 boost_1_91_0.tar.bz2" | sha256sum -c && \
     tar -xf boost_1_91_0.tar.bz2 && \
     rm boost_1_91_0.tar.bz2 && \
