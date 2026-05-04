@@ -38,13 +38,13 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: ${{env.BREW_INSTALL_MAC}}
       - name: Checkout Monero Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: monero-project/monero
           path: ${{github.workspace}}/monero/
           submodules: recursive 
       - name: Checkout LWS Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ${{github.workspace}}/lws
           submodules: recursive
@@ -80,13 +80,13 @@ jobs:
           dnf config-manager --set-enabled crb
           dnf -y install boost-devel cmake gcc g++ git hidapi-devel libsodium-devel make miniupnpc-devel openssl-devel unbound-devel zeromq-devel zlib-devel
       - name: Checkout Monero Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: monero-project/monero
           path: ${{github.workspace}}/monero/
           submodules: recursive 
       - name: Checkout LWS Source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ${{github.workspace}}/lws
       - name: Configure LWS
@@ -121,7 +121,7 @@ jobs:
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
   
     - name: Checkout Monero Source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: monero-project/monero
         path: ${{github.workspace}}/monero/
@@ -134,7 +134,7 @@ jobs:
       run: cd ${{github.workspace}}/monero/build && make -j$(nproc) daemon lmdb_lib multisig 
   
     - name: Checkout LWS Source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         path: ${{github.workspace}}/lws
 
@@ -173,14 +173,14 @@ jobs:
       run: HOMEBREW_NO_AUTO_UPDATE=1 brew install rabbitmq-c
 
     - name: Checkout Monero Source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: monero-project/monero
         path: ${{github.workspace}}/monero/
         submodules: recursive
 
     - name: Checkout LWS Source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         path: ${{github.workspace}}/lws
 
