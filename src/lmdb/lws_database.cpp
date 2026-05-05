@@ -25,6 +25,9 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lws_database.h"
+
+#include <cstdint>
+#include <limits>
 #include "lmdb/error.h"
 #include "lmdb/util.h"
 
@@ -46,7 +49,9 @@ namespace lws_lmdb
 {
     namespace
     {
-        constexpr const mdb_size_t max_resize = 1 * 1024 * 1024 * 1024; // 1 GB
+        static_assert(std::numeric_limits<std::uint32_t>::max() <= std::numeric_limits<mdb_size_t>::max());
+        constexpr const mdb_size_t initial_size = 100 * 1024 * 1024; // 100 MiB
+        constexpr const mdb_size_t max_resize = mdb_size_t(4) * 1024 * 1024 * 1024; // 4 GB
         void acquire_context(context& ctx) noexcept
         {
             while (ctx.lock.test_and_set());
@@ -68,8 +73,11 @@ namespace lws_lmdb
         MONERO_LMDB_CHECK(mdb_env_create(std::addressof(obj)));
         environment out{obj};
 
+        MDB_envinfo info{};
         MONERO_LMDB_CHECK(mdb_env_set_maxdbs(out.get(), max_dbs));
         MONERO_LMDB_CHECK(mdb_env_open(out.get(), path, 0, open_flags));
+        MONERO_LMDB_CHECK(mdb_env_info(out.get(), &info));
+        MONERO_LMDB_CHECK(mdb_env_set_mapsize(out.get(), std::max(info.me_mapsize, initial_size)));
         return {std::move(out)};
     }
 
