@@ -35,6 +35,7 @@
 
 #include "db/fwd.h"
 #include "db/storage.h"
+#include "fwd.h"
 #include "net/http/client.h"
 #include "net/net_ssl.h" // monero/contrib/epee/include
 #include "rpc/client.h"
@@ -130,7 +131,13 @@ namespace lws
     expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false, const bool regtest = false);
 
     //! Poll daemon until `shutdown()` is called, using `thread_count` threads.
-    void run(rpc::context ctx, std::size_t thread_count, const std::string& server_addr, std::string server_pass, const scanner_options&);
+    void run(
+      rpc::context ctx,
+      std::shared_ptr<mempool> pool,
+      std::size_t thread_count,
+      const std::string& server_addr,
+      std::string server_pass,
+      const scanner_options&);
 
     //! \return True iff `stop()` and `shutdown()` has never been called
     bool is_running() const noexcept { return sync_.is_running(); }

@@ -65,12 +65,14 @@
 #include "common/expect.h"         // monero/src
 #include "config.h"
 #include "crypto/crypto.h"         // monero/src
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/srcqq
 #include "cryptonote_config.h"     // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
 #include "lmdb/util.h"             // monero/src
+#include "mempool.h"
 #include "net/http/client.h"
 #include "net/http/slice_body.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
@@ -86,7 +88,9 @@
 #include "rpc/login.h"
 #include "rpc/rates.h"
 #include "rpc/webhook.h"
+#include "string_tools.h"          // monero/contrib/epee/include
 #include "util/gamma_picker.h"
+#include "util/ownership_test.h"
 #include "util/random_outputs.h"
 #include "util/source_location.h"
 #include "wire/adapted/crypto.h"
@@ -118,15 +122,17 @@ namespace lws
     boost::asio::io_context io;
     const db::storage disk;
     const rpc::client client;
+    const std::shared_ptr<lws::mempool> mempool;
     const runtime_options options;
     std::vector<net::zmq::async_client> clients;
     net::http::client webhook_client;
     boost::mutex sync;
 
-    rest_server_data(db::storage disk, rpc::client client, runtime_options options)
+    rest_server_data(db::storage disk, rpc::client client, std::shared_ptr<lws::mempool> mempool, runtime_options options)
       : io(),
         disk(std::move(disk)),
         client(std::move(client)),
+        mempool(std::move(mempool)),
         options(std::move(options)),
         webhook_client(options.webhook_verify),
         clients(),
@@ -551,7 +557,7 @@ namespace lws
           return user.error();
 
         data.passed_login = true;
-        return response::load(user->second, user->first, false);
+        return response::load(user->second, user->first, data.global->mempool.get(), false);
       }
     };
 
@@ -1433,6 +1439,10 @@ namespace lws
       {
         using transaction_rpc = cryptonote::rpc::SendRawTxHex;
 
+        cryptonote::blobdata tx_blob;
+        if (!epee::string_tools::parse_hexstr_to_binbuff(req.tx, tx_blob))
+          return {lws::error::bad_client_tx};
+
         struct frame
         {
           rest_server_data* parent;
@@ -1440,7 +1450,7 @@ namespace lws
           net::zmq::async_client client;
           boost::asio::steady_timer timer;
           boost::asio::io_context::strand strand;
-          std::deque<std::pair<epee::byte_slice, std::function<async_complete>>> resumers;
+          std::deque<std::tuple<epee::byte_slice, std::function<async_complete>, cryptonote::transaction>> resumers;
           std::size_t outstanding;
 
           frame(rest_server_data& parent, net::zmq::async_client client)
@@ -1480,7 +1490,11 @@ namespace lws
             return {error::load};
 
           active->outstanding += msg.size(); 
-          active->resumers.emplace_back(std::move(msg), std::move(resume));
+          auto& elem = active->resumers.emplace_back();
+          std::get<0>(elem) = std::move(msg);
+          std::get<1>(elem) = std::move(resume);
+          if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
+            return {lws::error::bad_client_tx};
           return success();
         }
 
@@ -1497,7 +1511,7 @@ namespace lws
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
 
-            std::deque<std::pair<epee::byte_slice, std::function<async_complete>>> resumers;
+            std::deque<std::tuple<epee::byte_slice, std::function<async_complete>, cryptonote::transaction>> resumers;
             {
               const boost::lock_guard<boost::mutex> lock{cache.sync};
               if (error)
@@ -1510,6 +1524,9 @@ namespace lws
               }
               else
               {
+                if (self_->parent && self_->parent->mempool)
+                  self_->parent->mempool->add_txs({std::addressof(std::get<2>(self_->resumers.front())), 1});
+
                 MDEBUG("Completed ZMQ request in /submit_raw_tx");
                 resumers.push_back(std::move(self_->resumers.front()));
                 self_->resumers.pop_front();
@@ -1517,7 +1534,7 @@ namespace lws
             }
 
             for (const auto& r : resumers)
-              r.second(value);
+              std::get<1>(r)(value);
           }
 
           bool set_timeout(std::chrono::steady_clock::duration timeout, const bool expecting) const
@@ -1568,7 +1585,7 @@ namespace lws
                     self_->parent->store_async_client(std::move(self_->client));
                     return;
                   }
-                  next = std::move(self_->resumers.front().first);
+                  next = std::move(std::get<0>(self_->resumers.front()));
                   self_->outstanding -= std::min(self_->outstanding, next.size());
                 }
 
@@ -1613,7 +1630,11 @@ namespace lws
         cache.status = active;
 
         active->outstanding += msg.size();
-        active->resumers.emplace_back(std::move(msg), std::move(resume));
+        auto& elem = active->resumers.emplace_back();
+        std::get<0>(elem) = std::move(msg);
+        std::get<1>(elem) = std::move(resume);
+        if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
+          return {lws::error::bad_client_tx};
         lock.unlock();
 
         MDEBUG("Starting new ZMQ request in /submit_raw_tx");
@@ -2072,7 +2093,7 @@ namespace lws
         if (!feed_disabled && boost::beast::websocket::is_upgrade(self_->parser_->get()))
         {
           MDEBUG("Attempting websocket '" << feed->name << "' on " << self_.get());
-          if (!rpc::feed::start(std::move(self_->sock()), from->io, from->client, self_->parser_->get(), from->disk, feed_timeout))
+          if (!rpc::feed::start(std::move(self_->sock()), from->io, from->client, from->mempool, self_->parser_->get(), from->disk, feed_timeout))
             return self_->bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
           return; // else a websocket has I/O queued on `io`.
         }
@@ -2240,8 +2261,8 @@ namespace lws
     }
   }
 
-  rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, configuration config)
-    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), runtime_options{config})),
+  rest_server::rest_server(epee::span<const std::string> addresses, std::vector<std::string> admin, db::storage disk, rpc::client client, std::shared_ptr<lws::mempool> mempool, configuration config)
+    : global_(std::make_unique<rest_server_data>(std::move(disk), std::move(client), std::move(mempool), runtime_options{config})),
       ports_(),
       workers_()
   {

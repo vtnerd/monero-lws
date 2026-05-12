@@ -541,6 +541,22 @@ namespace db
     );
   }
 
+  std::size_t get_hash(account_address const& value) noexcept
+  {
+    /* use view_public - it has good distribution and cannot be selected
+      by user (and has been verified as such at login). */
+    std::size_t out;
+    static_assert(sizeof(out) <= sizeof(value.view_public));
+    static_assert(std::is_trivially_copyable<account_address>::value);
+    std::memcpy(std::addressof(out), std::addressof(value.view_public), sizeof(out));
+    return out;
+  }
+  bool operator==(account_address const& left, account_address const& right) noexcept
+  {
+    static_assert(std::is_trivially_copyable<account_address>::value);
+    return std::memcmp(std::addressof(left), std::addressof(right), sizeof(left)) == 0;
+  }
+
   bool operator<(const webhook_dupsort& left, const webhook_dupsort& right) noexcept
   {
     return left.payment_id == right.payment_id ?

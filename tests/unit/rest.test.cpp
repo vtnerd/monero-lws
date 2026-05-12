@@ -31,22 +31,26 @@
 #include <boost/beast/websocket/error.hpp>
 #include <memory>
 #include <optional>
+#include <time.h>
 
+#include "cryptonote_basic/account.h"            // monero/src
+#include "cryptonote_core/cryptonote_tx_utils.h" // monero/src
 #include "db/data.h"
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "db/string.h"
 #include "error.h"
 #include "hex.h" // monero/epee/contrib/include
+#include "mempool.h"
 #include "net/http_client.h"
 #include "rapidjson/document.h"     // monero/external/rapidjson/include
 #include "rapidjson/stringbuffer.h" // monero/external/rapidjson/incldue
 #include "rapidjson/prettywriter.h" // monero/external/rapidjson/incldue
 #include "rest_server.h"
-#include "scanner.test.h"
 #include "rpc/pull.test.h"
-
-#include "misc_log_ex.h"
+#include "scanner.test.h"
+#include "util/account.test.h"
+#include "util/transaction.test.h"
 
 namespace rapidjson
 {
@@ -160,10 +164,13 @@ namespace
 
 LWS_CASE("rest_server")
 {
-  lws::db::account_address account_address{};
-  crypto::secret_key view{};
-  crypto::generate_keys(account_address.spend_public, view);
-  crypto::generate_keys(account_address.view_public, view);
+  const auto now = std::chrono::system_clock::now();
+  const auto base = lws_test::make_account();
+  lws::db::account_address account_address{
+    base.m_account_address.m_view_public_key,
+    base.m_account_address.m_spend_public_key
+  };
+  const crypto::secret_key view = base.m_view_secret_key;
   const std::string address = lws::db::address_string(account_address);
   const std::string viewkey = epee::to_hex::string(epee::as_byte_span(unwrap(unwrap(view))));
 
@@ -175,6 +182,7 @@ LWS_CASE("rest_server")
     auto context =
       lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false, true);
     const auto rpc = MONERO_UNWRAP(context.connect());
+    const auto init_server = [&] (std::shared_ptr<lws::mempool> pool) 
     {
       const lws::rest_server::configuration config{
         {}, {}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
@@ -185,9 +193,12 @@ LWS_CASE("rest_server")
         std::vector<std::string>{admin_server},
         db.clone(),
         MONERO_UNWRAP(rpc.clone()),
+        std::move(pool),
         config
       );
-    }
+    };
+
+    init_server(nullptr);
 
     const lws::db::block_info last_block =
       MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_last_block());
@@ -592,8 +603,30 @@ LWS_CASE("rest_server")
       );
     }
 
-    SECTION("One Receive, One Spend")
+    SECTION("One Receive, One Spend, and one mempool")
     {
+      const auto pool = std::make_shared<lws::mempool>();
+
+      EXPECT(client.disconnect());
+      init_server(pool);
+      EXPECT(client.connect(std::chrono::milliseconds{500})); 
+
+      lws_test::transaction tx;
+      {
+        std::vector<cryptonote::tx_destination_entry> destinations;
+        destinations.emplace_back();
+        destinations.back().amount = 8000;
+        destinations.back().addr = base.m_account_address;
+        tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+        const auto hash = get_transaction_hash(tx.tx);
+        pool->reset_txs(
+          lws::mempool::pool_table{
+            {hash, std::make_shared<lws::mempool::pool_entry>(cryptonote::transaction{tx.tx}, now)}
+          }
+        );
+      }
+
       const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
       const std::string start_height = std::to_string(std::uint64_t(account.start_height));
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
@@ -621,7 +654,7 @@ LWS_CASE("rest_server")
         lws::db::output{
           link,
           lws::db::output::spend_meta_{
-            lws::db::output_id{500, 30},
+            lws::db::output_id{0, 35},
             std::uint64_t(40000),
             std::uint32_t(16),
             std::uint32_t(2),
@@ -643,7 +676,7 @@ LWS_CASE("rest_server")
         lws::db::spend{
           link,
           image,
-          lws::db::output_id{500, 30},
+          lws::db::output_id{0, 35},
           std::uint64_t(66),
           std::uint64_t(1500),
           std::uint32_t(16),
@@ -688,37 +721,61 @@ LWS_CASE("rest_server")
       );
 
       response = invoke(client, "/get_address_txs", message);
-      EXPECT(response ==
-        "{\"total_received\":\"40000\","
-        "\"scanned_height\":" + scan_height + "," +
-        "\"scanned_block_height\":" + scan_height + ","
-        "\"start_height\":" + start_height + ","
-        "\"transaction_height\":" + scan_height + ","
-        "\"blockchain_height\":" + scan_height + ","
-        "\"transactions\":["
-          "{\"id\":0,"
-          "\"hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
-          "\"timestamp\":\"1970-01-01T01:56:40Z\","
-          "\"total_received\":\"40000\","
-          "\"total_sent\":\"40000\","
-          "\"fee\":\"100\","
-          "\"unlock_time\":4670,"
-          "\"height\":4000,"
-          "\"payment_id\":\"" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + "\","
-          "\"coinbase\":true,"
-          "\"mempool\":false,"
-          "\"mixin\":16,"
-          "\"recipient\":{\"maj_i\":2,\"min_i\":66},"
-          "\"spent_outputs\":[{"
-            "\"amount\":\"40000\","
-            "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
-            "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
-            "\"out_index\":2,"
-            "\"mixin\":16,"
-            "\"sender\":{\"maj_i\":4,\"min_i\":55}"
-          "}]}"
-        "]}"
-      );
+      const std::string expected =
+        R"({
+          "total_received":"48000",
+          "scanned_height":)" + scan_height + R"(,
+          "scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + start_height + R"(,
+          "transaction_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[
+            {
+              "id":0,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"40000",
+              "total_sent":"40000",
+              "fee":"100",
+              "unlock_time":4670,
+              "height":4000,
+              "payment_id":")" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + R"(",
+              "coinbase":true,
+              "mempool":false,
+              "mixin":16,
+              "recipient":{"maj_i":2,"min_i":66},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(image)) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":16,
+                "sender":{"maj_i":4,"min_i":55}
+              }]
+            },{
+              "id":1,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(get_transaction_hash(tx.tx))) + R"(",
+              "total_received":"8000",
+              "total_sent":"40000",
+              "fee":"12000",
+              "unlock_time":0,
+              "payment_id":"0000000000000000",
+              "coinbase":false,
+              "mempool":true,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(tx.images.at(0))) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":15,
+                "sender":{"maj_i":2, "min_i": 66}
+              }]
+            }
+          ]
+        })";
+      verify_json(lest_env, "/get_address_txs", response, expected);
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
@@ -736,8 +793,8 @@ LWS_CASE("rest_server")
           "{\"amount\":\"40000\","
           "\"public_key\":\"" + epee::to_hex::string(epee::as_byte_span(pub)) + "\","
           "\"index\":2,"
-          "\"global_index\":30,"
-          "\"tx_id\":30,"
+          "\"global_index\":35,"
+          "\"tx_id\":35,"
           "\"tx_hash\":\"" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + "\","
           "\"tx_prefix_hash\":\"" + epee::to_hex::string(epee::as_byte_span(tx_prefix)) + "\","
           "\"tx_pub_key\":\"" + epee::to_hex::string(epee::as_byte_span(tx_public)) + "\","
@@ -813,6 +870,7 @@ LWS_CASE("rest_server")
 
     SECTION("feed subscription")
     {
+      const auto pool = std::make_shared<lws::mempool>();
       const std::string scan_height = std::to_string(std::uint64_t(account.scan_height));
       namespace pull = lws_test::rpc::pull;
 
@@ -861,7 +919,7 @@ LWS_CASE("rest_server")
         io.run_one();
       }
 
-      std::string expected =
+      std::string expected=
         R"({"scanned_block_height":)" + scan_height + R"(,
           "start_height":)" + scan_height + R"(,
           "blockchain_height":)" + scan_height + "}";
@@ -871,6 +929,83 @@ LWS_CASE("rest_server")
       EXPECT(get_prefix(response) == "tx_sync:");
       response.erase(0, std::strlen("tx_sync:"));
       verify_json(lest_env, "tx_sync", response, expected);
+
+      pull::async_close(conn, handler);
+
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(response == "");
+
+      // mempool tx in sync//
+      init_server(pool);
+      conn = pull::make(io, boost::asio::ip::tcp::endpoint(local, 10000), "lws.feed.v0.json");
+      pull::async_handshake(conn, message, handler);
+
+      lws_test::transaction tx;
+      {
+        std::vector<cryptonote::tx_destination_entry> destinations;
+        destinations.emplace_back();
+        destinations.back().amount = 8000;
+        destinations.back().addr = base.m_account_address;
+        tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+        const auto hash = get_transaction_hash(tx.tx);
+        pool->reset_txs(
+          lws::mempool::pool_table{
+            {hash, std::make_shared<lws::mempool::pool_entry>(cryptonote::transaction{tx.tx}, now)}
+          }
+        );
+      }
+ 
+      ran = false;
+      error = {};
+      response = {};
+      while (!ran && !io.stopped())
+      {
+        io.restart();
+        io.run_one();
+      }
+
+      expected =
+        R"({"scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[{
+            "hash":")" + epee::to_hex::string(epee::as_byte_span(get_transaction_hash(tx.tx))) + R"(",
+            "prefix_hash":")" + epee::to_hex::string(epee::as_byte_span(get_transaction_prefix_hash(tx.tx))) + R"(",
+            "timestamp":)" + std::to_string(std::chrono::system_clock::to_time_t(now)) + R"(,
+            "fee":12000,
+            "unlock_time":0,
+            "payment_id": "0000000000000000",
+            "mempool":true,
+            "mixin":15,
+            "receives":[
+              {
+                "amount":8000,
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(tx.spend_publics.at(0))) + R"(",
+                "index":0,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx.pub_keys.at(0))) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(tx.ringct.at(0))) + R"("
+              }
+            ]
+          }]
+        })";
+
+      EXPECT(!io.stopped());
+      EXPECT(error == boost::system::error_code{});
+      EXPECT(get_prefix(response) == "tx_sync:");
+      response.erase(0, std::strlen("tx_sync:"));
+      verify_json(lest_env, "tx_sync non empty", response, expected);
+
 
       const lws::db::transaction_link link{
         lws::db::block_id::txpool, crypto::rand<crypto::hash>()

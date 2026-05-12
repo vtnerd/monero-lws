@@ -25,20 +25,18 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <boost/asio/ssl.hpp>
-#include <boost/beast/websocket/ssl.hpp>
-#include "feed.inl"
+#include "account.test.h"
 
-namespace lws { namespace rpc { namespace feed
+#include "crypto/crypto.h"
+#include "cryptonote_basic/account.h"
+
+namespace lws_test
 {
-  bool start(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
+  cryptonote::account_keys make_account()
   {
-    // moving ssl streams only supported in boost 1.74+
-#if BOOST_VERSION >= 107400 
-    return do_start(std::move(sock), io, client, std::move(pool), req, disk, timeout);
-#else
-    return false;
-#endif
+    cryptonote::account_keys out{};
+    crypto::generate_keys(out.m_account_address.m_spend_public_key, out.m_spend_secret_key); 
+    crypto::generate_keys(out.m_account_address.m_view_public_key, out.m_view_secret_key);
+    return out;
   }
-}}}
-
+}
