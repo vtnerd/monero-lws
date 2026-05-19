@@ -29,7 +29,7 @@
 
 #include <boost/optional/optional.hpp>
 #include <cstdint>
-
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,11 +40,18 @@
 #include "crypto/crypto.h"     // monero/src
 #include "db/data.h"
 #include "db/fwd.h"
+#include "fcmp_pp/curve_trees.h" // monero/src
 #include "rpc/fwd.h"
 #include "rpc/rates.h"
 #include "util/fwd.h"
 #include "wire/json/fwd.h"
 #include "wire/msgpack/fwd.h"
+
+namespace cryptonote { namespace rpc
+{
+  struct path_request;
+  struct path_response;
+}}
 
 namespace lws
 {
@@ -317,6 +324,45 @@ namespace rpc
   void write_bytes(wire::json_writer&, const get_subaddrs_response&);
 
 
+  struct legacy_id
+  {
+    legacy_id(std::uint64_t amount = 0, std::uint64_t index = 0) noexcept
+      : amount(amount), index(index)
+    {}
+
+    std::uint64_t amount;
+    std::uint64_t index;
+  };
+
+  using unified_id = std::variant<std::uint64_t, legacy_id>;
+
+  struct get_tree_paths_request
+  {
+    get_tree_paths_request() = delete;
+    std::vector<unified_id> output_ids;
+  };
+  void read_bytes(wire::json_reader&, get_tree_paths_request&);
+
+  struct path_response
+  {
+    path_response() = delete;
+    fcmp_pp::CompressedPath path;
+    unified_id output_id;
+    std::uint64_t leaf_idx; 
+  };
+
+  struct get_tree_paths_response
+  {
+    get_tree_paths_response() = delete;
+    std::uint64_t top_block_height;
+    std::uint64_t n_leaf_tuples;
+    std::vector<path_response> paths;
+    fcmp_pp::CompressedPath last_path;
+    crypto::hash top_block_hash;
+  };
+  void write_bytes(wire::json_writer&, const get_tree_paths_response&);
+
+
   struct get_version_request
   {
     get_version_request() = delete;
@@ -374,6 +420,7 @@ namespace rpc
     db::address_index lookahead;
     bool create_account;
     bool generated_locally;
+    bool balance_key;
   };
   void read_bytes(wire::json_reader&, login_request&);
 
@@ -391,6 +438,7 @@ namespace rpc
   {
     provision_subaddrs_request() = delete;
     account_credentials creds;
+    std::optional<crypto::secret_key> generate_address;
     boost::optional<std::uint32_t> maj_i;
     boost::optional<std::uint32_t> min_i;
     boost::optional<std::uint32_t> n_maj;
@@ -420,6 +468,7 @@ namespace rpc
     upsert_subaddrs_request() = delete;
     account_credentials creds;
     std::vector<db::subaddress_dict> subaddrs;
+    std::optional<crypto::secret_key> generate_address;
     boost::optional<bool> get_all;
   };
   void read_bytes(wire::json_reader&, upsert_subaddrs_request&);

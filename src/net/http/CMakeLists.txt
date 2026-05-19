@@ -30,4 +30,4 @@ set(monero-lws-net-http_sources client.cpp)
 set(monero-lws-net-http_headers client.h slice_body.h)
 
 add_library(monero-lws-net-http ${monero-lws-net-http_sources} ${monero-lws-net-http_headers})
-target_link_libraries(monero-lws-net-http ${Boost_SYSTEM_LIBRARY} monero::libraries)
+target_link_libraries(monero-lws-net-http monero-lws-common ${Boost_SYSTEM_LIBRARY} monero::libraries)

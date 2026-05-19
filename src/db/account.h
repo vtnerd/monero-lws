@@ -27,10 +27,12 @@
 #pragma once
 
 #include <array>
-#include <boost/optional/optional.hpp>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "crypto/crypto.h"
@@ -65,20 +67,26 @@ namespace lws
   {
     struct internal;
 
+    using balance_t = std::tuple<crypto::key_image, std::uint64_t, db::address_index>;
+    using spendable_t = std::pair<db::output_id, db::address_index>;
+
     std::shared_ptr<const internal> immutable_;
     std::vector<std::pair<db::output_id, db::address_index>> spendable_;
+    std::vector<balance_t> balance_;
     std::vector<crypto::public_key> pubs_;
     std::vector<db::spend> spends_;
     std::vector<db::output> outputs_;
     db::block_id height_;
 
-    explicit account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs) noexcept;
+    explicit account(std::shared_ptr<const internal> immutable, db::block_id height, std::vector<spendable_t> spendable, std::vector<balance_t> balance, std::vector<crypto::public_key> pubs) noexcept;
     void null_check() const;
 
     template<typename F, typename T, typename U>
     static void map(F& format, T& self, U& immutable);
 
   public:
+    //! `view_key()` can be one of several different "types"
+    enum class key_type : std::uint8_t { balance = 0, incoming, legacy };
 
     //! Sent internally via ZMQ from scanner thread to websocket "push" thread
     struct update
@@ -96,7 +104,7 @@ namespace lws
     account() noexcept;
 
     //! Construct an account from `source` and current `spendable` outputs.
-    explicit account(db::account const& source, std::vector<std::pair<db::output_id, db::address_index>> spendable, std::vector<crypto::public_key> pubs);
+    explicit account(db::account const& source, std::vector<spendable_t> spendable, std::vector<balance_t> balance, std::vector<crypto::public_key> pubs);
 
     /*!
       \return False if this is a "moved-from" account (i.e. the internal memory
@@ -125,6 +133,9 @@ namespace lws
     //! \return Unique ID from the account database, possibly `db::account_id::kInvalid`.
     db::account_id id() const noexcept;
 
+    //! \return Key-type
+    key_type type() const noexcept;
+
     //! \return Monero base58 string for account.
     std::string const& address() const;
 
@@ -137,14 +148,23 @@ namespace lws
     //! \return Extracted spend public key from `address()`.
     crypto::public_key const& spend_public() const;
 
-    //! \return Secret view key for the account.
+    //! \return Secret legacy or carrot incoming key for the account.
     crypto::secret_key const& view_key() const;
+
+    //! \return Secret balance view key, iff `type() == key_type::balance`.
+    crypto::secret_key const& balance_key() const;
+
+    //! \return Secret generate image ley, iff `type() == key_type::balance`.
+    crypto::secret_key const& generate_image_key() const;
 
     //! \return Current scan height of `this`.
     db::block_id scan_height() const noexcept { return height_; }
 
     //! \return Subaddress index iff `id` is spendable by `this`.
-    boost::optional<db::address_index> get_spendable(db::output_id const& id) const noexcept;
+    std::optional<db::address_index> get_spendable(db::output_id const& id) const noexcept;
+
+    //! \return Output index + subaddress index iff `image` is spendable by `this`.
+    std::optional<std::pair<db::output_id, db::address_index>> get_spendable(crypto::key_image const& image) const noexcept;
 
     //! \return Outputs matched during the latest scan.
     std::vector<db::output> const& outputs() const noexcept { return outputs_; }
@@ -157,6 +177,9 @@ namespace lws
 
     //! Track a possible `spend`.
     void add_spend(db::spend const& spend);
+
+    //! \return Key image for `out` iff `type() == key_type::balance`.
+    std::optional<crypto::key_image> get_image(db::output const& out) const;
   };
 
   struct by_height

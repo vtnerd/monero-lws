@@ -31,11 +31,13 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <ctime>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_set>
 
 #include "config.h"
+#include "db/carrot.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
@@ -44,10 +46,12 @@
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "rpc/feed.h"
+#include "rpc/message_data_structs.h" // monero/src
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "version.h"           // monero/src
 #include "wire.h"
+#include "wire/adapted/carrot.h"
 #include "wire/adapted/crypto.h"
 #include "wire/error.h"
 #include "wire/json.h"
@@ -56,6 +60,7 @@
 #include "wire/vector.h"
 #include "wire/wrapper/array.h"
 #include "wire/wrapper/defaulted.h"
+#include "wire/wrapper/variant.h"
 #include "wire/wrappers_impl.h"
 
 namespace
@@ -86,6 +91,31 @@ namespace wire
     : std::true_type
   {};
 }
+
+namespace fcmp_pp
+{
+  WIRE_AS_INTEGER(OutputPairType);
+
+  static void write_bytes(wire::json_writer& dest, const UnifiedOutputs& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(unified_ids),
+      WIRE_FIELD(output_types),
+      WIRE_FIELD(output_pubkeys),
+      WIRE_FIELD(commitments)
+    );
+  }
+ 
+  static void write_bytes(wire::json_writer& dest, const CompressedChunk& self)
+  {
+    wire::object(dest, WIRE_FIELD(elems));
+  }
+
+  static void write_bytes(wire::json_writer& dest, const CompressedPath& self)
+  {
+    wire::object(dest, WIRE_FIELD(leaves), WIRE_FIELD(layer_chunks));
+  } 
+} // fcmp_pp
 
 namespace
 {
@@ -140,6 +170,15 @@ namespace
       optional_rct = std::addressof(rct);
     }
 
+    carrot::encrypted_janus_anchor_t const* anchor = nullptr;
+    crypto::key_image const* first = nullptr;
+    if (self.data.first.is_carrot())
+    {
+      anchor = std::addressof(self.data.first.anchor);
+      if (!(unpack(self.data.first.extra).second & lws::db::coinbase_output))
+        first = std::addressof(self.data.first.first_image);
+    }
+
     wire::object(dest,
       wire::field("amount", lws::rpc::safe_uint64(self.data.first.spend_meta.amount)),
       wire::field("public_key", self.data.first.pub),
@@ -153,7 +192,10 @@ namespace
       wire::field("height", self.data.first.link.height),
       wire::field("spend_key_images", std::cref(self.data.second)),
       wire::optional_field("rct", optional_rct),
-      wire::field("recipient", std::cref(self.data.first.recipient))
+      wire::field("recipient", std::cref(self.data.first.recipient)),
+      wire::field("unified", self.data.first.spend_meta.id.is_unified()),
+      wire::optional_field("first_key_image", first),
+      wire::optional_field("janus_enc", anchor)
     );
   }
 
@@ -466,7 +508,7 @@ namespace lws
       wire::field("key_image", std::cref(self.possible_spend.image)),
       wire::field("tx_pub_key", std::cref(self.meta.tx_public)),
       wire::field("out_index", self.meta.index),
-      wire::field("mixin", self.possible_spend.mixin_count),
+      wire::field("mixin", self.meta.rpc_mixin()),
       wire::field("sender", std::cref(self.possible_spend.sender))
     );
   }
@@ -524,7 +566,7 @@ namespace lws
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
         wire::field("mempool", mempool),
-        wire::field("mixin", self.value().info.spend_meta.mixin_count),
+        wire::field("mixin", self.value().info.spend_meta.rpc_mixin()),
         wire::field("recipient", self.value().info.recipient),
         wire::field("spent_outputs", std::cref(self.value().spends))
       );
@@ -594,16 +636,26 @@ namespace lws
 
       const bool has_pool = (user && pool);
       std::uint64_t total = 0;
+      crypto::secret_key balance_key{};
+      db::account_address user_address{};
+      std::unique_ptr<carrot::balance_secrets> balance_secrets;
       std::vector<rpc::get_transaction> out{};
       std::vector<db::output::spend_meta_> metas{};
       std::vector<std::pair<db::output_id, db::address_index>> receives{};
+      std::vector<std::tuple<crypto::key_image, std::uint64_t, db::address_index>> balance{};
       std::unordered_set<crypto::hash> txes_processed{};
 
       out.reserve(reserve);
       metas.reserve(reserve);
-      if (has_pool)
+      if (user && pool)
       {
-        receives.reserve(reserve);
+        balance_secrets = user->get_balance_secrets();
+        user_address = db::account_address{user->pubs, balance_secrets.get()};
+        std::memcpy(&unwrap(unwrap(balance_key)), &user->key, sizeof(balance_key));
+        if (balance_secrets)
+          balance.reserve(reserve);
+        else
+          receives.reserve(reserve);
         txes_processed.reserve(reserve);
       }
 
@@ -645,7 +697,15 @@ namespace lws
           {
             auto id = output.template get_value<MONERO_FIELD(db::output, spend_meta.id)>();
             auto subaddr = output.template get_value<MONERO_FIELD(db::output, recipient)>();
-            receives.emplace_back(std::move(id), std::move(subaddr));
+
+            if (balance_secrets)
+            {
+              auto image = get_image(*output, user_address, balance_key, *balance_secrets);
+              if (image)
+                balance.emplace_back(std::move(*image), std::move(id.low), std::move(subaddr));
+            }
+            else
+              receives.emplace_back(std::move(id), std::move(subaddr));
           }
 
           if (all_outputs)
@@ -669,13 +729,19 @@ namespace lws
           LWS_VERIFY(!spend.is_end());
 
           const db::output_id source_id = spend.template get_value<MONERO_FIELD(db::spend, source)>();
-          const auto meta = rpc::get_address_txs_response::find_metadata(metas, source_id);
-          LWS_VERIFY(skip_spend_meta || (meta != metas.end() && meta->id == source_id));
+          auto meta = db::output::spend_meta_::unknown();
+          if (source_id != db::output_id::unknown_spend())
+          {
+            const auto spend_meta = rpc::get_address_txs_response::find_metadata(metas, source_id);
+            LWS_VERIFY(skip_spend_meta || (spend_meta != metas.end() && spend_meta->id == source_id));
+            if (spend_meta != metas.end())
+              meta = *spend_meta;
+          }
 
           if (out.empty() || out.back().info.link.tx_hash != next_spend.tx_hash)
           {
             out.push_back({});
-            out.back().spends.push_back({skip_spend_meta ? meta_type{} : *meta, *spend});
+            out.back().spends.push_back({skip_spend_meta ? meta_type{} : meta, *spend});
             out.back().info.link.height = out.back().spends.back().possible_spend.link.height;
             out.back().info.link.tx_hash = out.back().spends.back().possible_spend.link.tx_hash;
             out.back().info.spend_meta.mixin_count =
@@ -686,10 +752,10 @@ namespace lws
               txes_processed.emplace(out.back().info.link.tx_hash);
           }
           else
-            out.back().spends.push_back({skip_spend_meta ? meta_type{} : *meta, *spend});
+            out.back().spends.push_back({skip_spend_meta ? meta_type{} : meta, *spend});
 
           if (!skip_spend_meta)
-            out.back().spent += meta->amount;
+            out.back().spent += meta.amount;
 
           ++spend;
           if (!spend.is_end())
@@ -701,7 +767,7 @@ namespace lws
       {
         // Add mempool transactions. Order is not important, since
         // mempool txs cannot depend on each other.
-        lws::account full_user{*user, std::move(receives), {}};
+        lws::account full_user{*user, std::move(receives), std::move(balance), {}};
         const auto pool_txs = pool->scan_account(full_user);
         for (const auto& row: pool_txs)
         {
@@ -832,6 +898,73 @@ namespace lws
     wire::object(dest, WIRE_FIELD(all_subaddrs));
   }
 
+  namespace rpc
+  {
+    namespace
+    {
+      template<typename F, typename T>
+      void map_legacy(F& format, T& self)
+      {
+        wire::object(format, WIRE_FIELD(amount), WIRE_FIELD(index));
+      }
+    }
+
+    static void read_bytes(wire::json_reader& source, legacy_id& self)
+    {
+      map_legacy(source, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const legacy_id& self)
+    {
+      map_legacy(dest, self);
+    }
+
+    namespace
+    {
+      template<typename F, typename T>
+      void map_unified(F& format, T& self)
+      {
+        auto id = wire::variant(std::ref(self));
+        wire::object(format,
+          WIRE_OPTION("legacy", rpc::legacy_id, id),
+          WIRE_OPTION("unified", std::uint64_t, id)
+        ); 
+      }
+    }
+
+    static void read_bytes(wire::json_reader& source, unified_id& self)
+    {
+      map_unified(source, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const unified_id& self)
+    {
+      map_unified(dest, self);
+    }
+
+    static void write_bytes(wire::json_writer& dest, const path_response& self)
+    {
+      wire::object(dest, WIRE_FIELD(output_id), WIRE_FIELD(leaf_idx), WIRE_FIELD(path));
+    }
+  } // rpc
+
+  void rpc::read_bytes(wire::json_reader& source, get_tree_paths_request& self)
+  {
+    using max_outputs = wire::max_element_count<21845>;
+    wire::object(source, WIRE_FIELD_ARRAY(output_ids, max_outputs));
+  }
+
+  void rpc::write_bytes(wire::json_writer& dest, const get_tree_paths_response& self)
+  {
+    wire::object(dest,
+      WIRE_FIELD(top_block_height),
+      WIRE_FIELD(n_leaf_tuples),
+      WIRE_FIELD(paths),
+      WIRE_FIELD(last_path),
+      WIRE_FIELD(top_block_hash)
+    );
+  }
+
   void rpc::read_bytes(wire::json_reader& source, get_unspent_outs_request& self)
   {
     std::string address;
@@ -917,14 +1050,39 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, login_request& self)
   {
     std::string address;
+    std::optional<db::view_key> view_key;
+    std::optional<db::view_key> balance_key;
+    std::optional<crypto::public_key> partial_spend;
     wire::object(source,
       wire::field("address", std::ref(address)),
-      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("view_key", std::ref(view_key)),
+      wire::optional_field("balance_key", std::ref(balance_key)),
+      wire::optional_field("partial_spend", std::ref(partial_spend)),
       WIRE_FIELD_DEFAULTED(lookahead, db::address_index{}),
       WIRE_FIELD(create_account),
       WIRE_FIELD(generated_locally)
     );
+
+    if (unsigned(bool(view_key)) + unsigned(bool(balance_key)) != 1)
+      WIRE_DLOG_THROW(wire::error::schema::fixed_binary, "one of: view_key, balance_key");
+    if (!view_key && unsigned(bool(balance_key)) + unsigned(bool(partial_spend)) != 2)
+      WIRE_DLOG_THROW(wire::error::schema::fixed_binary, "both: balance_key and partial_spend");
+
+    self.balance_key = bool(balance_key);
     convert_address(address, self.creds.address);
+    if (balance_key && partial_spend)
+    {
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*balance_key), sizeof(*balance_key));
+
+      const db::account_pubs pubs{self.creds.address.view_public, *partial_spend};
+      const carrot::balance_secrets secrets{pubs, self.creds.key};
+      if (db::account_address{pubs, &secrets}.spend_public != self.creds.address.spend_public)
+        WIRE_DLOG_THROW(wire::error::schema::fixed_binary, "invalid partial spend pubkey");
+
+      self.creds.address.spend_public = *partial_spend;
+    }
+    else if (view_key)
+      std::memcpy(std::addressof(unwrap(unwrap(self.creds.key))), std::addressof(*view_key), sizeof(*view_key)); 
   }
   void rpc::write_bytes(wire::json_writer& dest, const login_response self)
   {
@@ -938,9 +1096,11 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, provision_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_OPTIONAL_FIELD(maj_i),
       WIRE_OPTIONAL_FIELD(min_i),
       WIRE_OPTIONAL_FIELD(n_maj),
@@ -948,6 +1108,8 @@ namespace lws
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
  
   void rpc::read_bytes(wire::json_reader& source, submit_raw_tx_request& self)
@@ -962,12 +1124,16 @@ namespace lws
   void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)
   {
     std::string address;
+    std::optional<crypto::ec_scalar> generate_address;
     wire::object(source,
       wire::field("address", std::ref(address)),
       wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      wire::optional_field("generate_address_key", std::ref(generate_address)),
       WIRE_FIELD_ARRAY(subaddrs, max_subaddrs),
       WIRE_OPTIONAL_FIELD(get_all)
     );
     convert_address(address, self.creds.address);
+    if (generate_address)
+      unwrap(unwrap(self.generate_address.emplace())) = *generate_address;
   }
 } // lws

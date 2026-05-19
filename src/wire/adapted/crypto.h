@@ -52,6 +52,7 @@ namespace crypto
 namespace wire
 {
   WIRE_DECLARE_BLOB(crypto::ec_scalar);
+  WIRE_DECLARE_BLOB(crypto::ec_point);
   WIRE_DECLARE_BLOB(crypto::hash);
   WIRE_DECLARE_BLOB(crypto::hash8);
   WIRE_DECLARE_BLOB(crypto::key_derivation);

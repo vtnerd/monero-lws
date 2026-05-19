@@ -148,7 +148,8 @@ namespace lws
           boost::numeric_cast<std::uint64_t>(std::chrono::system_clock::to_time_t(pair.second->timestamp)),
           std::addressof(pair.first),
           pair.second->tx,
-          fake_outs
+          fake_outs,
+          false
         );
       if (found.empty() || found.back().hash != pair.first)
         skipped.push_back(pair.first);

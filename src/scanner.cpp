@@ -46,7 +46,6 @@
 #include "common/error.h"                             // monero/src
 #include "config.h"
 #include "crypto/crypto.h"                            // monero/src
-#include "crypto/wallet/crypto.h"                     // monero/src
 #include "cryptonote_basic/cryptonote_basic.h"        // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "db/account.h"
@@ -274,7 +273,7 @@ namespace lws
       if (opts.max_subaddresses > 0)
         scan_transaction.enable_subaddresses(disk, opts.max_subaddresses);
       for (const auto& tx : parsed->txes)
-        scan_transaction(users, db::block_id::txpool, time, nullptr, tx, fake_outs);
+        scan_transaction(users, db::block_id::txpool, time, nullptr, tx, fake_outs, false /* not unified*/);
     }
 
     void do_scan_loop(scanner_sync& self, std::shared_ptr<thread_data> data, const size_t thread_n) noexcept
@@ -506,15 +505,17 @@ namespace lws
           if (!send(client, block_request.clone()))
             return false;
 
-          if (fetched->blocks.size() != fetched->output_indices.size())
+          if (fetched->blocks.size() != fetched->output_indices.size() && fetched->blocks.size() != fetched->unified_indices.size())
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};
 
           blockchain.push_back(cryptonote::get_block_hash(fetched->blocks.front().block));
           if (opts.untrusted_daemon)
             new_pow.push_back(db::pow_sync{fetched->blocks.front().block.timestamp});
 
+          const bool is_unified = !fetched->unified_indices.empty();
           auto blocks = epee::to_mut_span(fetched->blocks);
-          auto indices = epee::to_span(fetched->output_indices);
+          auto indices = is_unified ?
+            epee::to_span(fetched->unified_indices) : epee::to_span(fetched->output_indices);
 
           if (fetched->start_height != 1)
           {
@@ -557,7 +558,8 @@ namespace lws
               block.timestamp,
               nullptr,
               block.miner_tx,
-              *(indices.begin())
+              *(indices.begin()),
+              is_unified
             );
 
             if (opts.untrusted_daemon)
@@ -606,9 +608,10 @@ namespace lws
                 epee::to_mut_span(users),
                 db::block_id(fetched->start_height),
                 block.timestamp,
-                std::addressof(boost::get<0>(tx_data)), // tx_hashes
-                boost::get<1>(tx_data), // txes
-                boost::get<2>(tx_data) // indices
+                std::addressof(boost::get<0>(tx_data)),
+                boost::get<1>(tx_data),
+                boost::get<2>(tx_data),
+                is_unified
               );
             }
 

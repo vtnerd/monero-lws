@@ -79,7 +79,8 @@ namespace lws
       std::uint64_t timestamp,
       crypto::hash const* tx_hash,
       const cryptonote::transaction& tx,
-      const std::vector<std::uint64_t>& out_ids
+      const std::vector<std::uint64_t>& out_ids,
+      bool is_unified
     );
 
     void enable_subaddresses(const db::storage& disk, const std::uint32_t max_subaddresses);
