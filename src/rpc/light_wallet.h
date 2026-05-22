@@ -29,6 +29,7 @@
 
 #include <boost/optional/optional.hpp>
 #include <cstdint>
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -120,7 +121,14 @@ namespace rpc
 
   struct get_transaction
   {
-    get_transaction() = delete;
+    get_transaction()
+      : info{}, receives(), spends(), spent(0)
+    {}
+
+    get_transaction(const db::output& in)
+      : info(in), receives(), spends(), spent(0)
+    {}
+
     db::output info;
     std::vector<db::output> receives;
     std::vector<transaction_spend> spends;
@@ -135,7 +143,7 @@ namespace rpc
       find_metadata(std::vector<db::output::spend_meta_> const& metas, db::output_id id);
 
     static std::vector<get_transaction> load(std::vector<db::output> outputs, std::vector<db::spend> spends);
-    static expect<get_address_txs_response> load(db::storage_reader& reader, const db::account& acct, const bool all_outputs);
+    static expect<get_address_txs_response> load(db::storage_reader& reader, const db::account& acct, const mempool* pool, const bool all_outputs);
 
     safe_uint64 total_received;
     std::uint64_t scanned_height;

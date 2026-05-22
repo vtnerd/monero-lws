@@ -171,12 +171,13 @@ namespace lws { namespace rpc { namespace feed
   // defined in `feed_tcp.cpp`
   std::string_view get_prefix(const boost::beast::net::const_buffer buf);
   expect<epee::byte_slice> prep_error(std::error_code error, protocol proto);
-  expect<epee::byte_slice> prep_login(const db::storage& disk, account_sub* sub, connection_sync* sync, boost::beast::flat_buffer& buffer, protocol proto);
+  expect<epee::byte_slice> prep_login(const db::storage& disk, const mempool* pool, account_sub* sub, connection_sync* sync, boost::beast::flat_buffer& buffer, protocol proto);
   expect<epee::byte_slice> prep_update(const db::storage& disk, std::string&& source, connection_sync* sync, protocol proto);
 
   class connection
   {
     lws::db::storage disk_;
+    const std::shared_ptr<const mempool> pool_;
     std::string sub_buffer_;
     boost::beast::flat_buffer ws_buffer_;
     std::deque<epee::byte_slice> write_queue_;
@@ -324,8 +325,9 @@ namespace lws { namespace rpc { namespace feed
     }
 
    public: 
-    connection(boost::asio::io_context& io, const lws::rpc::client& client, const lws::db::storage& disk, const protocol proto)
+    connection(boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const lws::db::storage& disk, const protocol proto)
       : disk_(disk.clone()),
+        pool_(std::move(pool)),
         sub_buffer_(),
         ws_buffer_(),
         write_queue_(),
@@ -347,7 +349,7 @@ namespace lws { namespace rpc { namespace feed
 
     bool login(std::shared_ptr<connection> self)
     {
-      const bool rc = do_write(std::move(self), prep_login(disk_, &sub_, &sync_, ws_buffer_, proto_));
+      const bool rc = do_write(std::move(self), prep_login(disk_, pool_.get(), &sub_, &sync_, ws_buffer_, proto_));
       ws_buffer_.consume(ws_buffer_.cdata().size());
       return rc;
     }
@@ -465,8 +467,8 @@ namespace lws { namespace rpc { namespace feed
     { do_async_shutdown(sock().next_layer(), std::move(self)); }
 
   public:
-    explicit connection_(T&& sock, boost::asio::io_context& io, const lws::rpc::client& client, const lws::db::storage& disk, const protocol proto)
-      : connection(io, client, disk, proto), sock_(std::move(sock))
+    explicit connection_(T&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const lws::db::storage& disk, const protocol proto)
+      : connection(io, client, std::move(pool), disk, proto), sock_(std::move(sock))
     {
       if (is_binary(proto))
         sock_.binary(true);
@@ -581,14 +583,14 @@ namespace lws { namespace rpc { namespace feed
   }
 
   template<typename T>
-  inline bool do_start(T&& sock, boost::asio::io_context& io, const lws::rpc::client& client, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
+  inline bool do_start(T&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
   {
     const protocol proto = get_protocol(req.base()[boost::beast::http::field::sec_websocket_protocol]);
     switch (proto)
     {
     case protocol::v0_msgpack:
     case protocol::v0_json:
-      do_start(std::make_shared<connection_<T>>(std::forward<T>(sock), io, client, disk, proto), req, timeout);
+      do_start(std::make_shared<connection_<T>>(std::forward<T>(sock), io, client, std::move(pool), disk, proto), req, timeout);
       return true;
     default:
     case protocol::invalid:

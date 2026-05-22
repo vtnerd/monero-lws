@@ -38,11 +38,11 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
-#include "hardforks/hardforks.h"     // monero/src
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
 #include "scanner.h"
+#include "util/transaction.test.h"
 #include "wire/error.h"
 #include "wire/json/write.h"
 
@@ -87,147 +87,7 @@ namespace
       boost::thread& thread;
       ~join() { thread.join(); }
   };
-
-  struct transaction
-  {
-    cryptonote::transaction tx;
-    std::vector<crypto::secret_key> additional_keys;
-    std::vector<crypto::public_key> pub_keys;
-    std::vector<crypto::public_key> spend_publics;
-  };
-
-  transaction make_miner_tx(lest::env& lest_env, lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags)
-  {
-    static constexpr std::uint64_t fee = 0;
-
-    transaction tx{};
-    tx.pub_keys.emplace_back();
-    tx.spend_publics.emplace_back();
-
-    crypto::secret_key key;
-    crypto::generate_keys(tx.pub_keys.back(), key);
-    EXPECT(add_tx_pub_key_to_extra(tx.tx, tx.pub_keys.back()));
-
-    cryptonote::txin_gen in;
-    in.height = std::uint64_t(height);
-    tx.tx.vin.push_back(in);
-
-    // This will work, until size of constructed block is less then CRYPTONOTE_BLOCK_GRANTED_FULL_REWARD_ZONE
-    uint64_t block_reward;
-    EXPECT(cryptonote::get_block_reward(0, 0, 1000000, block_reward, num_testnet_hard_forks));
-    block_reward += fee;
-
-    crypto::key_derivation derivation;
-    EXPECT(crypto::generate_key_derivation(miner_address.view_public, key, derivation));
-    EXPECT(crypto::derive_public_key(derivation, 0, miner_address.spend_public, tx.spend_publics.back()));
- 
-    crypto::view_tag view_tag;
-    if (use_view_tags)
-      crypto::derive_view_tag(derivation, 0, view_tag);
-
-    cryptonote::tx_out out;
-    cryptonote::set_tx_out(block_reward, tx.spend_publics.back(), use_view_tags, view_tag, out);
-
-    tx.tx.vout.push_back(out);
-    tx.tx.version = 2;
-    tx.tx.unlock_time = std::uint64_t(height) + CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW;
-
-    return tx;
-  }
-
-  struct get_spend_public
-  {
-    std::vector<crypto::public_key>& pub_keys;
-
-    template<typename T>
-    void operator()(const T&) const noexcept
-    {}
    
-    void operator()(const cryptonote::txout_to_key& val) const
-    { pub_keys.push_back(val.key); }
-
-    void operator()(const cryptonote::txout_to_tagged_key& val) const
-    { pub_keys.push_back(val.key); }
-  };
-
-  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, std::vector<cryptonote::tx_destination_entry> destinations, const std::uint32_t ring_base, const bool use_view_tag)
-  {
-    static constexpr std::uint64_t input_amount = 20000;
-    static constexpr std::uint64_t output_amount = 8000;
-
-    EXPECT(15 < std::numeric_limits<std::uint32_t>::max() - ring_base);
-
-    crypto::secret_key unused_key{};
-    crypto::secret_key og_tx_key{};
-    crypto::public_key og_tx_public{};
-    crypto::generate_keys(og_tx_public, og_tx_key);
-
-    crypto::key_derivation derivation{};
-    crypto::public_key spend_public{};
-    EXPECT(crypto::generate_key_derivation(keys.m_account_address.m_view_public_key, og_tx_key, derivation));
-    EXPECT(crypto::derive_public_key(derivation, 0, keys.m_account_address.m_spend_public_key, spend_public));
-
-    std::uint32_t index = -1;
-    std::unordered_map<crypto::public_key, cryptonote::subaddress_index> subaddresses;
-    for (const auto& destination : destinations)
-    {
-      ++index;
-      subaddresses[destination.addr.m_spend_public_key] = {0, index};
-    }
-
-    if (2 < destinations.size())
-      destinations.erase(destinations.begin() + 1, destinations.end() - 1);
-
-    std::vector<cryptonote::tx_source_entry> sources;
-    sources.emplace_back();
-    sources.back().amount = input_amount;
-    sources.back().rct = true;
-    sources.back().real_output = 15;
-    sources.back().real_output_in_tx_index = 0;
-    sources.back().real_out_tx_key = og_tx_public;
-    for (std::uint32_t i = ring_base; i < 15 + ring_base; ++i)
-    {
-      crypto::public_key next{};
-      crypto::generate_keys(next, unused_key);
-      sources.back().push_output(i, next, 10000);
-    }
-    sources.back().outputs.emplace_back();
-    sources.back().outputs.back().first = 15 + ring_base;
-    sources.back().outputs.back().second.dest = rct::pk2rct(spend_public);
- 
-    transaction out{};
-    EXPECT(
-      cryptonote::construct_tx_and_get_tx_key(
-        keys, subaddresses, sources, destinations, keys.m_account_address, {}, out.tx, /* 0, */ unused_key,
-        out.additional_keys, true, {rct::RangeProofType::RangeProofPaddedBulletproof, 2}, use_view_tag
-      )
-    );
-
-    for (const auto& vout : out.tx.vout)
-      boost::apply_visitor(get_spend_public{out.spend_publics}, vout.target);
-
-    if (out.additional_keys.empty())
-    {
-      std::vector<cryptonote::tx_extra_field> extra;
-      EXPECT(cryptonote::parse_tx_extra(out.tx.extra, extra));
- 
-      cryptonote::tx_extra_pub_key key;
-      EXPECT(cryptonote::find_tx_extra_field_by_type(extra, key));
-
-      out.pub_keys.emplace_back();
-      out.pub_keys.back() = key.pub_key;
-    }
-    else
-    {
-      for (const auto& this_key : out.additional_keys)
-      {
-        out.pub_keys.emplace_back();
-        EXPECT(crypto::secret_key_to_public_key(this_key, out.pub_keys.back()));
-      }
-    }
-    return out;
-  }
-
   void scanner_thread(lws::scanner& scanner, void* ctx, const std::vector<epee::byte_slice>& reply)
   {
     struct stop_
@@ -331,6 +191,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
   SETUP("lws::rpc::context, ZMQ_REP Server, and lws::db::storage")
   {
+    std::shared_ptr<lws::mempool> pool{};
     auto rpc = 
       lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false, true);
 
@@ -448,15 +309,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       destinations.back().addr = keys.m_account_address;
 
       std::vector<epee::byte_slice> messages{};
-      transaction tx = make_miner_tx(lest_env, last_block.id, account, false);
+      lws_test::transaction tx = lws_test::make_miner_tx(lest_env, last_block.id, account, false);
       EXPECT(tx.pub_keys.size() == 1);
       EXPECT(tx.spend_publics.size() == 1);
 
-      transaction tx2 = make_tx(lest_env, keys, destinations, 20, true);
+      lws_test::transaction tx2 = lws_test::make_tx(lest_env, keys, destinations, 20, true);
       EXPECT(tx2.pub_keys.size() == 1);
       EXPECT(tx2.spend_publics.size() == 1);
 
-      transaction tx3 = make_tx(lest_env, keys, destinations, 86, false);
+      lws_test::transaction tx3 = lws_test::make_tx(lest_env, keys, destinations, 86, false);
       EXPECT(tx3.pub_keys.size() == 1);
       EXPECT(tx3.spend_publics.size() == 1);
 
@@ -465,7 +326,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       destinations.back().addr = keys_subaddr1.m_account_address;
       destinations.back().is_subaddress = true;
 
-      transaction tx4 = make_tx(lest_env, keys, destinations, 50, false);
+      lws_test::transaction tx4 = lws_test::make_tx(lest_env, keys, destinations, 50, false);
       EXPECT(tx4.pub_keys.size() == 1);
       EXPECT(tx4.spend_publics.size() == 2);
 
@@ -474,7 +335,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       //destinations.back().addr = keys_subaddr2.m_account_address;
       //destinations.back().is_subaddress = true;
 
-      //transaction tx5 = make_tx(lest_env, keys, destinations, 100, true);
+      //transaction tx5 = lws_test::make_tx(lest_env, keys, destinations, 100, true);
       //EXPECT(tx5.pub_keys.size() == 3);
       //EXPECT(tx5.spend_publics.size() == 3);
 
@@ -542,7 +403,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
-        scanner.run(std::move(rpc), 1, {}, {}, opts);
+        scanner.run(std::move(rpc), pool, 1, {}, {}, opts);
       }
 
       hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));
@@ -749,15 +610,15 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       destinations.back().addr = keys.m_account_address;
 
       std::vector<epee::byte_slice> messages{};
-      transaction tx = make_miner_tx(lest_env, last_block.id, account, false);
+      lws_test::transaction tx = lws_test::make_miner_tx(lest_env, last_block.id, account, false);
       EXPECT(tx.pub_keys.size() == 1);
       EXPECT(tx.spend_publics.size() == 1);
 
-      transaction tx2 = make_tx(lest_env, keys, destinations, 20, true);
+      lws_test::transaction tx2 = lws_test::make_tx(lest_env, keys, destinations, 20, true);
       EXPECT(tx2.pub_keys.size() == 1);
       EXPECT(tx2.spend_publics.size() == 1);
 
-      transaction tx3 = make_tx(lest_env, keys, destinations, 86, false);
+      lws_test::transaction tx3 = lws_test::make_tx(lest_env, keys, destinations, 86, false);
       EXPECT(tx3.pub_keys.size() == 1);
       EXPECT(tx3.spend_publics.size() == 1);
 
@@ -766,7 +627,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       destinations.back().addr = keys_subaddr1.m_account_address;
       destinations.back().is_subaddress = true;
 
-      transaction tx4 = make_tx(lest_env, keys, destinations, 50, false);
+      lws_test::transaction tx4 = lws_test::make_tx(lest_env, keys, destinations, 50, false);
       EXPECT(tx4.pub_keys.size() == 1);
       EXPECT(tx4.spend_publics.size() == 2);
 
@@ -775,7 +636,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       destinations.back().addr = keys_subaddr2.m_account_address;
       destinations.back().is_subaddress = true;
 
-      transaction tx5 = make_tx(lest_env, keys, destinations, 146, true);
+      lws_test::transaction tx5 = lws_test::make_tx(lest_env, keys, destinations, 146, true);
       EXPECT(tx5.pub_keys.size() == 1);
       EXPECT(tx5.spend_publics.size() == 2);
 
@@ -868,7 +729,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
         boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
         const join on_scope_exit{server_thread};
-        scanner.run(std::move(rpc), 1, {}, {}, opts);
+        scanner.run(std::move(rpc), pool, 1, {}, {}, opts);
       }
 
       hashes.push_back(cryptonote::get_block_hash(bmessage.blocks.back().block));

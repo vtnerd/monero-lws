@@ -33,12 +33,14 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_set>
 
 #include "config.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
 #include "lws_version.h"
+#include "mempool.h"
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
 #include "rpc/feed.h"
@@ -506,19 +508,22 @@ namespace lws
       }
 
       const bool is_coinbase = (extra.first & db::coinbase_output);
+      const auto height = self.value().info.link.height;
+      const bool mempool = height == db::block_id::txpool;
+      const iso_timestamp timestamp{self.value().info.timestamp};
 
       wire::object(dest,
         wire::field("id", std::uint64_t(self.index())),
         wire::field("hash", std::cref(self.value().info.link.tx_hash)),
-        wire::field("timestamp", iso_timestamp(self.value().info.timestamp)),
+        wire::optional_field("timestamp", mempool ? nullptr : &timestamp),
         wire::field("total_received", safe_uint64(self.value().info.spend_meta.amount)),
         wire::field("total_sent", safe_uint64(self.value().spent)),
         wire::field("fee", safe_uint64(self.value().info.fee)),
         wire::field("unlock_time", self.value().info.unlock_time),
-        wire::field("height", self.value().info.link.height),
+        wire::optional_field("height", mempool ? nullptr : &height),
         wire::optional_field("payment_id", payment_id),
         wire::field("coinbase", is_coinbase),
-        wire::field("mempool", false),
+        wire::field("mempool", mempool),
         wire::field("mixin", self.value().info.spend_meta.mixin_count),
         wire::field("recipient", self.value().info.recipient),
         wire::field("spent_outputs", std::cref(self.value().spends))
@@ -583,16 +588,24 @@ namespace lws
     vec_lmdb_<T> vec_lmdb(const std::vector<T>& src) { return {src.begin(), src.end()}; }
 
     template<typename T, typename U>
-    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
+    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, db::account const* const user, mempool const* const pool, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
     {
       // merge input and output info into a single set of txes.
 
+      const bool has_pool = (user && pool);
       std::uint64_t total = 0;
       std::vector<rpc::get_transaction> out{};
       std::vector<db::output::spend_meta_> metas{};
+      std::vector<std::pair<db::output_id, db::address_index>> receives{};
+      std::unordered_set<crypto::hash> txes_processed{};
 
       out.reserve(reserve);
       metas.reserve(reserve);
+      if (has_pool)
+      {
+        receives.reserve(reserve);
+        txes_processed.reserve(reserve);
+      }
 
       db::transaction_link next_output{};
       db::transaction_link next_spend{};
@@ -619,11 +632,20 @@ namespace lws
           {
             out.push_back({*output});
             amount = out.back().info.spend_meta.amount;
+            if (has_pool)
+              txes_processed.emplace(next_output.tx_hash);
           }
           else
           {
             amount = output.template get_value<MONERO_FIELD(db::output, spend_meta.amount)>();
             out.back().info.spend_meta.amount += amount;
+          }
+
+          if (has_pool)
+          {
+            auto id = output.template get_value<MONERO_FIELD(db::output, spend_meta.id)>();
+            auto subaddr = output.template get_value<MONERO_FIELD(db::output, recipient)>();
+            receives.emplace_back(std::move(id), std::move(subaddr));
           }
 
           if (all_outputs)
@@ -660,6 +682,8 @@ namespace lws
               out.back().spends.back().possible_spend.mixin_count;
             out.back().info.timestamp = out.back().spends.back().possible_spend.timestamp;
             out.back().info.unlock_time = out.back().spends.back().possible_spend.unlock_time;
+            if (has_pool)
+              txes_processed.emplace(out.back().info.link.tx_hash);
           }
           else
             out.back().spends.push_back({skip_spend_meta ? meta_type{} : *meta, *spend});
@@ -670,6 +694,62 @@ namespace lws
           ++spend;
           if (!spend.is_end())
             next_spend = spend.template get_value<MONERO_FIELD(db::spend, link)>();
+        }
+      }
+
+      if (has_pool)
+      {
+        // Add mempool transactions. Order is not important, since
+        // mempool txs cannot depend on each other.
+        lws::account full_user{*user, std::move(receives), {}};
+        const auto pool_txs = pool->scan_account(full_user);
+        for (const auto& row: pool_txs)
+        {
+          // mempool update after block could be delayed
+          if (txes_processed.count(row.hash))
+            continue;
+
+          rpc::get_transaction& tx = out.emplace_back();
+
+          // Ingore spends that use unknown outputs
+          // (perhaps the scanner thread is behind, and hasn't seen them yet).
+          bool from_future = false;
+          for (const auto& spend: row.spends)
+          {
+            const auto meta = rpc::get_address_txs_response::find_metadata(metas, spend.source);
+            if (meta == metas.end() || meta->id != spend.source)
+            {
+              from_future = true;
+              break;
+            }
+            tx.spends.push_back({*meta, spend});
+            tx.spent += meta->amount;
+          }
+
+          uint64_t tx_total = 0;
+          for (const auto& output: row.outputs)
+          {
+            const auto amount = output.spend_meta.amount;
+            total += amount;
+            tx_total += amount;
+            tx.receives.push_back(output);
+          }
+          if (!row.outputs.empty())
+          {
+            tx.info = row.outputs.front();
+            tx.info.spend_meta.amount = tx_total;
+          }
+          else
+          {
+            if (row.spends.empty() || from_future) break;
+            auto spend = row.spends.front();
+            tx.info.link.tx_hash = row.hash;
+            tx.info.link.height = db::block_id::txpool;
+            tx.info.spend_meta.amount = tx_total;
+            tx.info.spend_meta.mixin_count = spend.mixin_count;
+            tx.info.timestamp = spend.timestamp;
+            tx.info.unlock_time = spend.unlock_time;
+          }
         }
       }
       
@@ -691,10 +771,10 @@ namespace lws
   {
     std::sort(outputs.begin(), outputs.end(), by_tx_link);
     std::sort(spends.begin(), spends.end(), by_tx_link);
-    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), outputs.size(), true, true).first;
+    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), nullptr, nullptr, outputs.size(), true, true).first;
   }
 
-  expect<rpc::get_address_txs_response> rpc::get_address_txs_response::load(db::storage_reader& reader, const db::account& acct, const bool all_outputs)
+  expect<rpc::get_address_txs_response> rpc::get_address_txs_response::load(db::storage_reader& reader, const db::account& acct, mempool const* const pool, const bool all_outputs)
   {
     auto outputs = reader.get_outputs(acct.id);
     if (!outputs)
@@ -717,7 +797,7 @@ namespace lws
     resp.lookahead_fail = db::to_uint(acct.lookahead_fail);
     resp.lookahead = acct.lookahead;
 
-    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), outputs->count(), all_outputs, false);
+    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), std::addressof(acct), pool, outputs->count(), all_outputs, false);
     resp.total_received = safe_uint64(out.second);
     resp.transactions = std::move(out.first);
     return resp;
