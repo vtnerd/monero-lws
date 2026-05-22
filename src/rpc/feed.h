@@ -34,6 +34,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <system_error>
 
 #include "db/fwd.h"
@@ -72,8 +73,8 @@ namespace lws { namespace rpc { namespace feed
     return std::error_code{int(value), error_category()};
   }
 
-  bool start(boost::asio::ip::tcp::socket&& sock, boost::asio::io_context& io, const lws::rpc::client& client, const request& req, const lws::db::storage& disk, std::chrono::seconds timeout);
-  bool start(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>&& sock, boost::asio::io_context& io, const lws::rpc::client& client, const request& req, const lws::db::storage& disk, std::chrono::seconds idle_timeout);
+  bool start(boost::asio::ip::tcp::socket&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const request& req, const lws::db::storage& disk, std::chrono::seconds timeout);
+  bool start(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<mempool> pool, const request& req, const lws::db::storage& disk, std::chrono::seconds idle_timeout);
 }}} // lws // rpc // feed
 
 namespace std

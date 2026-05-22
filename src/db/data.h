@@ -433,6 +433,13 @@ namespace db
   };
   void write_bytes(wire::writer&, const webhook_new_account&);
 
+  std::size_t get_hash(account_address const& value) noexcept;
+  bool operator==(account_address const& left, account_address const& right) noexcept;
+  inline bool operator!=(account_address const& left, account_address const& right) noexcept
+  {
+    return !(left == right);
+  }
+
   inline constexpr bool operator==(address_index const& left, address_index const& right) noexcept
   {
     return left.maj_i == right.maj_i && left.min_i == right.min_i;
@@ -507,4 +514,14 @@ namespace wire
    struct is_blob<lws::db::view_key>
     : std::true_type
   {};
+}
+
+namespace std
+{
+  template<>
+  struct hash<lws::db::account_address>
+  {
+    std::size_t operator()(lws::db::account_address const& value) const noexcept
+    { return lws::db::get_hash(value); }
+  };
 }

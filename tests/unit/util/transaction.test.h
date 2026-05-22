@@ -25,20 +25,36 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <boost/asio/ssl.hpp>
-#include <boost/beast/websocket/ssl.hpp>
-#include "feed.inl"
+#pragma once
 
-namespace lws { namespace rpc { namespace feed
+#include <cstdint>
+#include <vector>
+
+#include "cryptonote_basic/cryptonote_basic.h"   // monero/src
+#include "db/fwd.h"
+#include "lest.hpp"
+
+namespace cryptonote
 {
-  bool start(boost::asio::ssl::stream<boost::asio::ip::tcp::socket>&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
-  {
-    // moving ssl streams only supported in boost 1.74+
-#if BOOST_VERSION >= 107400 
-    return do_start(std::move(sock), io, client, std::move(pool), req, disk, timeout);
-#else
-    return false;
-#endif
-  }
-}}}
+  class account_keys;
+  struct public_key;
+  class secret_key;
+  class tx_destination_entry;
+}
+namespace rct { struct key; }
 
+namespace lws_test
+{
+  struct transaction
+  {
+    cryptonote::transaction tx;
+    std::vector<crypto::secret_key> additional_keys;
+    std::vector<crypto::public_key> pub_keys;
+    std::vector<crypto::public_key> spend_publics;
+    std::vector<crypto::key_image> images;
+    std::vector<rct::key> ringct;
+  };
+
+  transaction make_miner_tx(lest::env& lest_env, lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags);
+  transaction make_tx(lest::env& lest_env, const cryptonote::account_keys& keys, std::vector<cryptonote::tx_destination_entry> destinations, const std::uint32_t ring_base, const bool use_view_tag);
+}

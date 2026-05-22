@@ -231,7 +231,7 @@ namespace lws { namespace rpc { namespace feed
     return prep(feed_error{error}, proto);
   }
 
-  expect<epee::byte_slice> prep_login(const db::storage& disk, account_sub* const sub, connection_sync* const sync, boost::beast::flat_buffer& buffer, const protocol proto)
+  expect<epee::byte_slice> prep_login(const db::storage& disk, mempool const* const pool, account_sub* const sub, connection_sync* const sync, boost::beast::flat_buffer& buffer, const protocol proto)
   {
     LWS_VERIFY(sub && sync);
     const std::string_view prefix = get_prefix(buffer.cdata());
@@ -271,7 +271,7 @@ namespace lws { namespace rpc { namespace feed
       return prep(feed_blocks{acct.start_height, acct.scan_height, block->id, acct.lookahead_fail, acct.lookahead}, proto);
     }
 
-    auto txs = get_address_txs_response::load(account->second, account->first, true);
+    auto txs = get_address_txs_response::load(account->second, account->first, pool, true);
     if (!txs)
       return txs.error();
  
@@ -366,9 +366,9 @@ namespace lws { namespace rpc { namespace feed
     return prep(feed_mempool{from_scanner.outputs.at(0)}, proto);
   } 
 
-  bool start(boost::asio::ip::tcp::socket&& sock, boost::asio::io_context& io, const lws::rpc::client& client, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
+  bool start(boost::asio::ip::tcp::socket&& sock, boost::asio::io_context& io, const lws::rpc::client& client, std::shared_ptr<const mempool> pool, const request& req, const lws::db::storage& disk, const std::chrono::seconds timeout)
   {
-    return do_start(std::move(sock), io, client, req, disk, timeout);
+    return do_start(std::move(sock), io, client, std::move(pool), req, disk, timeout);
   }
 }}} // lws // rpc // feed 
 

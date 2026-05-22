@@ -42,6 +42,7 @@ namespace lws
       enum class status : std::uint16_t;
     }
   }
+  class mempool;
   struct rates;
   class scan_manager;  
 }
