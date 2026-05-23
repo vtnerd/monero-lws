@@ -1,6 +1,6 @@
 site_name: docs.monerolws.com
 site_url: https://docs.monerolws.com
-site_description: Documentation for Monero-LWS
+site_description: Documentation / for Monero-LWS
 nav:
   - Overview: index.md 
   - Installation:
