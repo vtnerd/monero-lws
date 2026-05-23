@@ -2124,17 +2124,19 @@ namespace lws
           by the handler function), and therefore needs to be "wrapped" to
           ensure thread safety. This also allows `resume` to be unwrapped.
           DO NOT use `boost::asio::bind_executor` here as it doesn't create
-          a new callable like `wrap` does. */
+          a new callable like `wrap` does (which is deprecated, see dispatch
+          below). */
         const auto& self = self_;
-        resumer = self->strand_.wrap(
-          [self, resume] (expect<copyable_slice> body) mutable
-          {
-            if (!body)
-              self->bad_request(body.error(), std::move(resume));
-            else
-              self->valid_request(std::move(body->value), std::move(resume));
-          }
-        );
+        resumer = [self, resume] (expect<copyable_slice> body) mutable
+        {
+            boost::asio::dispatch(self->strand_, [self, resume = std::move(resume), body = std::move(body)] () mutable
+            {
+              if (!body)
+                self->bad_request(body.error(), std::move(resume));
+              else
+                self->valid_request(std::move(body->value), std::move(resume));
+            });
+        };
       }
 
       MDEBUG("Running REST handler " << handler->name << " on " << self_.get());
