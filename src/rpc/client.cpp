@@ -30,7 +30,6 @@
 #include <array>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/thread/mutex.hpp>
-#include <boost/utility/string_ref.hpp>
 #include <cassert>
 #include <system_error>
 
@@ -338,12 +337,12 @@ namespace rpc
     return {lws::error::bad_daemon_response};
   }
 
-  expect<std::uint32_t> account_sub::watch(const std::string_view address) const
+  expect<std::uint32_t> account_sub::watch(const boost::string_ref address) const
   {
     MONERO_PRECOND(ctx);
     MONERO_PRECOND(sub.zsock);
 
-    const std::string_view warning = feed_warning::prefix();
+    const boost::string_ref warning = feed_warning::prefix();
     const std::uint32_t count = ctx->warning_count;
     MONERO_ZMQ_CHECK(zmq_setsockopt(sub.zsock.get(), ZMQ_SUBSCRIBE, warning.data(), warning.size()));
     MONERO_ZMQ_CHECK(zmq_setsockopt(sub.zsock.get(), ZMQ_SUBSCRIBE, address.data(), address.size()));
@@ -710,10 +709,10 @@ namespace rpc
   namespace
   {
     template<typename T>
-    expect<void> prep_message(epee::byte_stream& sink, const std::string_view prefix, const T& message)
+    expect<void> prep_message(epee::byte_stream& sink, const boost::string_ref prefix, const T& message)
     {  
       sink.write({prefix.data(), prefix.size()});
-      if (prefix.empty() || prefix.back() != u8':')
+      if (prefix.empty() || prefix.back() != ':')
         sink.push_back(':');
 
       wire::msgpack_slice_writer dest{std::move(sink), true /* integer keys */};
@@ -731,7 +730,7 @@ namespace rpc
     }
 
     template<typename T>
-    expect<epee::byte_slice> prep_message(const std::string_view prefix, const T& message)
+    expect<epee::byte_slice> prep_message(const boost::string_ref prefix, const T& message)
     {  
       epee::byte_stream sink;
       MONERO_CHECK(prep_message(sink, prefix, message));

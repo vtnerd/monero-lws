@@ -38,7 +38,7 @@ namespace lws { namespace rpc { namespace scanner
     status out{
      std::move(replace_), std::move(push_), user_count_
     };
-    replace_ = std::nullopt;
+    replace_ = boost::none;
     push_.clear();
     push_.shrink_to_fit();
     return out; 

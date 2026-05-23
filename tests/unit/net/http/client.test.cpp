@@ -82,7 +82,7 @@ LWS_CASE("net::http::client")
 
     SECTION("GET 200 OK")
     {
-      std::atomic<bool> done = false;
+      std::atomic<bool> done{false};
       const auto handler = [&done, &lest_env] (boost::system::error_code error, std::string body)
       {
         EXPECT(!error);
@@ -102,7 +102,7 @@ LWS_CASE("net::http::client")
 
     SECTION("GET 200 OK Twice")
     {
-      std::atomic<unsigned> done = 0;
+      std::atomic<unsigned> done{0};
       const auto handler = [&done, &lest_env] (boost::system::error_code error, std::string body)
       {
         EXPECT(!error);
@@ -125,7 +125,7 @@ LWS_CASE("net::http::client")
 
     SECTION("GET 404 NOT FOUND")
     {
-      std::atomic<bool> done = false;
+      std::atomic<bool> done{false};
       const auto handler = [&done, &lest_env] (boost::system::error_code error, std::string body)
       {
         EXPECT(error == boost::asio::error::operation_not_supported);
@@ -145,7 +145,7 @@ LWS_CASE("net::http::client")
 
     SECTION("GET (Invalid server address)")
     {
-      std::atomic<bool> done = false;
+      std::atomic<bool> done{false};
       const auto handler = [&done, &lest_env] (boost::system::error_code error, std::string body)
       {
         EXPECT(error == boost::asio::error::connection_refused);

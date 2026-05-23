@@ -25,6 +25,9 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
+#include "error.h"
 #include "wire/json.h"
 #include "wire/wrapper/variant.h"
 
@@ -44,7 +47,6 @@ namespace rpc
     unsigned id;
     const char* method; //!< Must be in static memory
   };
-  constexpr const char json_request_base::jsonrpc[];
 
   //! \tparam W implements the WRITE concept \tparam M implements the METHOD concept
   template<typename W, typename M>
@@ -76,10 +78,7 @@ namespace rpc
     std::string message;
   };
 
-  inline void read_bytes(wire::json_reader& source, json_error& self)
-  {
-    wire::object(source, WIRE_FIELD(code), WIRE_FIELD(message));
-  }
+  void read_bytes(wire::json_reader& source, json_error& self);
 
   //! \tparam R implements the READ concept
   template<typename R>

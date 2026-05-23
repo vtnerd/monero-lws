@@ -2,7 +2,7 @@ name: Build+Push Daemon/Admin Docker Image
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "release-v1.0_0.18" ]
     paths-ignore: [ "docs/**", "mkdocs.yml" ]
 
 jobs:
@@ -12,9 +12,12 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Build Docker image
-      run: docker build --no-cache --tag vtnerd/monero-lws:master .
+      run: docker build --no-cache --tag vtnerd/monero-lws:1.0 .
     - name: Add additional tags
-      run: docker image tag vtnerd/monero-lws:master ghcr.io/vtnerd/monero-lws:master
+      run: >
+        docker image tag vtnerd/monero-lws:1.0 vtnerd/monero-lws:1 &&
+        docker image tag vtnerd/monero-lws:1.0 ghcr.io/vtnerd/monero-lws:1.0 &&
+        docker image tag vtnerd/monero-lws:1.0 ghcr.io/vtnerd/monero-lws:1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4

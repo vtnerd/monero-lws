@@ -27,13 +27,13 @@
 
 #include <boost/asio/signal_set.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/optional/optional.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/thread/thread.hpp>
 #include <csignal>
 #include <iostream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -139,7 +139,7 @@ namespace
     out << description;
   }
 
-  std::optional<program> get_program(int argc, char** argv)
+  boost::optional<program> get_program(int argc, char** argv)
   {
     namespace po = boost::program_options;
 
@@ -170,7 +170,7 @@ namespace
     if (command_line::get_arg(args, command_line::arg_help))
     {
       print_help(std::cout);
-      return std::nullopt;
+      return boost::none;
     }
 
     opts.set_network(args); // do this first, sets global variable :/
@@ -257,7 +257,7 @@ namespace
           auto new_client = MONERO_UNWRAP(zclient.clone());
           MONERO_UNWRAP(new_client.watch_scan_signals());
           send_users send{client};
-          if (!lws::scanner::loop(self, std::move(send), std::nullopt, std::move(new_client), std::move(users), *queue, opts, false))
+          if (!lws::scanner::loop(self, std::move(send), boost::none, std::move(new_client), std::move(users), *queue, opts, false))
             return;
         }
       }
@@ -363,7 +363,7 @@ int main(int argc, char** argv)
 
   try
   {
-    std::optional<program> prog;
+    boost::optional<program> prog;
 
     try
     {

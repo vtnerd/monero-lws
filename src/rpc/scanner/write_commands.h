@@ -210,7 +210,7 @@ namespace lws { namespace rpc { namespace scanner
         self_->write_bufs_.push_back(std::move(msg_));
 
         if (queue)
-          write_buffers{self_}();
+          write_buffers<T>{self_}();
         else if (max_write_buffers <= self_->write_bufs_.size())
         {
           MERROR("Exceeded max buffer size for connection: " << self_->remote_endpoint());

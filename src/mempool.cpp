@@ -51,7 +51,7 @@ namespace lws
 
     for (auto& tx: txs)
     {
-      auto found = state_.try_emplace(get_transaction_hash(tx), nullptr);
+      auto found = state_.emplace(get_transaction_hash(tx), nullptr);
       if (!found.first->second)
         found.first->second = std::make_shared<pool_entry>(std::move(tx), now);
     }

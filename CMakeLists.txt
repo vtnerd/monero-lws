@@ -30,7 +30,7 @@ cmake_minimum_required(VERSION 3.5.0)
 project(monero-lws)
 
 enable_language(CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-DBOOST_UUID_DISABLE_ALIGNMENT) # This restores UUID's std::has_unique_object_representations property
 
@@ -134,13 +134,13 @@ if (MONERO_BUILD_DIR)
     usb_LIBRARY
     HIDAPI_INCLUDE_DIR
     HIDAPI_LIBRARY
-    libzmq_INCLUDE_DIRS
     LMDB_INCLUDE
     monero_SOURCE_DIR
     OPENSSL_INCLUDE_DIR
     OPENSSL_CRYPTO_LIBRARY
     OPENSSL_SSL_LIBRARY
-    pkgcfg_lib_libzmq_zmq
+    ZMQ_INCLUDE_PATH
+    ZMQ_LIB
     sodium_LIBRARY_RELEASE
     SODIUM_LIBRARY
     UNBOUND_LIBRARIES
@@ -186,6 +186,7 @@ if (MONERO_BUILD_DIR)
 
   set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
   set(LMDB_LIB_PATH "monero::lmdb")
+  set(ZMQ_LIB "${monero_ZMQ_LIB}")
 else () # NOT MONERO_BUILD_DIR
   if (NOT MONERO_SOURCE_DIR)
     set (MONERO_SOURCE_DIR "${monero-lws_SOURCE_DIR}/external/monero")
@@ -201,7 +202,7 @@ else () # NOT MONERO_BUILD_DIR
   set(MONERO_BUILD_DIR "${monero_BINARY_DIR}")
   set(IMPORTED_MONERO_LIBRARIES "${MONERO_LIBRARIES}")
   set(monero_Boost_THREAD_LIBRARY_RELEASE "${Boost_THREAD_LIBRARY_RELEASE}")
-  set(monero_pkgcfg_lib_libzmq_zmq "${pkgcfg_lib_libzmq_zmq}")
+  find_library(ZMQ_LIB zmq)
   if (SODIUM_LIBRARY)
     set(monero_SODIUM_LIBRARY "${SODIUM_LIBRARY}")
   else()
@@ -239,8 +240,6 @@ else()
   set(RMQ_LIBRARY "")
 endif()
 
-set(ZMQ_INCLUDE_PATH "${libzmq_INCLUDE_DIRS}")
-set(ZMQ_LIB "${monero_pkgcfg_lib_libzmq_zmq}")
 if (monero_SODIUM_LIBRARY)
   set(SODIUM_LIBRARY "${monero_SODIUM_LIBRARY}")
 else ()

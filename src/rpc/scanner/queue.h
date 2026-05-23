@@ -27,11 +27,11 @@
 #pragma once
 
 #include <algorithm>
+#include <boost/optional/optional.hpp>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/lock_guard.hpp>
 #include <boost/thread/mutex.hpp>
 #include <cstddef>
-#include <optional>
 #include <vector>
 
 #include "db/fwd.h"
@@ -46,13 +46,13 @@ namespace lws { namespace rpc { namespace scanner
     //! Status of upstream scan requests.
     struct status
     {
-      std::optional<std::vector<lws::account>> replace; //!< Empty optional means replace **not** requested.
+      boost::optional<std::vector<lws::account>> replace; //!< Empty optional means replace **not** requested.
       std::vector<lws::account> push;
       std::size_t user_count;
     };
 
   private:
-    std::optional<std::vector<lws::account>> replace_;
+    boost::optional<std::vector<lws::account>> replace_;
     std::vector<lws::account> push_;
     std::size_t user_count_;
     db::block_id current_min_height_;  //!< Minimum scan height of accounts on this thread

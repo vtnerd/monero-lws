@@ -449,7 +449,7 @@ namespace db
           return {lmdb::error(MDB_CORRUPTED)};
 
         key_bytes.assign(reinterpret_cast<const char*>(key.mv_data), key.mv_size);
-        key.mv_data = reinterpret_cast<void*>(key_bytes.data());
+        key.mv_data = const_cast<void*>(reinterpret_cast<const void*>(key_bytes.data()));
 
         Y transition{};
         std::memcpy(std::addressof(transition), value.mv_data, value.mv_size);

@@ -148,7 +148,7 @@ namespace lws { namespace rpc { namespace scanner
   {
     if (!self)
       return false;
-    boost::asio::dispatch(self->strand_, do_read_commands{self});
+    boost::asio::dispatch(self->strand_, do_read_commands<T>{self});
     return true;
   }
 }}} // lws // rpc // scanner

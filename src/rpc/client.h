@@ -28,6 +28,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/optional/optional.hpp>
+#include <boost/utility/string_ref.hpp>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -86,7 +87,7 @@ namespace rpc
     net::zmq::async_client& get() noexcept { return sub; }
 
     //! Subscribe to events from `address` and "warning:"
-    expect<std::uint32_t> watch(const std::string_view address) const;
+    expect<std::uint32_t> watch(const boost::string_ref address) const;
 
     //! Initiate complete shutdown on this sub
     void shutdown(boost::system::error_code& ec)

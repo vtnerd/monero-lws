@@ -28,7 +28,7 @@
 
 add_subdirectory(scanner)
 
-set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp feed_ssl.cpp feed_tcp.cpp light_wallet.cpp login.cpp lws_pub.cpp rates.cpp)
+set(monero-lws-rpc_sources admin.cpp client.cpp daemon_pub.cpp daemon_zmq.cpp feed_ssl.cpp feed_tcp.cpp json.cpp light_wallet.cpp login.cpp lws_pub.cpp rates.cpp)
 set(monero-lws-rpc_headers admin.h client.h daemon_pub.h daemon_zmq.h feed.h fwd.h json.h light_wallet.h login.h lws_pub.h rates.h)
 
 add_library(monero-lws-rpc ${monero-lws-rpc_sources} ${monero-lws-rpc_headers})

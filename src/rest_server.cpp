@@ -1489,8 +1489,9 @@ namespace lws
           if (std::numeric_limits<std::size_t>::max() - msg.size() < active->outstanding || config::submit_tx_max < msg.size() + active->outstanding)
             return {error::load};
 
-          active->outstanding += msg.size(); 
-          auto& elem = active->resumers.emplace_back();
+          active->outstanding += msg.size();
+          active->resumers.emplace_back();
+          auto& elem = active->resumers.back();
           std::get<0>(elem) = std::move(msg);
           std::get<1>(elem) = std::move(resume);
           if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
@@ -1630,7 +1631,8 @@ namespace lws
         cache.status = active;
 
         active->outstanding += msg.size();
-        auto& elem = active->resumers.emplace_back();
+        active->resumers.emplace_back();
+        auto& elem = active->resumers.back();
         std::get<0>(elem) = std::move(msg);
         std::get<1>(elem) = std::move(resume);
         if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
@@ -1830,7 +1832,7 @@ namespace lws
     constexpr const unsigned max_endpoint_size =
       std::max(max_standard_endpoint_size, max_admin_endpoint_size);
 
-    constexpr const endpoint* get_endpoint(const std::string_view name) noexcept
+    constexpr const endpoint* get_endpoint(const boost::beast::string_view name) noexcept
     {
       const endpoint* current = std::begin(endpoints);
       endpoint const* const end = std::end(endpoints);
@@ -2084,7 +2086,7 @@ namespace lws
       if (!handler)
         return self_->bad_request(boost::beast::http::status::not_found, std::forward<F>(resume));
 
-      static constexpr endpoint const* const feed = get_endpoint("/feed");
+      static endpoint const* const feed = get_endpoint("/feed");
       if (handler == feed)
       {
         rest_server_data* const from = self_->data_.global;
@@ -2241,7 +2243,7 @@ namespace lws
           else
           {
             MDEBUG("New connection to " << next_->sock().remote_endpoint(error) << " / " << next_.get());
-            boost::asio::dispatch(next_->strand_, handler_loop{next_});
+            boost::asio::dispatch(next_->strand_, handler_loop<Sock>{next_});
           }
         }
       }
