@@ -29,8 +29,8 @@
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/websocket/error.hpp>
+#include <boost/optional/optional.hpp>
 #include <memory>
-#include <optional>
 #include <time.h>
 
 #include "cryptonote_basic/account.h"            // monero/src
@@ -155,7 +155,7 @@ namespace
 
   std::string get_prefix(const std::string& raw)
   {
-    char const* const sep = std::strchr(raw.c_str(), u8':');
+    char const* const sep = std::strchr(raw.c_str(), ':');
     if (!sep)
       return {};
     return {raw.data(), std::size_t(sep - raw.data() + 1)};
@@ -176,7 +176,7 @@ LWS_CASE("rest_server")
 
   SETUP("Database and login")
   {
-    std::optional<lws::rest_server> server;
+    boost::optional<lws::rest_server> server;
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
     auto context =

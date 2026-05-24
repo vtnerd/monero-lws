@@ -27,6 +27,7 @@
 
 #include "feed.inl"
 
+#include <boost/utility/string_view.hpp>
 #include <cstring>
 
 #include "db/account.h"
@@ -165,9 +166,17 @@ namespace lws { namespace rpc { namespace feed
 
   namespace
   {
+    constexpr boost::beast::string_view constexpr_ref(const char* str) noexcept
+    {
+      char const* const start = str;
+      while (*str)
+        ++str;
+      return {start, std::size_t(str - start)};
+    }
+
     constexpr std::pair<boost::beast::string_view, protocol> get_map(const protocol proto) noexcept
     {
-      return {get_string(proto), proto};
+      return {constexpr_ref(get_string(proto)), proto};
     }
 
     std::string get_string(const boost::beast::net::const_buffer buf)
@@ -185,7 +194,7 @@ namespace lws { namespace rpc { namespace feed
     {
       epee::byte_stream sink{};
 
-      const std::string_view prefix = T::prefix();
+      const boost::string_ref prefix = T::prefix();
       sink.write({prefix.data(), prefix.size()});
 
       const std::error_code error = proto == protocol::v0_msgpack ?
@@ -217,10 +226,10 @@ namespace lws { namespace rpc { namespace feed
   }
 
 
-  std::string_view get_prefix(const boost::beast::net::const_buffer buf)
+  boost::string_ref get_prefix(const boost::beast::net::const_buffer buf)
   {
     char const* const begin = reinterpret_cast<const char*>(buf.data());
-    void const* const match = std::memchr(begin, u8':', buf.size());
+    void const* const match = std::memchr(begin, ':', buf.size());
     if (match)
       return {begin, std::size_t(reinterpret_cast<const char*>(match) - begin + 1)};
     return {};
@@ -234,7 +243,7 @@ namespace lws { namespace rpc { namespace feed
   expect<epee::byte_slice> prep_login(const db::storage& disk, mempool const* const pool, account_sub* const sub, connection_sync* const sync, boost::beast::flat_buffer& buffer, const protocol proto)
   {
     LWS_VERIFY(sub && sync);
-    const std::string_view prefix = get_prefix(buffer.cdata());
+    const boost::string_ref prefix = get_prefix(buffer.cdata());
     if (prefix != feed_login::prefix())
       return {error::protocol};
 
@@ -285,7 +294,7 @@ namespace lws { namespace rpc { namespace feed
     LWS_VERIFY(sync);
 
     epee::byte_slice slice{std::move(source)};
-    const std::string_view prefix = get_prefix({slice.data(), slice.size()});
+    const boost::string_ref prefix = get_prefix({slice.data(), slice.size()});
     const bool warning = prefix == feed_warning::prefix();
     slice.remove_prefix(prefix.size());
     if (warning)

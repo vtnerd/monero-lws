@@ -510,7 +510,7 @@ namespace lws
       const bool is_coinbase = (extra.first & db::coinbase_output);
       const auto height = self.value().info.link.height;
       const bool mempool = height == db::block_id::txpool;
-      const iso_timestamp timestamp{self.value().info.timestamp};
+      const iso_timestamp timestamp = iso_timestamp(self.value().info.timestamp);
 
       wire::object(dest,
         wire::field("id", std::uint64_t(self.index())),
@@ -709,7 +709,8 @@ namespace lws
           if (txes_processed.count(row.hash))
             continue;
 
-          rpc::get_transaction& tx = out.emplace_back();
+          out.emplace_back();
+          rpc::get_transaction& tx = out.back();
 
           // Ingore spends that use unknown outputs
           // (perhaps the scanner thread is behind, and hasn't seen them yet).

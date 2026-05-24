@@ -49,6 +49,7 @@
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/beast/websocket/stream.hpp>
+#include <boost/utility/string_ref.hpp>
 #include <chrono>
 #include <type_traits>
 #include <utility>
@@ -169,7 +170,7 @@ namespace lws { namespace rpc { namespace feed
   };
  
   // defined in `feed_tcp.cpp`
-  std::string_view get_prefix(const boost::beast::net::const_buffer buf);
+  boost::string_ref get_prefix(const boost::beast::net::const_buffer buf);
   expect<epee::byte_slice> prep_error(std::error_code error, protocol proto);
   expect<epee::byte_slice> prep_login(const db::storage& disk, const mempool* pool, account_sub* sub, connection_sync* sync, boost::beast::flat_buffer& buffer, protocol proto);
   expect<epee::byte_slice> prep_update(const db::storage& disk, std::string&& source, connection_sync* sync, protocol proto);

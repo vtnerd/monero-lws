@@ -47,7 +47,7 @@ namespace
     {
       EXPECT(Target(0) == wire::integer::cast_unsigned<Target>(std::uintmax_t(0)));
       EXPECT(limit::max() == wire::integer::cast_unsigned<Target>(std::uintmax_t(limit::max())));
-      if constexpr (limit::max() < max)
+      if (limit::max() < max)
       {
         EXPECT_THROWS_AS(wire::integer::cast_unsigned<Target>(std::uintmax_t(limit::max()) + 1), wire::exception);
         EXPECT_THROWS_AS(wire::integer::cast_unsigned<Target>(max), wire::exception);
@@ -68,7 +68,7 @@ namespace
 
     SETUP("intmax_t to " + boost::core::demangle(typeid(Target).name()))
     {
-      if constexpr (min < limit::min())
+      if (min < limit::min())
       {
         EXPECT_THROWS_AS(wire::integer::cast_signed<Target>(std::intmax_t(limit::min()) - 1), wire::exception);
         EXPECT_THROWS_AS(wire::integer::cast_signed<Target>(min), wire::exception);
@@ -76,7 +76,7 @@ namespace
       EXPECT(limit::min() == wire::integer::cast_signed<Target>(std::intmax_t(limit::min())));
       EXPECT(Target(0) == wire::integer::cast_signed<Target>(std::intmax_t(0)));
       EXPECT(limit::max() == wire::integer::cast_signed<Target>(std::intmax_t(limit::max())));
-      if constexpr (limit::max() < max)
+      if (limit::max() < max)
       {
         EXPECT_THROWS_AS(wire::integer::cast_signed<Target>(std::intmax_t(limit::max()) + 1), wire::exception);
         EXPECT_THROWS_AS(wire::integer::cast_signed<Target>(max), wire::exception);

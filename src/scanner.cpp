@@ -100,7 +100,7 @@ namespace lws
       scanner_options opts;
     };
  
-    bool is_new_block(std::string&& chain_msg, std::optional<db::storage>& disk, const account& user)
+    bool is_new_block(std::string&& chain_msg, boost::optional<db::storage>& disk, const account& user)
     {
       const auto chain = rpc::minimal_chain_pub::from_json(std::move(chain_msg));
       if (!chain)
@@ -359,7 +359,7 @@ namespace lws
   scanner::~scanner()
   {}
 
-    bool scanner::loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const size_t thread_n)
+    bool scanner::loop(scanner_sync& self, store_func store, boost::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const size_t thread_n)
     {
       const bool leader_thread = thread_n == 0;
 
