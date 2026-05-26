@@ -112,8 +112,9 @@ namespace wire
   void msgpack_writer::do_integer(const std::intmax_t value)
   {
     assert(value < 0); // constraint checked in header
-    if (0xe0 < value) // 0xe0 needs to be type `int` to work
+    if (-32 <= value)
     {
+      static_assert(msgpack::ftag_signed::tag() == std::uint8_t(-32), "");
       bytes_.put(std::uint8_t(value));
       return;
     }
