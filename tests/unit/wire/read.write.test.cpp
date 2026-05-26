@@ -97,7 +97,7 @@ namespace
   void fill(complex& self)
   {
     self.objects = std::vector<inner>{inner{0, limit<std::uint32_t>::max()}, inner{100, 200}, inner{44444, 83434}};
-    self.ints = std::vector<std::int16_t>{limit<std::int16_t>::min(), limit<std::int16_t>::max(), -3, 31234};
+    self.ints = std::vector<std::int16_t>{limit<std::int16_t>::min(), limit<std::int16_t>::max(), -3, 31234, -32};
     self.uints = std::vector<std::uint64_t>{0, limit<std::uint64_t>::max(), 34234234, 33};
     self.blobs = {lws_test::blob_test1, lws_test::blob_test2, lws_test::blob_test3};
     self.strings = {"string1", "string2", "string3", "string4"};
@@ -114,11 +114,12 @@ namespace
     EXPECT(self.objects.at(2).left == 44444);
     EXPECT(self.objects.at(2).right == 83434);
 
-    EXPECT(self.ints.size() == 4);
+    EXPECT(self.ints.size() == 5);
     EXPECT(self.ints.at(0) == limit<std::int16_t>::min());
     EXPECT(self.ints.at(1) == limit<std::int16_t>::max());
     EXPECT(self.ints.at(2) == -3);
     EXPECT(self.ints.at(3) == 31234);
+    EXPECT(self.ints.at(4) == -32);
 
     EXPECT(self.uints.size() == 4);
     EXPECT(self.uints.at(0) == 0);
