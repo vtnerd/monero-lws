@@ -42,18 +42,18 @@
 namespace
 {
   constexpr const char basic_string[] = u8"my_string_data";
-  //constexpr const char basic_[] =
-  //  u8"{\"utf8\":\"my_string_data\",\"vec\":[0,127],\"data\":\"00ff2211\",\"choice\":true}";
+  //  u8"{\"utf8\":\"my_string_data\",\"vec\":[0,127],\"data\":\"00ff2211\",\"integer\":-2,\"choice\":true}";
   constexpr const std::uint8_t basic_msgpack[] = {
-    0x84, 0xa4, 0x75, 0x74, 0x66, 0x38, 0xae, 0x6d, 0x79, 0x5f, 0x73, 0x74,
+    0x85, 0xa4, 0x75, 0x74, 0x66, 0x38, 0xae, 0x6d, 0x79, 0x5f, 0x73, 0x74,
     0x72, 0x69, 0x6e, 0x67, 0x5f, 0x64, 0x61, 0x74, 0x61, 0xa3, 0x76, 0x65,
     0x63, 0x92, 0x00, 0x7f, 0xa4, 0x64, 0x61, 0x74, 0x61, 0xc4, 0x04, 0x00,
-    0xff, 0x22, 0x11, 0xa6, 0x63, 0x68, 0x6f, 0x69, 0x63, 0x65, 0xc3
+    0xff, 0x22, 0x11, 0xa7, 0x69, 0x6e, 0x74, 0x65, 0x67, 0x65, 0x72, 0xfe,
+    0xa6, 0x63, 0x68, 0x6f, 0x69, 0x63, 0x65, 0xc3
   };
   constexpr const std::uint8_t advanced_msgpack[] = {
-    0x84, 0x00, 0xae, 0x6d, 0x79, 0x5f, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67,
+    0x85, 0x00, 0xae, 0x6d, 0x79, 0x5f, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67,
     0x5f, 0x64, 0x61, 0x74, 0x61, 0x01, 0x92, 0x00, 0x7f, 0x02, 0xc4, 0x04,
-    0x00, 0xff, 0x22, 0x11, 0xcc, 0xfe, 0xc3
+    0x00, 0xff, 0x22, 0x11, 0x03, 0xd0, 0xdf, 0xcc, 0xfe, 0xc3
   };
 
   template<typename T>
@@ -62,6 +62,7 @@ namespace
     std::string utf8;
     std::vector<T> vec;
     lws_test::small_blob data;
+    std::int32_t integer;
     bool choice;
   };
 
@@ -73,6 +74,7 @@ namespace
       WIRE_FIELD_ID(0, utf8),
       wire::field<1>("vec", wire::array<vec_max>(std::ref(self.vec))),
       WIRE_FIELD_ID(2, data),
+      WIRE_FIELD_ID(3, integer),
       WIRE_FIELD_ID(254, choice)
     );
   }
@@ -100,6 +102,7 @@ namespace
         EXPECT(result.vec == expected);
       }
       EXPECT(result.data == lws_test::blob_test1);
+      EXPECT(result.integer == -2);
       EXPECT(result.choice);
     }
   }
@@ -119,6 +122,7 @@ namespace
         EXPECT(result.vec == expected);
       }
       EXPECT(result.data == lws_test::blob_test1);
+      EXPECT(result.integer == -33);
       EXPECT(result.choice);
     }
   }
@@ -128,7 +132,7 @@ namespace
   {
     SETUP("Basic (string keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
-      const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, true};
+      const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, -2, true};
       epee::byte_slice result{};
       const std::error_code error = wire::msgpack::to_bytes(result, val);
       EXPECT(!error);
@@ -141,7 +145,7 @@ namespace
   {
     SETUP("Advanced (integer keys) with " + boost::core::demangle(typeid(T).name()) + " integers")
     {
-      const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, true};
+      const basic_object<T> val{basic_string, std::vector<T>{0, 127}, lws_test::blob_test1, -33, true};
       epee::byte_slice result{};
       {
         wire::msgpack_slice_writer out{true};
