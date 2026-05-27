@@ -387,10 +387,16 @@ namespace wire
 
     const auto read_float = [this](auto value)
     {
-      if (remaining_.size() < sizeof(value))
-        WIRE_DLOG_THROW_(error::msgpack::not_enough_bytes);
-      std::memcpy(std::addressof(value), remaining_.data(), sizeof(value));
-      remaining_.remove_prefix(sizeof(value));
+      using real_type = decltype(value);
+      using buf_type =  typename std::conditional<
+        std::is_same<real_type, float>::value, std::uint32_t, std::uint64_t
+      >::type;
+      static_assert(std::is_same<real_type, float>() || std::is_same<real_type, double>(), "");
+      static_assert(std::numeric_limits<real_type>::is_iec559, "");
+      static_assert(sizeof(real_type) == sizeof(buf_type), "");
+
+      const auto buf = read_endian<buf_type>(remaining_);
+      std::memcpy(&value, &buf, sizeof(buf));
       return value;
     };
 
