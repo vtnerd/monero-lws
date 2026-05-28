@@ -66,6 +66,7 @@ namespace
     std::vector<std::uint64_t> uints;
     std::vector<lws_test::small_blob> blobs;
     std::vector<std::string> strings;
+    double real;
     bool choice;
   };
 
@@ -79,6 +80,7 @@ namespace
       WIRE_FIELD_ARRAY(uints, max_vec),
       WIRE_FIELD(blobs),
       WIRE_FIELD_ARRAY(strings, max_vec),
+      WIRE_FIELD(real),
       WIRE_FIELD(choice)
     );
   }
@@ -101,6 +103,7 @@ namespace
     self.uints = std::vector<std::uint64_t>{0, limit<std::uint64_t>::max(), 34234234, 33};
     self.blobs = {lws_test::blob_test1, lws_test::blob_test2, lws_test::blob_test3};
     self.strings = {"string1", "string2", "string3", "string4"};
+    self.real = 3.7559;
     self.choice = true;
   }
 
@@ -137,6 +140,8 @@ namespace
     EXPECT(self.strings.at(1) == "string2");
     EXPECT(self.strings.at(2) == "string3");
     EXPECT(self.strings.at(3) == "string4");
+
+    EXPECT(self.real == 3.7559);
 
     EXPECT(self.choice == true);
   }

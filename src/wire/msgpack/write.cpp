@@ -52,8 +52,8 @@ namespace
     bytes.put(std::uint8_t(value));
   }
 
-  template<typename T, typename U, wire::msgpack::tag tag>
-  void write_endian(epee::byte_stream& bytes, const T value, const wire::msgpack::type<U, tag> type)
+  template<typename U, typename T>
+  void write_endian(epee::byte_stream& bytes, const T value)
   {
     static_assert(std::is_integral<T>::value, "input not integral");
     static_assert(std::is_integral<U>::value, "output not integral");
@@ -62,16 +62,22 @@ namespace
     using out_limits = std::numeric_limits<U>;
     static_assert(in_limits::is_signed == out_limits::is_signed, "signs must match");
 
-    assert(type.min() <= value);
-    assert(value <= type.max());
-
     static constexpr const std::size_t bits = 8 * sizeof(U);
     using buffer_type =
       boost::endian::endian_buffer<boost::endian::order::big, U, bits>;
 
-    buffer_type buffer(value);
-    write_tag(bytes, type.Tag());
+    const buffer_type buffer(value);
     bytes.write(buffer.data(), sizeof(buffer));
+  }
+
+  template<typename T, typename U, wire::msgpack::tag tag>
+  void write_endian(epee::byte_stream& bytes, const T value, const wire::msgpack::type<U, tag> type)
+  {
+    assert(type.min() <= value);
+    assert(value <= type.max());
+
+    write_tag(bytes, type.Tag());
+    write_endian<U>(bytes, value);
   }
 
   template<typename T>
@@ -161,8 +167,15 @@ namespace wire
 
   void msgpack_writer::real(const double source)
   {
+    static_assert(std::numeric_limits<double>::is_iec559, "");
+    static_assert(sizeof(double) == sizeof(std::uint64_t), "");
+
     write_tag(bytes_, msgpack::tag::float64);
-    bytes_.write(reinterpret_cast<const char*>(std::addressof(source)), sizeof(source));
+
+    std::uint64_t buf;
+    std::memcpy(&buf, &source, sizeof(buf));
+    write_endian<std::uint64_t>(bytes_, buf);
+
     --expected_;
   }
 
