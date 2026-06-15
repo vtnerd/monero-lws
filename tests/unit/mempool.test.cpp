@@ -28,6 +28,7 @@
 #include "framework.test.h"
 
 #include <cstring>
+#include "carrot_core/payment_proposal.h"             // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "cryptonote_core/cryptonote_tx_utils.h"      // monero/src
 #include "db/account.h"
@@ -42,8 +43,8 @@ namespace
   lws::db::account make_account(const cryptonote::account_keys& src)
   {
     lws::db::account out{};
-    std::memcpy(&out.address.spend_public, &src.m_account_address.m_spend_public_key, sizeof(out.address.spend_public));
-    std::memcpy(&out.address.view_public, &src.m_account_address.m_view_public_key, sizeof(out.address.view_public));
+    std::memcpy(&out.pubs.flex_public, &src.m_account_address.m_spend_public_key, sizeof(out.pubs.flex_public));
+    std::memcpy(&out.pubs.view_public, &src.m_account_address.m_view_public_key, sizeof(out.pubs.view_public));
     std::memcpy(&out.key, &unwrap(unwrap(src.m_view_secret_key)), sizeof(out.key));
     return out;
   }
@@ -56,7 +57,7 @@ LWS_CASE("mempool")
   SETUP("mempool")
   {
     lws::mempool pool{};
-    lws::account account{make_account(base), {}, {}};
+    lws::account account{make_account(base), {}, {}, {}};
 
     SECTION("empty")
     {

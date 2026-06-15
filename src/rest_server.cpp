@@ -226,7 +226,6 @@ namespace lws
       return to_uint(tx_height) + CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > to_uint(last);
     }
 
-     
     bool check_lookahead(connection_data& data, const db::address_index lookahead)
     {
       const auto minor = to_uint(lookahead.min_i);
@@ -524,16 +523,20 @@ namespace lws
         resp.spent_outputs.reserve(spends->count());
         for (auto const& spend : spends->make_range())
         {
-          const auto meta = rpc::get_address_txs_response::find_metadata(metas, spend.source);
-          if (meta == metas.end() || meta->id != spend.source)
+          if (spend.source != db::output_id::unknown_spend())
           {
-            throw std::logic_error{
-              "Serious database error, no receive for spend"
-            };
+            const auto meta = rpc::get_address_txs_response::find_metadata(metas, spend.source);
+            if (meta == metas.end() || meta->id != spend.source)
+            {
+              throw std::logic_error{
+                "Serious database error, no receive for spend"
+              };
+            }
+            resp.spent_outputs.push_back({*meta, spend});
+            resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
           }
-
-          resp.spent_outputs.push_back({*meta, spend});
-          resp.total_sent = rpc::safe_uint64(std::uint64_t(resp.total_sent) + meta->amount);
+          else // carrot output with legacy or view-incoming key
+            resp.spent_outputs.push_back({db::output::spend_meta_::unknown(), spend}); 
         }
 
         // `get_rates()` nevers does I/O, so handler can remain synchronous
@@ -1304,7 +1307,7 @@ namespace lws
 
       static expect<response> handle(request req, connection_data& data, std::function<async_complete>&&)
       {
-        if (!lws::rpc::key_check(req.creds))
+        if (!lws::rpc::key_check(req.creds, req.balance_key))
           return {lws::error::bad_view_key};
 
         auto disk = data.global->disk.clone();
@@ -1332,8 +1335,13 @@ namespace lws
         if (!check_lookahead(data, req.lookahead))
           return {lws::error::max_subaddresses};
 
-        const auto flags = req.generated_locally ? db::account_generated_locally : db::default_account;
-        const auto hooks = disk.creation_request(req.creds.address, req.creds.key, flags, req.lookahead);
+        db::account_flags flags = req.generated_locally ? db::account_generated_locally : db::default_account;
+        if (req.balance_key)
+          flags = db::account_flags(flags | db::view_balance_key);
+
+        const auto hooks = disk.creation_request(
+          {req.creds.address.view_public, req.creds.address.spend_public}, req.creds.key, flags, req.lookahead
+        );
         if (!hooks)
           return hooks.error();
 
@@ -1407,7 +1415,7 @@ namespace lws
               db::major_index(elem), db::index_ranges{{db::index_range{db::minor_index(minor_i), db::minor_index(minor_i + n_minor - 1)}}}
             );
           }
-          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.creds.address, req.creds.key, ranges, data.global->options.max_subaddresses);
+          auto upserted = data.global->disk.clone().upsert_subaddresses(id, req.generate_address, ranges, data.global->options.max_subaddresses);
           if (!upserted)
             return upserted.error();
           new_ranges = std::move(*upserted);
@@ -1667,7 +1675,7 @@ namespace lws
         std::vector<db::subaddress_dict> all_ranges;
         auto disk = data.global->disk.clone();
         auto new_ranges =
-          disk.upsert_subaddresses(id, req.creds.address, req.creds.key, req.subaddrs, data.global->options.max_subaddresses);
+          disk.upsert_subaddresses(id, req.generate_address, req.subaddrs, data.global->options.max_subaddresses);
         if (!new_ranges)
           return new_ranges.error();
 

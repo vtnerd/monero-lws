@@ -70,7 +70,7 @@ namespace
   void write_bytes(wire::json_writer& dest, const admin_display<lws::db::account>& source)
   {
     wire::object(dest,
-      wire::field("address", lws::db::address_string(source.value.address)),
+      wire::field("address", lws::db::address_string(lws::db::account_address{source.value})),
       wire::field("key", std::cref(source.value.key))
     );
   }
@@ -184,8 +184,8 @@ namespace
     admin_display<lws::db::account> account{};
     {
       crypto::secret_key auth{};
-      crypto::generate_keys(account.value.address.view_public, auth);
-      MONERO_UNWRAP(prog.disk.add_account(account.value.address, auth, lws::db::account_flags::admin_account));
+      crypto::generate_keys(account.value.pubs.view_public, auth);
+      MONERO_UNWRAP(prog.disk.add_account(lws::db::account_address{account.value}, auth, lws::db::account_flags::admin_account));
 
       static_assert(sizeof(auth) == sizeof(account.value.key), "bad memcpy");
       std::memcpy(std::addressof(account.value.key), std::addressof(auth), sizeof(auth));

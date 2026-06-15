@@ -27,11 +27,19 @@
 
 #include "login.h"
 
-#include "crypto/crypto.h" // monero/src
+#include "carrot_core/account_secrets.h" // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "error.h"
 #include "rpc/light_wallet.h"
+
+namespace
+{
+  bool key_check(const lws::rpc::account_credentials& creds)
+  {
+    return ::lws::rpc::key_check(creds.address.view_public, creds.key);
+  }
+}
 
 namespace lws { namespace rpc
 {
@@ -49,20 +57,28 @@ namespace lws { namespace rpc
     return true;
   }
 
-  bool key_check(const rpc::account_credentials& creds)
+  bool key_check(const crypto::public_key& view_public, const crypto::secret_key& key)
   {
     crypto::public_key verify{};
-    if (!crypto::secret_key_to_public_key(creds.key, verify))
+    if (!crypto::secret_key_to_public_key(key, verify))
       return false;
-    if (verify != creds.address.view_public)
-      return false;
-    return true;
+    return verify == view_public;
+  }
+
+  bool key_check(const rpc::account_credentials& creds, const bool balance_key)
+  {
+    if (!balance_key)
+      return ::key_check(creds);
+
+    crypto::secret_key view_key{};
+    ::carrot::make_carrot_viewincoming_key(creds.key, view_key);
+    return key_check(creds.address.view_public, view_key);
   }
 
   //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
   expect<std::pair<db::account, db::storage_reader>> open_account(const account_credentials& creds, const db::storage& disk)
   {
-    if (!key_check(creds))
+    if (!::key_check(creds))
       return {lws::error::bad_view_key};
 
     auto reader = disk.start_read();

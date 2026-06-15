@@ -66,6 +66,7 @@ namespace rpc
     get_blocks_fast_response() = delete;
     std::vector<cryptonote::rpc::block_with_transactions> blocks;
     std::vector<std::vector<std::vector<std::uint64_t>>> output_indices;
+    std::vector<std::vector<std::vector<std::uint64_t>>> unified_indices;
     std::uint64_t start_height;
     std::uint64_t current_height;
   };
