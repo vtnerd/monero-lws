@@ -382,7 +382,7 @@ namespace
       mempool = std::make_shared<lws::mempool>();
     }
 
-    auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon).value();
+    auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon, prog.regtest).value();
 
     lws::rest_server server{
       epee::to_span(prog.rest_servers),
