@@ -10,6 +10,9 @@ namespace config
 {
   extern cryptonote::network_type network;
 
+  //! True when running against a regtest/fakechain daemon (no checkpoints)
+  extern bool regtest;
+
   //! Default inactivity timeout for `/feed` websocket connections
   constexpr const std::chrono::minutes feed_timeout{4};
 
