@@ -79,12 +79,14 @@ namespace lws { namespace rpc { namespace scanner
   {
     const std::shared_ptr<server> parent_;
     std::size_t threads_; //!< Number of scan threads at remote process
+    bool authenticated_;
 
   public:
     explicit server_connection(std::shared_ptr<server> parent, boost::asio::io_context& io)
       : connection(io),
         parent_(std::move(parent)),
-        threads_(0)
+        threads_(0),
+        authenticated_(false)
     {
       if (!parent_)
         MONERO_THROW(common_error::kInvalidArgument, "nullptr parent");
@@ -135,6 +137,7 @@ namespace lws { namespace rpc { namespace scanner
         return false;
       }
 
+      self->authenticated_ = true;
       self->threads_ = boost::numeric_cast<std::size_t>(msg.threads);
       server::replace_users(self->parent_);
       return true;
@@ -147,6 +150,12 @@ namespace lws { namespace rpc { namespace scanner
 
       if (msg.users.empty())
         return true;
+
+      if (!self->authenticated_)
+      {
+        MINFO("Remote peer needs to authenticate first");
+        return false;
+      }
 
       MINFO("Client (" << self->remote_endpoint() << ") processed "
         << msg.blocks.size() << " block(s) against " << msg.users.size() << " account(s)");
@@ -565,7 +574,7 @@ namespace lws { namespace rpc { namespace scanner
     if (crypto_pwhash_BYTES_MAX < out.size())
       MONERO_THROW(error::crypto_failure, "Invalid output size");
 
-    if (pass.size() < crypto_pwhash_PASSWD_MIN && crypto_pwhash_PASSWD_MAX < pass.size())
+    if (pass.size() < crypto_pwhash_PASSWD_MIN || crypto_pwhash_PASSWD_MAX < pass.size())
       MONERO_THROW(error::crypto_failure, "Invalid password size");
 
     if (crypto_pwhash(out.data(), out.size(), pass.data(), pass.size(), pass_salt_.data(),
