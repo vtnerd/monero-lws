@@ -233,7 +233,7 @@ namespace lws
       if (minor)
       {
         const auto major = to_uint(lookahead.maj_i);
-        if (std::numeric_limits<std::uint32_t>::max() < major / minor)
+        if (std::numeric_limits<std::uint32_t>::max() / minor < major)
           return false;
         return major * minor <= data.global->options.max_subaddresses;
       }

@@ -2332,7 +2332,7 @@ namespace db
         return success();
 
       // Quick fail check
-      if (std::numeric_limits<std::uint32_t>::max() < major / minor)
+      if (std::numeric_limits<std::uint32_t>::max() / minor < major)
         return {error::max_subaddresses};
       if (max_subaddresses < major * minor)
         return {error::max_subaddresses};
