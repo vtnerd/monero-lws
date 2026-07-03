@@ -265,6 +265,86 @@ namespace rpc
       MONERO_ZMQ_CHECK(zmq_setsockopt(sock, option, std::addressof(value), sizeof(value)));
       return success();
     }
+
+    struct do_receive
+    {
+      /* ZMQ documentation states that message parts are atomic - either
+         all are received or none are. Looking through ZMQ code and
+         GitHub discussions indicates that after part 1 is returned,
+         `EAGAIN` cannot be returned to meet these guarantees. Unit tests
+         verify (for the `inproc://` case) that this is the behavior.
+         Therefore, read errors after the first part are treated as a
+         failure for the entire message (probably `ETERM`). */
+      int operator()(std::string& payload, void* const socket, const int flags, const std::uint64_t max_message_size) const
+      {
+        //! RAII wrapper for `zmq_msg_t`.
+        class message
+        {
+          zmq_msg_t handle_;
+
+        public:
+          message() noexcept
+            : handle_()
+          {
+            zmq_msg_init(handle());
+          }
+
+          message(message&& rhs) = delete;
+          message(const message& rhs) = delete;
+          message& operator=(message&& rhs) = delete;
+          message& operator=(const message& rhs) = delete;
+
+          ~message() noexcept
+          {
+            zmq_msg_close(handle());
+          }
+
+          zmq_msg_t* handle() noexcept
+          {
+            return std::addressof(handle_);
+          }
+
+          const char* data() noexcept
+          {
+            return static_cast<const char*>(zmq_msg_data(handle()));
+          }
+
+          std::size_t size() noexcept
+          {
+            return zmq_msg_size(handle());
+          }
+        };
+
+        static constexpr const int max_out = std::numeric_limits<int>::max();
+        const std::string::size_type initial = payload.size();
+        message part{};
+        for (;;)
+        {
+          int last = 0;
+          if ((last = zmq_msg_recv(part.handle(), socket, flags)) < 0)
+            return last;
+
+          if (max_message_size < payload.size() ||
+              max_message_size - payload.size() < part.size())
+          {
+            errno = EMSGSIZE;
+            return -1;
+          }
+          payload.append(part.data(), part.size());
+          if (!zmq_msg_more(part.handle()))
+            break;
+        }
+        const std::string::size_type added = payload.size() - initial;
+        return unsigned(max_out) < added ? max_out : int(added);
+      }
+    };
+
+    expect<std::string> read_msg(void* const socket, const int flags, const std::uint64_t max_message_size)
+    {
+      std::string payload{};
+      MONERO_CHECK(net::zmq::retry_op(do_receive{}, payload, socket, flags, max_message_size));
+      return {std::move(payload)};
+    }
   } // anonymous
 
   namespace detail
@@ -294,6 +374,9 @@ namespace rpc
         if (!rmq.connect())
           MONERO_THROW(error::configuration, "RMQ misconfigured");
       }
+
+      std::uint64_t get_msg_max(const std::uint64_t limit) const noexcept
+      { return untrusted_daemon ? limit : - 1; }
 
       zcontext comm;
       net::zmq::socket signal_pub;
@@ -380,7 +463,7 @@ namespace rpc
     assert(signal_sub != nullptr);
 
     expect<std::string> msg{common_error::kInvalidArgument};
-    while (!(msg = net::zmq::receive(daemon.get(), ZMQ_DONTWAIT)))
+    while (!(msg = read_msg(daemon.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_req))))
     {
       if (msg != net::zmq::make_error_code(EAGAIN))
         break;
@@ -474,7 +557,7 @@ namespace rpc
     std::vector<std::pair<topic, std::string>> messages{};
     for (; /*every message */ ;)
     {
-      expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+      expect<std::string> pub = read_msg(daemon_sub.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_sub));
       if (!pub)
       {
         if (pub == net::zmq::make_error_code(EAGAIN))
@@ -556,7 +639,7 @@ namespace rpc
       // check for rpc responses:
       if (daemon && (poll_items[1].revents & (ZMQ_POLLIN | ZMQ_POLLERR)))
       {
-        auto json = net::zmq::receive(daemon.get(), ZMQ_DONTWAIT);
+        auto json = read_msg(daemon.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_req));
         if (!json)
         {
           if (json != net::zmq::make_error_code(EAGAIN))
@@ -574,7 +657,7 @@ namespace rpc
       {
         while (true)
         {
-          auto json = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+          auto json = read_msg(daemon_sub.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_sub));
           if (!json)
           {
             if (json == net::zmq::make_error_code(EAGAIN))
