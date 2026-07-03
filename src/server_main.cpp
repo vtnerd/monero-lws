@@ -76,6 +76,7 @@ namespace
     const command_line::arg_descriptor<std::size_t> scan_threads;
     const command_line::arg_descriptor<std::vector<std::string>> access_controls;
     const command_line::arg_descriptor<bool> external_bind;
+    const command_line::arg_descriptor<bool> lws_server_external;
     const command_line::arg_descriptor<unsigned> create_queue_max;
     const command_line::arg_descriptor<std::chrono::minutes::rep> rates_interval;
     const command_line::arg_descriptor<unsigned short> log_level;
@@ -132,6 +133,7 @@ namespace
       , scan_threads{"scan-threads", "Maximum number of threads for account scanning", boost::thread::hardware_concurrency()}
       , access_controls{"access-control-origin", "Specify a whitelisted HTTP control origin domain"}
       , external_bind{"confirm-external-bind", "Allow listening for external connections", false}
+      , lws_server_external{"lws-server-external", "Allow listening on external interface for scanner connections (see documentation)", false}
       , create_queue_max{"create-queue-max", "Set pending create account requests maximum", 10000}
       , rates_interval{"exchange-rate-interval", "Retrieve exchange rates in minute intervals from cryptocompare.com if greater than 0", 0}
       , log_level{"log-level", "Log level [0-4]", 1}
@@ -176,6 +178,7 @@ namespace
       command_line::add_arg(description, scan_threads);
       command_line::add_arg(description, access_controls);
       command_line::add_arg(description, external_bind);
+      command_line::add_arg(description, lws_server_external);
       command_line::add_arg(description, create_queue_max);
       command_line::add_arg(description, rates_interval);
       command_line::add_arg(description, log_level);
@@ -220,6 +223,7 @@ namespace
     bool regtest;
     bool block_depth_threading;
     bool balance_new_addresses;
+    bool lws_server_external;
   };
 
   void print_version(std::ostream& out)
@@ -328,7 +332,8 @@ namespace
       command_line::get_arg(args, opts.untrusted_daemon),
       command_line::get_arg(args, opts.regtest),
       command_line::get_arg(args, opts.block_depth_threading),
-      command_line::get_arg(args, opts.balance_new_addresses)
+      command_line::get_arg(args, opts.balance_new_addresses),
+      command_line::get_arg(args, opts.lws_server_external)
     };
 
     if (prog.regtest && lws::config::network != cryptonote::MAINNET)
@@ -402,8 +407,7 @@ namespace
       std::move(ctx),
       mempool,
       prog.scan_threads,
-      std::move(prog.lws_server_addr),
-      std::move(prog.lws_server_pass),
+      lws::scanner_server{std::move(prog.lws_server_addr), std::move(prog.lws_server_pass), prog.lws_server_external},
       lws::scanner_options{prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest, prog.block_depth_threading, prog.balance_new_addresses}
     );
   }

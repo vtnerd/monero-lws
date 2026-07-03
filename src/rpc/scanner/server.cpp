@@ -582,7 +582,7 @@ namespace lws { namespace rpc { namespace scanner
       MONERO_THROW(error::crypto_failure, "Failed password hashing");
   }
 
-  void server::start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass)
+  void server::start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass, const bool allow_external)
   {
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
@@ -590,6 +590,9 @@ namespace lws { namespace rpc { namespace scanner
       return;
 
     auto endpoint = get_endpoint(address);
+    if (!endpoint.address().is_loopback() && !allow_external)
+      MONERO_THROW(error::configuration, "--lws-server-addr given external bind address, use --lws-server-external after reading docs");
+
     boost::asio::dispatch(
       self->strand_,
       [self, endpoint = std::move(endpoint), pass = std::move(pass)] ()
