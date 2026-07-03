@@ -77,5 +77,7 @@ from hijacking the scan process. Also consider specifying the password in a
 
 The protocol is a custom unencrypted binary format, so `ssh -L ...` should be
 used on the `monero-lws-client` side to provide proper encryption, and
-additional authentication).
+additional authentication). The server side will refuse listening for external
+connections by default (since it is expected to be used over ssh/wiregeuard),
+and overriding this will require the `--lws-server-external` option.
 

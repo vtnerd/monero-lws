@@ -101,7 +101,7 @@ namespace lws { namespace rpc { namespace scanner
     void compute_hash(std::array<unsigned char, 32>& out, const std::string& pass) const noexcept;
 
     //! Start listening for incoming connections on `address`.
-    static void start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass);
+    static void start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass, bool allow_external);
 
     //! Start timed checks of local DB for change in user state
     static void start_user_checking(const std::shared_ptr<server>& self);
