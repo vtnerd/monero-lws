@@ -659,8 +659,7 @@ namespace lws
       rpc::context& ctx,
       std::shared_ptr<lws::mempool> pool,
       const std::size_t thread_count,
-      const std::string& lws_server_addr,
-      std::string lws_server_pass,
+      const scanner_server& lws_server,
       std::vector<lws::account> users,
       std::vector<db::account_id> active,
       const scanner_options& opts)
@@ -989,8 +988,8 @@ namespace lws
         );
 
         rpc::scanner::server::start_user_checking(server);
-        if (!lws_server_addr.empty())
-          rpc::scanner::server::start_acceptor(server, lws_server_addr, std::move(lws_server_pass));
+        if (!lws_server.address.empty())
+          rpc::scanner::server::start_acceptor(server, lws_server.address, lws_server.pass, lws_server.allow_external);
 
         // This is a hack to prevent racy shutdown
         boost::asio::post(self.io_, [&self] () { if (!self.is_running()) self.stop(); });
@@ -1276,16 +1275,15 @@ namespace lws
     rpc::context ctx,
     std::shared_ptr<mempool> pool,
     std::size_t thread_count,
-    const std::string& lws_server_addr,
-    std::string lws_server_pass,
+    scanner_server lws_server,
     const scanner_options& opts)
   {
     if (has_shutdown())
       MONERO_THROW(common_error::kInvalidArgument, "this has shutdown");
-    if (!lws_server_addr.empty() && (opts.max_subaddresses || opts.untrusted_daemon))
+    if (!lws_server.address.empty() && (opts.max_subaddresses || opts.untrusted_daemon))
       MONERO_THROW(error::configuration, "Cannot use remote scanner with subaddresses or untrusted daemon");
 
-    if (lws_server_addr.empty())
+    if (lws_server.address.empty())
       thread_count = std::max(std::size_t(1), thread_count);
 
     /*! \NOTE Be careful about references and lifetimes of the callbacks. The
@@ -1366,7 +1364,7 @@ namespace lws
         }
       }
       else
-        check_loop(sync_, disk_.clone(), ctx, pool, thread_count, lws_server_addr, lws_server_pass, std::move(users), std::move(active), opts);
+        check_loop(sync_, disk_.clone(), ctx, pool, thread_count, lws_server, std::move(users), std::move(active), opts);
 
       if (has_shutdown())
         return;

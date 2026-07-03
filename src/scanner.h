@@ -46,6 +46,13 @@ namespace lws
 {
   constexpr std::uint64_t MINIMUM_BLOCK_DEPTH = 16;
 
+  struct scanner_server
+  {
+    std::string address;
+    std::string pass;
+    bool allow_external;
+  };
+
   struct scanner_options
   {
     double split_sync_threads;
@@ -135,8 +142,7 @@ namespace lws
       rpc::context ctx,
       std::shared_ptr<mempool> pool,
       std::size_t thread_count,
-      const std::string& server_addr,
-      std::string server_pass,
+      scanner_server lws_server,
       const scanner_options&);
 
     //! \return True iff `stop()` and `shutdown()` has never been called
