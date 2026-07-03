@@ -1825,7 +1825,7 @@ namespace lws
       {"/webhook_list",          call_admin<rpc::webhook_list_>,          100, false}
     };
     constexpr const unsigned max_admin_endpoint_size =
-      get_max(std::begin(endpoints), std::end(endpoints));
+      get_max(std::begin(admin_endpoints), std::end(admin_endpoints));
 
     constexpr const unsigned max_endpoint_size =
       std::max(max_standard_endpoint_size, max_admin_endpoint_size);
