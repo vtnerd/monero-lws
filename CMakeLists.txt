@@ -217,12 +217,6 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # boost
-
-set(Boost_NO_BOOST_CMAKE ON)
-if(STATIC)
-  set(Boost_USE_STATIC_LIBS ON)
-  set(Boost_USE_STATIC_RUNTIME ON)
-endif()
 find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization thread CONFIG)
 
 if (NOT (Boost_DIR STREQUAL monero_Boost_DIR))
