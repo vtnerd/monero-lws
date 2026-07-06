@@ -331,8 +331,8 @@ namespace lws
     if (0 < *upserted)
       update_reader(); // update reader after upsert added new addresses
     else if (*upserted < 0)
-      upserted = {error::max_subaddresses};
-    return upserted.error();
+      return {error::max_subaddresses};
+    return success();
   }
 
 } // namespace lws
