@@ -93,7 +93,7 @@ ARG NPROC
 RUN set -ex \
     && git submodule update --init --recursive \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D LWS_DEAD_FUNCTION_REMOVAL=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON .. \
+    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D Boost_USE_STATIC_LIBS=ON -D Boost_USE_STATIC_RUNTIME=ON -D LWS_DEAD_FUNCTION_REMOVAL=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON .. \
     && make -j${NPROC:-$(nproc)} monero-lws-admin monero-lws-daemon monero-lws-unit \
     && ./tests/unit/monero-lws-unit
 
