@@ -140,7 +140,7 @@ git submodule update --init --recursive
 cmake -DCMAKE_BUILD_TYPE=Release ../
 make -j$(nproc) daemon multisig lmdb_lib
 cd ../../monero-lws/build
-cmake -DCMAKE_BUILD_TYPE=Relase -DMONERO_SOURCE_DIR=../../monero -DMONERO_BUILD_DIR=../../monero/build ../
+cmake -DCMAKE_BUILD_TYPE=Release -DMONERO_SOURCE_DIR=../../monero -DMONERO_BUILD_DIR=../../monero/build ../
 make -j$(nproc)
 ```
 
