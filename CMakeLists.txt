@@ -88,6 +88,7 @@ set(MONERO_LIBRARIES
   common
   lmdb
   device
+  fcmp_pp
   cncrypto
   randomx
   epee
