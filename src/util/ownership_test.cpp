@@ -305,6 +305,11 @@ namespace lws
 
   void subaddress_reader::update_reader()
   {
+    // Release the current read txn before opening the next one - `reader = disk.start_read()`
+    // would otherwise begin the new LMDB read txn (inside start_read()) while the old one
+    // is still open on this thread, which LMDB's default (non-MDB_NOTLS) reader-slot tracking
+    // does not support and reports as MDB_BAD_RSLOT.
+    reader = expect<db::storage_reader>{common_error::kInvalidArgument};
     reader = disk.start_read();
     if (!reader)
       MERROR("Subadress lookup failure: " << reader.error().message());
