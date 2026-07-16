@@ -944,7 +944,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
         auto reader = MONERO_UNWRAP(db.start_read());
         auto outputs = MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(1)));
-        EXPECT(outputs.count() == 6);
+        EXPECT(outputs.count() == 7);
         auto output_it = outputs.make_iterator();
         for (auto output_it = outputs.make_iterator(); !output_it.is_end(); ++output_it)
         {
@@ -1003,7 +1003,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
         {
           const std::vector<lws::db::subaddress_dict> expected_range{
-            {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(2)}}}}
+            {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(3)}}}}
           };
           EXPECT(MONERO_UNWRAP(reader.get_subaddresses(lws::db::account_id(1))) == expected_range);
         }
