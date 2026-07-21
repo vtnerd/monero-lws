@@ -47,6 +47,13 @@ namespace lws_lmdb
     namespace
     {
         constexpr const mdb_size_t max_resize = 1 * 1024 * 1024 * 1024; // 1 GB
+        // LMDB's own default (when unset) is tiny (10 MiB) - open_environment never called
+        // mdb_env_set_mapsize before, so the env started at that default and needed to grow via
+        // the (rarely exercised, and not safe to lean on under heavy concurrent write load -
+        // resize() below busy-waits for zero active transactions) MDB_MAP_RESIZED/MDB_MAP_FULL
+        // recovery paths almost immediately under any real load. Starting from a size that's
+        // already generous avoids relying on that recovery path in the first place.
+        constexpr const mdb_size_t initial_mapsize = 4ull * 1024 * 1024 * 1024; // 4 GB
         void acquire_context(context& ctx) noexcept
         {
             while (ctx.lock.test_and_set());
@@ -69,6 +76,7 @@ namespace lws_lmdb
         environment out{obj};
 
         MONERO_LMDB_CHECK(mdb_env_set_maxdbs(out.get(), max_dbs));
+        MONERO_LMDB_CHECK(mdb_env_set_mapsize(out.get(), initial_mapsize));
         MONERO_LMDB_CHECK(mdb_env_open(out.get(), path, 0, open_flags));
         return {std::move(out)};
     }
