@@ -25,6 +25,7 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lws_database.h"
+#include <boost/thread/locks.hpp>
 #include "lmdb/error.h"
 #include "lmdb/util.h"
 
@@ -47,16 +48,15 @@ namespace lws_lmdb
     namespace
     {
         constexpr const mdb_size_t max_resize = 1 * 1024 * 1024 * 1024; // 1 GB
+        constexpr const mdb_size_t initial_mapsize = 128 * 1024 * 1024; // 128 MiB
         void acquire_context(context& ctx) noexcept
         {
-            while (ctx.lock.test_and_set());
-            ++(ctx.active);
-            ctx.lock.clear();
+            ctx.sync.lock_shared();
         }
 
         void release_context(context& ctx) noexcept
         {
-            --(ctx.active);
+            ctx.sync.unlock_shared();
         }
     }
 
@@ -69,6 +69,7 @@ namespace lws_lmdb
         environment out{obj};
 
         MONERO_LMDB_CHECK(mdb_env_set_maxdbs(out.get(), max_dbs));
+        MONERO_LMDB_CHECK(mdb_env_set_mapsize(out.get(), initial_mapsize));
         MONERO_LMDB_CHECK(mdb_env_open(out.get(), path, 0, open_flags));
         return {std::move(out)};
     }
@@ -96,7 +97,7 @@ namespace lws_lmdb
     }
 
     database::database(environment env)
-      : env(std::move(env)), ctx{{}, ATOMIC_FLAG_INIT}
+      : env(std::move(env)), ctx{}
     {
         if (handle())
         {
@@ -108,22 +109,20 @@ namespace lws_lmdb
 
     database::~database() noexcept
     {
-        while (ctx.active);
+        const boost::lock_guard<boost::shared_mutex> lock{ctx.sync};
     }
 
     expect<void> database::resize() noexcept
     {
         MONERO_PRECOND(handle() != nullptr);
 
-        while (ctx.lock.test_and_set());
-        while (ctx.active);
+        const boost::lock_guard<boost::shared_mutex> lock{ctx.sync};
 
         MDB_envinfo info{};
         MONERO_LMDB_CHECK(mdb_env_info(handle(), &info));
 
         const mdb_size_t resize = std::min(info.me_mapsize, max_resize);
         const int err = mdb_env_set_mapsize(handle(), info.me_mapsize + resize);
-        ctx.lock.clear();
         if (err)
             return {lmdb::error(err)};
         return success();
