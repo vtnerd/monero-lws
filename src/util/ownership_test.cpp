@@ -291,7 +291,8 @@ namespace lws
             payment_id.second,
             cryptonote::get_tx_fee(tx),
             account_index
-          }
+          },
+          get_reader()
         );
       }
     }

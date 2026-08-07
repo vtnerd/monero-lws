@@ -25,6 +25,7 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <atomic>
 #include <vector>
 #include "byte_slice.h" // monero/contrib/epee/include
 #include "fwd.h"
@@ -32,5 +33,12 @@
 namespace lws_test
 {
   constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
+  constexpr const char pub_rendevous[] = "inproc://fake_sub";
+  void rpc_pub_thread(void* ctx, const std::vector<epee::byte_slice>& reply, const std::vector<epee::byte_slice>& pubs, std::atomic<bool>& pub_ready, const std::atomic<bool>& finished);
+  inline void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
+  {
+    std::atomic<bool> unused{false};
+    std::atomic<bool> finished{true};
+    rpc_pub_thread(ctx, reply, {}, unused, finished);
+  }
 }

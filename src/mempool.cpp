@@ -126,7 +126,7 @@ namespace lws
           found.push_back({spend.link.tx_hash});
         found.back().spends.push_back(std::move(spend));
       },
-      [&found](account&, db::output&& output)
+      [&found](account&, db::output&& output, db::storage_reader*)
       {
         if (found.empty() || found.back().hash != output.link.tx_hash)
           found.push_back({output.link.tx_hash});
