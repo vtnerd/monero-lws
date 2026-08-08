@@ -21,7 +21,7 @@ jobs:
         docker image tag vtnerd/monero-lws:1.0 ghcr.io/vtnerd/monero-lws:1
 
     - name: Add release tags (if release)
-      if: ${{startsWith(github.ref, 'refs/tags/')}}}
+      if: ${{startsWith(github.ref, 'refs/tags/')}}
       run: >
         docker image tag vtnerd/monero-lws:1.0 vtnerd/monero-lws:${{ github.ref_name }} &&
         docker image tag vtnerd/monero-lws:1.0 ghcr.io/vtnerd/monero-lws:${{ github.ref_name }}
