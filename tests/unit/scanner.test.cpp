@@ -28,7 +28,22 @@
 #include "scanner.test.h"
 #include "framework.test.h"
 
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/write.hpp>
+#include <boost/beast/core/error.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/core/string.hpp>
+#include <boost/beast/http/error.hpp>
+#include <boost/beast/http/fields.hpp>
+#include <boost/beast/http/message.hpp>
+#include <boost/beast/http/parser.hpp>
+#include <boost/beast/http/read.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <boost/beast/version.hpp>
 #include <boost/thread.hpp>
+#include <boost/uuid/random_generator.hpp>
 
 #include "cryptonote_basic/account.h" // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
@@ -42,6 +57,7 @@
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
 #include "scanner.h"
+#include "serialization/json_object.h"
 #include "util/transaction.test.h"
 #include "wire/error.h"
 #include "wire/json/write.h"
@@ -82,6 +98,18 @@ namespace
     return cryptonote::rpc::FullMessage::getResponse(message, id);
   }
 
+  epee::byte_slice daemon_pub(const std::vector<cryptonote::transaction> txes)
+  {
+    epee::byte_stream out;
+    const boost::string_ref filter{"json-full-txpool_add:"};
+    out.write({filter.data(), filter.size()});
+    {
+      rapidjson::Writer<epee::byte_stream> writer{out};
+      cryptonote::json::toJsonValue(writer, txes);
+    }
+    return epee::byte_slice{std::move(out)};
+  }
+
   struct join
   {
       boost::thread& thread;
@@ -93,19 +121,166 @@ namespace
     struct stop_
     {
       lws::scanner& scanner;
-      ~stop_() { scanner.shutdown(); }; 
+      ~stop_() { scanner.shutdown(); };
     } stop{scanner};
 
     lws_test::rpc_thread(ctx, reply);
   }
+
+  void scanner_pub_thread(lws::scanner& scanner, void* ctx, const epee::byte_slice& rpc, const std::vector<epee::byte_slice>& pubs, std::atomic<bool>& pub_ready, const std::atomic<bool>& finished)
+  {
+    struct stop_
+    {
+      lws::scanner& scanner;
+      ~stop_() { scanner.shutdown(); };
+    } stop{scanner};
+
+    std::vector<epee::byte_slice> rpcs;
+    rpcs.push_back(rpc.clone());
+
+    lws_test::rpc_pub_thread(ctx, rpcs, pubs, pub_ready, finished);
+  }
+
+  namespace webhook
+  {
+    struct connection;
+    struct server
+    {
+      using tcp = boost::asio::ip::tcp;
+
+      lest::env& lest_env_;
+      boost::asio::io_context& io_;
+      boost::asio::ip::tcp::acceptor acceptor_;
+      std::vector<std::shared_ptr<connection>> callbacks_;
+      boost::mutex sync_;
+      std::atomic<bool> ready_;
+
+      explicit server(lest::env& lest_env, boost::asio::io_context& io)
+        : lest_env_(lest_env),
+          io_(io),
+          acceptor_(io, tcp::endpoint(tcp::v4(), 0)),
+          callbacks_(),
+          sync_(),
+          ready_(false)
+      {}
+
+      ~server();
+    };
+
+    struct connection
+    {
+      std::weak_ptr<server> parent_;
+      const std::string response_;
+      boost::asio::ip::tcp::socket sock_;
+      boost::beast::flat_buffer buffer_;
+      boost::optional<boost::beast::http::parser<true, boost::beast::http::string_body>> parser_;
+      boost::asio::ip::tcp::endpoint remote_;
+      std::size_t count_;
+      bool keep_alive_;
+
+      explicit connection(std::shared_ptr<server> parent)
+        : parent_(std::move(parent)),
+          response_("HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n"),
+          sock_(parent->io_),
+          buffer_(),
+          parser_(),
+          count_(0),
+          keep_alive_(false)
+      {}
+    };
+
+    server::~server()
+    {}
+
+    struct handler_loop : public boost::asio::coroutine
+    {
+      std::shared_ptr<connection> self_;
+
+      explicit handler_loop(std::shared_ptr<connection> self) noexcept
+        : self_(std::move(self))
+      {}
+
+      void operator()(boost::system::error_code error = {}, std::size_t = {})
+      {
+        if (!self_ || error == boost::beast::http::error::end_of_stream)
+          return;
+
+        connection& self = *self_;
+        const std::shared_ptr<server> parent = self.parent_.lock();
+        if (!parent)
+          return;
+
+        lest::env& lest_env = parent->lest_env_;
+
+        const boost::lock_guard<boost::mutex> lock{parent->sync_};
+        EXPECT(!error);
+        BOOST_ASIO_CORO_REENTER(*this)
+        {
+          for (;;)
+          {
+            self.parser_.emplace();
+            self.parser_->body_limit(10 * 1024 * 1024);
+
+            BOOST_ASIO_CORO_YIELD boost::beast::http::async_read(
+              self.sock_, self.buffer_, *self.parser_, std::move(*this)
+            );
+
+            ++self.count_;
+            BOOST_ASIO_CORO_YIELD boost::asio::async_write(
+              self.sock_, boost::asio::buffer(self.response_.data(), self.response_.size()), std::move(*this)
+            );
+          }
+        }
+      }
+    };
+
+    struct accept_loop : public boost::asio::coroutine
+    {
+      std::shared_ptr<server> self_;
+
+      explicit accept_loop(std::shared_ptr<server> self) noexcept
+        : self_(std::move(self))
+      {}
+
+      void operator()(boost::system::error_code error = {})
+      {
+        if (!self_)
+          return;
+
+        server& self = *self_;
+        lest::env& lest_env = self.lest_env_;
+        const boost::lock_guard<boost::mutex> lock{self.sync_};
+        BOOST_ASIO_CORO_REENTER(*this)
+        {
+          self.acceptor_.listen();
+          self.ready_ = true;
+          for (;;)
+          {
+            self.callbacks_.push_back(std::make_shared<connection>(self_));
+            BOOST_ASIO_CORO_YIELD self.acceptor_.async_accept(self.callbacks_.back()->sock_, std::move(*this));
+
+            EXPECT(!error);
+            boost::asio::post(self.io_, handler_loop{self.callbacks_.back()});
+          }
+        }
+      }
+    };
+  } // webhook
 } // anonymous
 
 namespace lws_test
 {
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
+  void rpc_pub_thread(void* ctx, const std::vector<epee::byte_slice>& reply, const std::vector<epee::byte_slice>& pubs, std::atomic<bool>& pub_ready, const std::atomic<bool>& finished)
   {
     try
     {
+      struct stop_
+      {
+        std::atomic<bool>& ready;
+        ~stop_() { ready = true; }
+      } stop{pub_ready};
+
+      net::zmq::socket pub{};
       net::zmq::socket server{};
       server.reset(zmq_socket(ctx, ZMQ_REP));
       if (!server || zmq_bind(server.get(), lws_test::rpc_rendevous))
@@ -114,6 +289,14 @@ namespace lws_test
         return;
       }
 
+      pub.reset(zmq_socket(ctx, ZMQ_PUB));
+      if (!pub || zmq_bind(pub.get(), lws_test::pub_rendevous))
+      {
+        std::cout << "Failed to create ZMQ pub" << std::endl;
+        return;
+      }
+
+      pub_ready = true;
       for (const epee::byte_slice& message : reply)
       {
         const auto start = std::chrono::steady_clock::now();
@@ -144,6 +327,19 @@ namespace lws_test
           return;
         }
       } // foreach message
+
+      for (const epee::byte_slice& message : pubs)
+      {
+        const auto sent = net::zmq::send(message.clone(), pub.get());
+        if (!sent)
+        {
+          std::cout << "Failed to send dummy PUB message: " << sent.error().message() << std::endl;
+          return;
+        }
+      }
+
+      while (!finished)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
     }
     catch (const std::exception& e)
     {
@@ -193,8 +389,7 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
   {
     std::shared_ptr<lws::mempool> pool{};
     auto rpc = 
-      lws::rpc::context::make(lws_test::rpc_rendevous, {}, {}, {}, std::chrono::minutes{0}, false, true);
-
+      lws::rpc::context::make(lws_test::rpc_rendevous, lws_test::pub_rendevous, {}, {}, std::chrono::minutes{0}, false, true);
 
     lws::db::test::cleanup_db on_scope_exit{};
     lws::db::storage db = lws::db::test::get_fresh_db();
@@ -1006,6 +1201,121 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         }
       }
     } //SECTION (lws::scanner::run (lookahead))
+
+    SECTION("lws::scanner::loop mempool pub")
+    {
+      std::vector<epee::byte_slice> messages{};
+      cryptonote::rpc::GetBlocksFast::Response bmessage{};
+      bmessage.start_height = std::uint64_t(last_block.id) + 1;
+      bmessage.current_height = bmessage.start_height + 1;
+      bmessage.blocks.emplace_back();
+      bmessage.blocks.back().block.miner_tx =
+        lws_test::make_miner_tx(lest_env, last_block.id, account, false).tx;
+
+      const std::vector<crypto::hash> hashes{
+        last_block.hash,
+        cryptonote::get_block_hash(bmessage.blocks.back().block)
+      };
+      {
+        cryptonote::rpc::GetHashesFast::Response hmessage{};
+
+        hmessage.start_height = std::uint64_t(last_block.id);
+        hmessage.hashes = hashes;
+        hmessage.current_height = hmessage.start_height + boost::size(hashes) - 1;
+        messages.push_back(daemon_response(hmessage));
+
+        hmessage.start_height = hmessage.current_height;
+        hmessage.hashes.front() = hmessage.hashes.back();
+        hmessage.hashes.resize(1);
+        messages.push_back(daemon_response(hmessage));
+
+        {
+          lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
+          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+          const join on_scope_exit{server_thread};
+          EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
+          lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
+        }
+      }
+
+      EXPECT(db.add_account(account, keys.m_view_secret_key));
+
+      messages.clear();
+      messages.push_back(daemon_pub({bmessage.blocks.back().block.miner_tx}));
+      {
+        static constexpr const lws::scanner_options opts{
+          0, 0, lws::MINIMUM_BLOCK_DEPTH, 10, false, false, false, false
+        };
+
+        std::atomic<bool> pub_ready{false};
+        std::atomic<bool> finished{false};
+        lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
+
+        const epee::byte_slice init = daemon_response(bmessage);
+        boost::thread server_thread(&scanner_pub_thread, std::ref(scanner), rpc.zmq_context(), std::cref(init), std::cref(messages), std::ref(pub_ready), std::cref(finished));
+        const join on_scope_exit{server_thread};
+        struct stop_rpc_server_
+        {
+          std::atomic<bool>& finished;
+          ~stop_rpc_server_() { finished = true; }
+        } stop_rpc_server{finished};
+
+        while (!pub_ready)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+
+        boost::asio::io_context io;
+        const auto server = std::make_shared<webhook::server>(lest_env, io);
+        boost::asio::post(io, webhook::accept_loop{server});
+
+        boost::thread webhook_thread{[&] { io.run(); server->ready_ = true; }};
+        const join on_scope_exit2{webhook_thread};
+        struct stop_webhook_
+        {
+          boost::asio::io_context& io;
+          ~stop_webhook_() { io.stop(); }
+        } stop_webhook{io};
+
+        while (!server->ready_)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+
+        {
+          const boost::lock_guard<boost::mutex> lock{server->sync_};
+          const lws::db::webhook_value event{
+            lws::db::webhook_dupsort{0, boost::uuids::random_generator{}()},
+            lws::db::webhook_data{
+              "http://127.0.0.1:" + std::to_string(server->acceptor_.local_endpoint().port()),
+              "",
+              0
+            }
+          };
+
+          EXPECT(db.add_webhook(lws::db::webhook_type::tx_confirmation, account, event));
+        }
+
+        boost::thread scanner_thread{[&] { scanner.run(std::move(rpc), pool, 1, {}, opts); }};
+        const join on_scope_exit3{scanner_thread};
+        struct stop_scanner_
+        {
+          std::atomic<bool>& finished;
+          ~stop_scanner_() { finished = true; }
+        } stop_scanner{finished};
+
+        bool done = false;
+        const auto start = std::chrono::steady_clock::now();
+        while (!done)
+        {
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+          const boost::lock_guard<boost::mutex> lock{server->sync_};
+          done = (server->callbacks_.size() && server->callbacks_.at(0)->count_);
+          if (message_timeout <= std::chrono::steady_clock::now() - start)
+            break;
+        }
+        {
+          const boost::lock_guard<boost::mutex> lock{server->sync_};
+          EXPECT(done);
+        }
+      }
+    }
   } // SETUP
 } // LWS_CASE
 

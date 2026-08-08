@@ -45,6 +45,13 @@ namespace lws
     expect<db::address_index> find_subaddress(const account& user, crypto::public_key const& pubkey);
     expect<void> update_lookahead(const account& user, const db::address_index& match, db::block_id height);
 
+    db::storage_reader* get_reader() noexcept
+    {
+      if (reader)
+        return std::addressof(*reader);
+      return nullptr;
+    }
+
   private:
     expect<db::storage_reader> reader;
     db::storage disk;
@@ -57,7 +64,14 @@ namespace lws
   class ownership_test {
   public:
     using spend_action = std::function<void(account&, db::spend&&)>;
-    using output_action = std::function<void(account&, db::output&&)>;
+    using output_action = std::function<void(account&, db::output&&, db::storage_reader*)>;
+
+    db::storage_reader* get_reader() noexcept
+    {
+      if (subaddress)
+        return subaddress->get_reader();
+      return nullptr;
+    }
 
     ownership_test(spend_action, output_action);
 
