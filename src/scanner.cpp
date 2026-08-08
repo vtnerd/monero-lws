@@ -201,7 +201,7 @@ namespace lws
     };
     struct add_output
     {
-      void operator()(lws::account& user, db::output&& out) const
+      void operator()(lws::account& user, db::output&& out, db::storage_reader*) const
       {
         if (!user.add_out(out))
           MWARNING("Output not added, duplicate public key encountered");
@@ -219,18 +219,25 @@ namespace lws
       rpc::client& client_;
       scanner_sync& http_;
 
-      void operator()(lws::account& user, db::output&& out)
+      void operator()(lws::account& user, db::output&& out, db::storage_reader* reader)
       {
         const db::webhook_key key{user.id(), db::webhook_type::tx_confirmation};
         std::vector<db::webhook_value> hooks{};
 
         {
-          expect<db::storage_reader> reader = disk_.start_read();
+          expect<db::storage_reader> reader_storage{common_error::kInvalidArgument};
           if (!reader)
           {
-            MERROR("Unable to lookup webhook on tx in pool: " << reader.error().message());
-            return;
+            reader_storage = disk_.start_read();
+            if (!reader_storage)
+            {
+              MERROR("Unable to lookup webhook on tx in pool: " << reader_storage.error().message());
+              return;
+            }
+            else
+              reader = std::addressof(*reader_storage);
           }
+
           auto found = reader->find_webhook(key, out.payment_id.short_);
           if (!found)
           {
@@ -238,6 +245,7 @@ namespace lws
             return;
           }
           hooks = std::move(*found);
+          reader = nullptr;
         }
 
         std::vector<db::webhook_tx_confirmation> events{};
