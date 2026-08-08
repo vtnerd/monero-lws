@@ -29,6 +29,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <boost/thread/shared_mutex.hpp>
 #include <lmdb.h>
 #include <memory>
 #include <type_traits>
@@ -57,8 +58,11 @@ namespace lws_lmdb
     //! Context given to LMDB.
     struct context
     {
-        std::atomic<std::size_t> active;
-        std::atomic_flag lock;
+        context()
+          : sync()
+        {}
+
+        boost::shared_mutex sync;
     };
 
     //! Manages a LMDB environment for safe memory-map resizing. Thread-safe.
