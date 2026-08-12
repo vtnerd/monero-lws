@@ -15,7 +15,7 @@ env:
         echo "Acquire::Retries \"3\";"         | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
-  BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf unbound'
+  BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers protobuf rust unbound'
   CONFIGURE_BASIC: '-B "$GITHUB_WORKSPACE/lws/build" -DMONERO_SOURCE_DIR="$GITHUB_WORKSPACE/monero" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -S "$GITHUB_WORKSPACE/lws"'
   BUILD: 'cmake --build "$GITHUB_WORKSPACE/lws/build" -j$(nproc)'
   RUN: 'ctest --test-dir "$GITHUB_WORKSPACE/lws/build" --output-on-failure'
@@ -34,6 +34,7 @@ jobs:
           ${{env.APT_SET_CONF}}
           sudo apt update
           sudo ${{env.APT_INSTALL_LINUX}}
+          sudo apt -y install cargo
       - name: Install dependencies (MacOS)
         if: matrix.os == 'macos-latest'
         run: ${{env.BREW_INSTALL_MAC}}
@@ -65,11 +66,23 @@ jobs:
         run: |
           apt update
           ${{env.APT_INSTALL_LINUX}}
+      - name: Install Cargo (rustup)
+        if: matrix.distro == 'debian:bookworm-slim'
+        run: |
+          apt -y install curl
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "$HOME/.cargo/env"
+          rustup default stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - name: Install Cargo (Debian/apt)
+        if: matrix.distro == 'debian:trixie-slim'
+        run: apt -y install cargo
       - name: Install Dependencies (Arch/pacman)
         if: matrix.distro == 'archlinux:base-devel'
         run: |
           sudo pacman --noconfirm -Syu
-          sudo pacman --noconfirm -S cmake boost boost-libs git hidapi libsodium miniupnpc openssl unbound zeromq
+          sudo pacman --noconfirm -S cmake boost boost-libs git hidapi libsodium miniupnpc openssl rustup unbound zeromq
+          rustup default stable
       - name: Install Dependencies (Alma/dnf)
         if: matrix.distro == 'almalinux:9' || matrix.distro == 'almalinux:10'
         run: |
@@ -78,7 +91,7 @@ jobs:
           dnf clean all
           dnf makecache
           dnf config-manager --set-enabled crb
-          dnf -y install boost-devel cmake gcc g++ git hidapi-devel libsodium-devel make miniupnpc-devel openssl-devel unbound-devel zeromq-devel zlib-devel
+          dnf -y install boost-devel cargo cmake gcc g++ git hidapi-devel libsodium-devel make miniupnpc-devel openssl-devel unbound-devel zeromq-devel zlib-devel
       - name: Checkout Monero Source
         uses: actions/checkout@v6
         with:
@@ -109,6 +122,7 @@ jobs:
         ${{env.APT_SET_CONF}}
         sudo apt update
         sudo ${{env.APT_INSTALL_LINUX}}
+        sudo apt -y install cargo
     - name: Install RabbitMQ iff WITH_RMQ (Ubuntu)
       if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04')
       run: sudo apt -y install librabbitmq-dev
