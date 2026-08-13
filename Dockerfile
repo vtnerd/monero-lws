@@ -46,11 +46,11 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8_1/expat-2.8.1.tar.bz2 && \
-    echo "f5833dd2e1cd7739ec9182804a1a29c4f0cc7c2f26b633d3a2188b7766a88ecb expat-2.8.1.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.8.1.tar.bz2 && \
-    rm expat-2.8.1.tar.bz2 && \
-    cd expat-2.8.1 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8_3/expat-2.8.3.tar.bz2 && \
+    echo "b4cc2483927d5e90bf8c40b44a6b95b368b42a8a96e25883fce188b48a92b670 expat-2.8.3.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.8.3.tar.bz2 && \
+    rm expat-2.8.3.tar.bz2 && \
+    cd expat-2.8.3 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
@@ -79,11 +79,11 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
 
 # Build boost for latest security updates
 WORKDIR /tmp
-RUN set -ex && wget https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.bz2 && \
-    echo "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5 boost_1_91_0.tar.bz2" | sha256sum -c && \
-    tar -xf boost_1_91_0.tar.bz2 && \
-    rm boost_1_91_0.tar.bz2 && \
-    cd boost_1_91_0 && \
+RUN set -ex && wget https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.bz2 && \
+    echo "5c1d40cb8e19adbf740a4ec2da35b3e58f3f5804b1dce44deb53df72193cbc6c boost_1_92_0.tar.bz2" | sha256sum -c && \
+    tar -xf boost_1_92_0.tar.bz2 && \
+    rm boost_1_92_0.tar.bz2 && \
+    cd boost_1_92_0 && \
     ./bootstrap.sh && \
     ./b2 -j${NPROC:-$(nproc)} runtime-link=static link=static threading=multi variant=release \
       --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
