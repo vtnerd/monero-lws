@@ -290,11 +290,12 @@ namespace db
       \param height The first hash in `chain` is at this height.
       \param chain List of block hashes that `accts` were scanned against.
       \param accts Updated to `height + chain.size()` scan height.
+      \param regtest Bypass the checkpoint-height gate for regtest environment.
 
       \return Status via `updated` object.
     */
     expect<updated>
-      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow);
+      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow, bool regtest = false);
 
     /*!
       Adds subaddresses to an account. Upon success, an account will
