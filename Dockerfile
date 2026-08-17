@@ -57,11 +57,11 @@ RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.25.1.tar.gz && \
-    echo "0fe8b6277b0959cfd17562debac0aa5f71e0b02dc4ffa9c60271c583edab586f unbound-1.25.1.tar.gz" | sha256sum -c && \
-    tar -xzf unbound-1.25.1.tar.gz && \
-    rm unbound-1.25.1.tar.gz && \
-    cd unbound-1.25.1 && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.25.2.tar.gz && \
+    echo "0d92275c703d5f5f8baba3dab22117dd8c29b495588a5c229768ed6581566600 unbound-1.25.2.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.25.2.tar.gz && \
+    rm unbound-1.25.2.tar.gz && \
+    cd unbound-1.25.2 && \
     ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
