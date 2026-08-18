@@ -3171,7 +3171,9 @@ namespace db
 
       // collect all .value() errors
       updated out{};
-      if (get_checkpoints().get_max_height() <= last_update)
+      // regtest hast no checkpoints, so a re-org can occur at any height (including below the
+      // mainnet checkpoint height that get_checkpoints() reports)
+      if (lws::config::regtest || get_checkpoints().get_max_height() <= last_update)
       {
         cursor::blocks blocks_cur;
         cursor::pow    pow_cur;

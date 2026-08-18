@@ -336,6 +336,8 @@ namespace
       command_line::get_arg(args, opts.lws_server_external)
     };
 
+    lws::config::regtest = prog.regtest;
+
     if (prog.regtest && lws::config::network != cryptonote::MAINNET)
       MONERO_THROW(lws::error::configuration, "Regtest cannot be used with testnet or stagenet");
 
