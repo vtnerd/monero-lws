@@ -60,6 +60,21 @@ namespace lws_lmdb
         }
     }
 
+    void release_read_txn::operator()(MDB_txn* ptr) const noexcept
+    {
+        if (ptr)
+        {
+            MDB_env* const env = mdb_txn_env(ptr);
+            abort_txn{}(ptr);
+            if (env)
+            {
+                context* ctx = reinterpret_cast<context*>(mdb_env_get_userctx(env));
+                if (ctx)
+                    release_context(*ctx);
+            }
+        }
+    }
+
     expect<environment> open_environment(const char* path, MDB_dbi max_dbs) noexcept
     {
         MONERO_PRECOND(path != nullptr);
@@ -74,7 +89,7 @@ namespace lws_lmdb
         return {std::move(out)};
     }
 
-    expect<lmdb::write_txn> database::do_create_txn(unsigned int flags) noexcept
+    expect<lws_lmdb::write_txn> database::do_create_txn(unsigned int flags) noexcept
     {
         MONERO_PRECOND(handle() != nullptr);
 
@@ -86,7 +101,7 @@ namespace lws_lmdb
             const int err =
                 mdb_txn_begin(handle(), nullptr, flags, &txn);
             if (!err && txn != nullptr)
-                return lmdb::write_txn{txn};
+                return lws_lmdb::write_txn{txn};
 
             release_context(ctx);
             if (err != MDB_MAP_RESIZED)
@@ -128,7 +143,7 @@ namespace lws_lmdb
         return success();
     }
 
-    expect<lmdb::read_txn> database::create_read_txn(lmdb::suspended_txn txn) noexcept
+    expect<lws_lmdb::read_txn> database::create_read_txn(lws_lmdb::suspended_txn txn) noexcept
     {
         if (txn)
         {
@@ -139,28 +154,28 @@ namespace lws_lmdb
                 release_context(ctx);
                 return {lmdb::error(err)};
             }
-            return lmdb::read_txn{txn.release()};
+            return lws_lmdb::read_txn{txn.release()};
         }
         auto new_txn = do_create_txn(MDB_RDONLY);
         if (new_txn)
-            return lmdb::read_txn{new_txn->release()};
+            return lws_lmdb::read_txn{new_txn->release()};
         return new_txn.error();
     }
 
-    expect<lmdb::suspended_txn> database::reset_txn(lmdb::read_txn txn) noexcept
+    expect<lws_lmdb::suspended_txn> database::reset_txn(lws_lmdb::read_txn txn) noexcept
     {
         MONERO_PRECOND(txn != nullptr);
         mdb_txn_reset(txn.get());
         release_context(ctx);
-        return lmdb::suspended_txn{txn.release()};
+        return lws_lmdb::suspended_txn{txn.release()};
     }
 
-    expect<lmdb::write_txn> database::create_write_txn() noexcept
+    expect<lws_lmdb::write_txn> database::create_write_txn() noexcept
     {
         return do_create_txn(0);
     }
 
-    expect<void> database::commit(lmdb::write_txn txn) noexcept
+    expect<void> database::commit(lws_lmdb::write_txn txn) noexcept
     {
         MONERO_PRECOND(txn != nullptr);
         const int err = mdb_txn_commit(txn.release());
