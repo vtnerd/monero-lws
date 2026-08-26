@@ -37,8 +37,8 @@
 #include "db/account.h"
 #include "db/data.h"
 #include "fwd.h"
-#include "lmdb/transaction.h"
 #include "lmdb/key_stream.h"
+#include "lmdb/lws_transaction.h"
 #include "lmdb/value_stream.h"
 #include "wire/msgpack/fwd.h"
 
@@ -49,21 +49,21 @@ namespace db
 {
   namespace cursor
   {
-    MONERO_CURSOR(accounts);
-    MONERO_CURSOR(outputs);
-    MONERO_CURSOR(spends);
-    MONERO_CURSOR(images);
-    MONERO_CURSOR(requests);
-    MONERO_CURSOR(subaddress_ranges);
-    MONERO_CURSOR(subaddress_indexes);
+    MONERO_LWS_CURSOR(accounts);
+    MONERO_LWS_CURSOR(outputs);
+    MONERO_LWS_CURSOR(spends);
+    MONERO_LWS_CURSOR(images);
+    MONERO_LWS_CURSOR(requests);
+    MONERO_LWS_CURSOR(subaddress_ranges);
+    MONERO_LWS_CURSOR(subaddress_indexes);
 
-    MONERO_CURSOR(blocks);
-    MONERO_CURSOR(pow);
-    MONERO_CURSOR(accounts_by_address);
-    MONERO_CURSOR(accounts_by_height);
+    MONERO_LWS_CURSOR(blocks);
+    MONERO_LWS_CURSOR(pow);
+    MONERO_LWS_CURSOR(accounts_by_address);
+    MONERO_LWS_CURSOR(accounts_by_height);
   
-    MONERO_CURSOR(webhooks);
-    MONERO_CURSOR(events);
+    MONERO_LWS_CURSOR(webhooks);
+    MONERO_LWS_CURSOR(events);
   }
 
   struct storage_internal;
@@ -85,11 +85,11 @@ namespace db
   class storage_reader
   {
     std::shared_ptr<storage_internal> db;
-    lmdb::read_txn txn;
+    lws_lmdb::read_txn txn;
     reader_internal curs;
 
   public:
-    storage_reader(std::shared_ptr<storage_internal> db, lmdb::read_txn txn) noexcept
+    storage_reader(std::shared_ptr<storage_internal> db, lws_lmdb::read_txn txn) noexcept
       : db(std::move(db)), txn(std::move(txn)), curs{}
     {}
 
@@ -179,7 +179,7 @@ namespace db
     expect<void> json_debug(std::ostream& out, bool show_keys);
 
     //! \return Read txn that can be re-used via `storage::start_read`.
-    lmdb::suspended_txn finish_read() noexcept;
+    lws_lmdb::suspended_txn finish_read() noexcept;
   };
 
   //! Wrapper for LMDB on-disk storage of light-weight server data.
@@ -340,7 +340,7 @@ namespace db
     expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
-    expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;
+    expect<storage_reader> start_read(lws_lmdb::suspended_txn txn = nullptr) const;
   };
 } // db
 } // lws

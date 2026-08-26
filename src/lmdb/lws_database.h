@@ -35,7 +35,7 @@
 
 #include "common/expect.h"
 #include "lmdb/error.h"
-#include "lmdb/transaction.h"
+#include "lmdb/lws_transaction.h"
 
 namespace lws_lmdb
 {
@@ -70,7 +70,7 @@ namespace lws_lmdb
         //! \return The LMDB environment associated with the object.
         MDB_env* handle() const noexcept { return env.get(); }
 
-        expect<::lmdb::write_txn> do_create_txn(unsigned int flags) noexcept;
+        expect<::lws_lmdb::write_txn> do_create_txn(unsigned int flags) noexcept;
 
     public: 
         database(environment env);
@@ -90,16 +90,16 @@ namespace lws_lmdb
         expect<void> resize() noexcept;
 
         //! \return A read only LMDB transaction, reusing `txn` if provided.
-        expect<lmdb::read_txn> create_read_txn(lmdb::suspended_txn txn = nullptr) noexcept;
+        expect<lws_lmdb::read_txn> create_read_txn(lws_lmdb::suspended_txn txn = nullptr) noexcept;
 
         //! \return `txn` after releasing context.
-        expect<lmdb::suspended_txn> reset_txn(lmdb::read_txn txn) noexcept;
+        expect<lws_lmdb::suspended_txn> reset_txn(lws_lmdb::read_txn txn) noexcept;
 
         //! \return A read-write LMDB transaction.
-        expect<lmdb::write_txn> create_write_txn() noexcept;
+        expect<lws_lmdb::write_txn> create_write_txn() noexcept;
 
         //! Commit the read-write transaction.
-        expect<void> commit(lmdb::write_txn txn) noexcept;
+        expect<void> commit(lws_lmdb::write_txn txn) noexcept;
 
         /*!
             Create a write transaction, pass it to `f`, then try to commit
@@ -115,7 +115,7 @@ namespace lws_lmdb
         {
             for (unsigned i = 0; i < attempts; ++i)
             {
-                expect<lmdb::write_txn> txn = create_write_txn();
+                expect<lws_lmdb::write_txn> txn = create_write_txn();
                 if (!txn)
                     return txn.error();
 
