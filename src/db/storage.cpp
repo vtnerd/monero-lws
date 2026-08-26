@@ -50,7 +50,6 @@
 #include "hex.h"
 #include "lmdb/lws_database.h"
 #include "lmdb/lws_error.h"
-#include "lmdb/lws_table.h"
 #include "lmdb/error.h"
 #include "lmdb/key_stream.h"
 #include "lmdb/msgpack_table.h"
@@ -367,7 +366,7 @@ namespace db
     constexpr const lmdb::msgpack_table<webhook_key, webhook_dupsort, webhook_data> webhooks{
       "webhooks_by_account_id,payment_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<db::webhook_dupsort>
     };
-    constexpr const lws_lmdb::basic_table<account_id, webhook_event> events_by_account_id{
+    constexpr const lmdb::basic_table<account_id, webhook_event> events_by_account_id{
       "webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<webhook_event>
     };
     constexpr const lmdb::msgpack_table<account_id, major_index, index_ranges> subaddress_ranges{
@@ -386,7 +385,7 @@ namespace db
       }
       else
       {
-        auto new_cur = lmdb::open_cursor<D>(txn, tbl);
+        auto new_cur = lws_lmdb::open_cursor<D>(txn, tbl);
         if (!new_cur)
           return new_cur.error();
         cur = std::move(*new_cur);
@@ -471,7 +470,7 @@ namespace db
 
     void check_blockchain(MDB_txn& txn, MDB_dbi tbl)
     {
-      cursor::blocks cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_blocks>(txn, tbl));
+      cursor::blocks cur = MONERO_UNWRAP(lws_lmdb::open_cursor<cursor::close_blocks>(txn, tbl));
 
       std::map<std::uint64_t, crypto::hash> const& points =
         storage::get_checkpoints().get_points();
@@ -527,7 +526,7 @@ namespace db
 
     void check_pow(MDB_txn& txn, MDB_dbi tbl)
     {
-      cursor::pow cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_pow>(txn, tbl));
+      cursor::pow cur = MONERO_UNWRAP(lws_lmdb::open_cursor<cursor::close_pow>(txn, tbl));
 
       MDB_val key = lmdb::to_val(pows_version);
       int err = mdb_cursor_get(cur.get(), &key, nullptr, MDB_SET);
@@ -726,7 +725,7 @@ namespace db
     explicit storage_internal(lws_lmdb::environment env, unsigned create_queue_max)
       : lws_lmdb::database(std::move(env)), tables{}, create_queue_max(create_queue_max)
     {
-      lmdb::write_txn txn = this->create_write_txn().value();
+      lws_lmdb::write_txn txn = this->create_write_txn().value();
       assert(txn != nullptr);
 
       tables.blocks      = blocks.open(*txn).value();
@@ -1420,7 +1419,7 @@ namespace db
     return success();
   }
 
-  lmdb::suspended_txn storage_reader::finish_read() noexcept
+  lws_lmdb::suspended_txn storage_reader::finish_read() noexcept
   {
     if (txn != nullptr)
     {
@@ -1504,11 +1503,11 @@ namespace db
     return storage{db};
   }
 
-  expect<storage_reader> storage::start_read(lmdb::suspended_txn txn) const
+  expect<storage_reader> storage::start_read(lws_lmdb::suspended_txn txn) const
   {
     MONERO_PRECOND(db != nullptr);
 
-    expect<lmdb::read_txn> reader = db->create_read_txn(std::move(txn));
+    expect<lws_lmdb::read_txn> reader = db->create_read_txn(std::move(txn));
     if (!reader)
       return reader.error();
 
