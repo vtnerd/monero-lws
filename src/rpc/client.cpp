@@ -29,6 +29,7 @@
 
 #include <array>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/numeric/conversion/cast.hpp>
 #include <boost/thread/mutex.hpp>
 #include <cassert>
 #include <system_error>
@@ -338,13 +339,6 @@ namespace rpc
         return unsigned(max_out) < added ? max_out : int(added);
       }
     };
-
-    expect<std::string> read_msg(void* const socket, const int flags, const std::uint64_t max_message_size)
-    {
-      std::string payload{};
-      MONERO_CHECK(net::zmq::retry_op(do_receive{}, payload, socket, flags, max_message_size));
-      return {std::move(payload)};
-    }
   } // anonymous
 
   namespace detail
@@ -397,6 +391,13 @@ namespace rpc
       std::atomic_flag rates_running;
     };
   } // detail
+
+  expect<std::string> read_msg(void* const socket, const int flags, const std::uint64_t max_message_size)
+  {
+    std::string payload{};
+    MONERO_CHECK(net::zmq::retry_op(do_receive{}, payload, socket, flags, max_message_size));
+    return {std::move(payload)};
+  }
 
   expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc)
   {
@@ -719,7 +720,14 @@ namespace rpc
     expect<net::zmq::socket> daemon = make_daemon(ctx);
     if (!daemon)
       return daemon.error();
-    return net::zmq::async_client::make(io, std::move(*daemon));
+    auto out = net::zmq::async_client::make(io, std::move(*daemon));
+    if (out && ctx->untrusted_daemon)
+    {
+      const std::uint64_t limit{ctx->get_msg_max(max_msg_req)};
+      out->msg_limit = boost::numeric_cast<std::uint32_t>(limit);
+      MONERO_CHECK(do_set_option(out->zsock.get(), ZMQ_MAXMSGSIZE, limit));
+    }
+    return out;
   }
 
   expect<void> client::send(epee::byte_slice message, std::chrono::seconds timeout) noexcept

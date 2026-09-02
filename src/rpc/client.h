@@ -65,6 +65,7 @@ namespace rpc
     std::string routing;
   };
 
+  expect<std::string> read_msg(void* const socket, const int flags, std::uint64_t msg_max);
   expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc = {});
 
   class account_sub
