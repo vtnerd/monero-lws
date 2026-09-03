@@ -195,7 +195,7 @@ namespace
   {
     std::shared_ptr<lws::rpc::scanner::client> client_;
 
-    bool operator()(boost::asio::io_context&, lws::rpc::client&, net::http::client&, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const lws::db::pow_sync> pow)
+    bool operator()(boost::asio::io_context&, lws::rpc::client&, net::http::client&, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const lws::db::pow_sync> pow, bool)
     {
       if (!client_)
         return false;

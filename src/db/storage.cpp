@@ -3151,7 +3151,7 @@ namespace db
     }
   } // anonymous
 
-  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow)
+  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow, bool regtest)
   {
     if (users.empty() && chain.empty())
       return {updated{}};
@@ -3160,7 +3160,7 @@ namespace db
     if (!pow.empty())
       MONERO_PRECOND(chain.size() == pow.size());
 
-    return db->try_write([this, height, chain, users, pow] (MDB_txn& txn) -> expect<updated>
+    return db->try_write([this, height, chain, users, pow, regtest] (MDB_txn& txn) -> expect<updated>
     {
       epee::span<const crypto::hash> chain_copy{chain};
       epee::span<const pow_sync> pow_copy{pow};
@@ -3170,7 +3170,7 @@ namespace db
 
       // collect all .value() errors
       updated out{};
-      if (get_checkpoints().get_max_height() <= last_update)
+      if (regtest || get_checkpoints().get_max_height() <= last_update)
       {
         cursor::blocks blocks_cur;
         cursor::pow    pow_cur;
