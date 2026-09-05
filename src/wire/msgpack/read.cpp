@@ -27,6 +27,7 @@
 
 #include "read.h"
 
+#include <algorithm>
 #include <boost/endian/buffers.hpp>
 #include <boost/fusion/include/any.hpp>
 #include <boost/fusion/include/std_tuple.hpp>
@@ -441,7 +442,7 @@ namespace wire
       read_count<msgpack::ftag_array, msgpack::array_types>(error::schema::array);
     if (limits<std::size_t>::max() - tags_remaining_ < upcoming)
       WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
-    if (min_element_size && (remaining_.size() / min_element_size) < upcoming)
+    if ((remaining_.size() / std::max(min_element_size, std::size_t(1))) < upcoming)
       WIRE_DLOG_THROW(error::schema::array, upcoming << " array elements of at least " << min_element_size << " bytes each exceeds " << remaining_.size() << " remaining bytes");
 
     tags_remaining_ += upcoming;

@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -307,8 +308,7 @@ namespace wire_read
     if (max_element_count < count)
       throw_exception(wire::error::schema::array_max_element, "", nullptr);
 
-    // also checked by derived formats when count is known
-    if (min_element_size && (source.remaining().size() / min_element_size) < count)
+    if ((source.remaining().size() / std::max(min_element_size, std::size_t(1))) < count)
       throw_exception(wire::error::schema::array_min_size, "", nullptr);
 
     dest.clear();
