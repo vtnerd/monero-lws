@@ -638,7 +638,7 @@ namespace lws
           MINFO("Thread " << thread_n << " processed " << blockchain.size() << " blocks(s) @ height " << fetched->start_height << " against " << users.size() << " account(s)");
 
           scan_transaction.disable_subaddresses(); // cleanup reader before next write
-          if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_mut_span(users), epee::to_span(new_pow)))
+          if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_mut_span(users), epee::to_span(new_pow), opts.regtest))
             return false;
 
           // TODO         
@@ -992,7 +992,8 @@ namespace lws
           queues,
           std::move(active),
           self.webhooks_.ssl_context(),
-          opts.balance_new_addresses
+          opts.balance_new_addresses,
+          opts.regtest
         );
 
         rpc::scanner::server::start_user_checking(server);
@@ -1229,7 +1230,7 @@ namespace lws
     }
   } // anonymous
 
-  bool user_data::store(boost::asio::io_context& io, db::storage& disk, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow)
+  bool user_data::store(boost::asio::io_context& io, db::storage& disk, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow, bool regtest)
   {
     if (users.empty())
       return true;
@@ -1237,7 +1238,7 @@ namespace lws
     LWS_VERIFY(std::is_sorted(users.begin(), users.end(), by_height{}));
 
     const db::block_id base_height = users[0].scan_height();
-    auto updated = disk.update(base_height, chain, epee::to_span(users), pow);
+    auto updated = disk.update(base_height, chain, epee::to_span(users), pow, regtest);
     if (!updated)
     {
       if (updated == lws::error::blockchain_reorg)
@@ -1265,9 +1266,9 @@ namespace lws
     return true;
   }
 
-  bool user_data::operator()(boost::asio::io_context& io, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow)
+  bool user_data::operator()(boost::asio::io_context& io, rpc::client& client, net::http::client& webhook, const epee::span<const crypto::hash> chain, const epee::span<lws::account> users, const epee::span<const db::pow_sync> pow, bool regtest)
   {
-    return store(io, disk_, client, webhook, chain, users, pow);
+    return store(io, disk_, client, webhook, chain, users, pow, regtest);
   } 
 
   expect<rpc::client> scanner::sync(rpc::client client, const bool untrusted_daemon, const bool regtest)
