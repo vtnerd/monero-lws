@@ -16,9 +16,9 @@ jobs:
       run: docker build --no-cache --tag vtnerd/monero-lws:latest .
     - name: Add additional tags
       run: >
-        docker image tag vtnerd/monero-lws:latest vtnerd/monero-lws:1.0
+        docker image tag vtnerd/monero-lws:latest vtnerd/monero-lws:1.0 &&
         docker image tag vtnerd/monero-lws:latest vtnerd/monero-lws:1 &&
-        docker image tag vtnerd/monero-lws:latest ghcr.io/vtnerd/monero-lws:latest
+        docker image tag vtnerd/monero-lws:latest ghcr.io/vtnerd/monero-lws:latest &&
         docker image tag vtnerd/monero-lws:latest ghcr.io/vtnerd/monero-lws:1.0 &&
         docker image tag vtnerd/monero-lws:latest ghcr.io/vtnerd/monero-lws:1
 
