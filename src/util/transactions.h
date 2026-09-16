@@ -29,13 +29,12 @@
 #include <cstdint>
 #include <utility>
 
-#include "common/pod-class.h"
 #include "ringct/rctTypes.h"
 
 namespace crypto
 {
-  POD_CLASS hash8;
-  POD_CLASS key_derivation;
+  struct hash8;
+  struct key_derivation;
 }
 
 namespace lws
