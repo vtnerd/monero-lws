@@ -35,10 +35,9 @@ namespace lws_test
   constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
   constexpr const char pub_rendevous[] = "inproc://fake_sub";
   void rpc_pub_thread(void* ctx, const std::vector<epee::byte_slice>& reply, const std::vector<epee::byte_slice>& pubs, std::atomic<bool>& pub_ready, const std::atomic<bool>& finished);
-  inline void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply)
+  inline void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply, std::atomic<bool>& pub_ready)
   {
-    std::atomic<bool> unused{false};
     std::atomic<bool> finished{true};
-    rpc_pub_thread(ctx, reply, {}, unused, finished);
+    rpc_pub_thread(ctx, reply, {}, pub_ready, finished);
   }
 }
