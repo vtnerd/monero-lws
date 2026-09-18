@@ -185,8 +185,11 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
@@ -292,8 +295,11 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
@@ -449,8 +455,11 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
