@@ -119,7 +119,7 @@ namespace
       ~join() { thread.join(); }
   };
    
-  void scanner_thread(lws::scanner& scanner, void* ctx, const std::vector<epee::byte_slice>& reply)
+  void scanner_thread(lws::scanner& scanner, void* ctx, const std::vector<epee::byte_slice>& reply, std::atomic<bool>& ready)
   {
     struct stop_
     {
@@ -127,7 +127,7 @@ namespace
       ~stop_() { scanner.shutdown(); };
     } stop{scanner};
 
-    lws_test::rpc_thread(ctx, reply);
+    lws_test::rpc_thread(ctx, reply, ready);
   }
 
   void scanner_pub_thread(lws::scanner& scanner, void* ctx, const epee::byte_slice& rpc, const std::vector<epee::byte_slice>& pubs, std::atomic<bool>& pub_ready, const std::atomic<bool>& finished)
@@ -415,8 +415,11 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
       lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
 
-      boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
       EXPECT(!scanner.sync(MONERO_UNWRAP(rpc.connect())));
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, hashes);
     }
@@ -447,9 +450,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
 
       lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, {hashes.data(), 1});
       {
+        std::atomic<bool> ready{false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
         const join on_scope_exit{server_thread};
+        while (!ready)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
         EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
       }
@@ -471,9 +477,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         message.hashes.resize(1);
         messages.push_back(daemon_response(message));
 
+        std::atomic<bool> ready{false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
         const join on_scope_exit{server_thread};
+        while (!ready)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
         EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
         lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
       }
@@ -579,9 +588,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         messages.push_back(daemon_response(hmessage));
 
         {
+          std::atomic<bool> ready{false};
           lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
           const join on_scope_exit{server_thread};
+          while (!ready)
+            boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
           EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
           lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
         }
@@ -598,9 +610,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       messages.push_back(daemon_response(bmessage));
       {
         static constexpr const lws::scanner_options opts{0, 0, lws::MINIMUM_BLOCK_DEPTH, 1, false, false, false, false};
+        std::atomic<bool> ready{false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
         const join on_scope_exit{server_thread};
+        while (!ready)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
         scanner.run(std::move(rpc), pool, 1, {}, opts);
       }
 
@@ -885,9 +900,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         messages.push_back(daemon_response(hmessage));
 
         {
+          std::atomic<bool> ready{false};
           lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
           const join on_scope_exit{server_thread};
+          while (!ready)
+            boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
           EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
           lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
         }
@@ -924,9 +942,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
       messages.push_back(daemon_response(bmessage));
       {
         static constexpr const lws::scanner_options opts{0, 0, lws::MINIMUM_BLOCK_DEPTH, 10, false, false, false, false};
+        std::atomic<bool> ready{false};
         lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+        boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
         const join on_scope_exit{server_thread};
+        while (!ready)
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
         scanner.run(std::move(rpc), pool, 1, {}, opts);
       }
 
@@ -1233,9 +1254,12 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
         messages.push_back(daemon_response(hmessage));
 
         {
+          std::atomic<bool> ready{false};
           lws::scanner scanner{db.clone(), epee::net_utils::ssl_verification_t::none};
-          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages));
+          boost::thread server_thread(&scanner_thread, std::ref(scanner), rpc.zmq_context(), std::cref(messages), std::ref(ready));
           const join on_scope_exit{server_thread};
+          while (!ready)
+            boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
           EXPECT(scanner.sync(MONERO_UNWRAP(rpc.connect())));
           lws_test::test_chain(lest_env, MONERO_UNWRAP(db.start_read()), last_block.id, epee::to_span(hashes));
         }
