@@ -27,6 +27,7 @@
 
 #include "ownership_test.h"
 
+#include <boost/numeric/conversion/cast.hpp>
 #include <boost/optional/optional.hpp>
 #include <boost/range/combine.hpp>
 
