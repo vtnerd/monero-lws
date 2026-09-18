@@ -28,6 +28,7 @@
 
 #include <boost/endian/buffers.hpp>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "crypto/hash.h" // monero/src
