@@ -31,5 +31,5 @@
 namespace lws_test
 {
   constexpr const char rpc_rendevous[] = "inproc://fake_daemon";
-  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply);
+  void rpc_thread(void* ctx, const std::vector<epee::byte_slice>& reply, std::atomic<bool>& ready);
 }

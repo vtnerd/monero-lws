@@ -20,20 +20,20 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-22.04, macos-26, macos-15, macos-14]
+        os: [ubuntu-26.04, ubuntu-24.04, ubuntu-22.04, macos-26, macos-15, macos-14]
         rmq: [WITH_RMQ=ON, WITH_RMQ=OFF]
     steps:
     - name: set apt conf (Debian based Linux)
-      if: matrix.os == 'ubuntu-24.04' ||  matrix.os == 'ubuntu-22.04'
+      if: matrix.os == 'ubuntu-26.04' || matrix.os == 'ubuntu-24.04' ||  matrix.os == 'ubuntu-22.04'
       run: ${{env.APT_SET_CONF}}
     - name: update apt (Debian based Linux)
-      if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
+      if: matrix.os == 'ubuntu-26.04' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
       run: sudo apt update
     - name: Install dependencies (Debian based Linux)
-      if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
+      if: matrix.os == 'ubuntu-26.04' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04'
       run: ${{env.APT_INSTALL_LINUX}}
     - name: Install RabbitMQ iff WITH_RMQ (Debian based Linux)
-      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04')
+      if: matrix.rmq == 'WITH_RMQ=ON' && (matrix.os == 'ubuntu-26.04' || matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-22.04')
       run: sudo apt -y install librabbitmq-dev
 
     - name: Install dependencies (MacOS)
