@@ -85,10 +85,10 @@ namespace lws
 
     /*! Store updated accounts locally (`disk`), and send ZMQ/RMQ/webhook
       events. `users` must be sorted by height (lowest first). */
-    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow);
+    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
 
     //! `users` must be sorted by height (lowest first)
-    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow);
+    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
   };
 
   struct scanner_sync
@@ -125,7 +125,7 @@ namespace lws
     ~scanner();
 
     //! Callback for storing user account (typically local lmdb, but perhaps remote rpc)
-    using store_func = std::function<bool(boost::asio::io_context&, rpc::client&, net::http::client&, epee::span<const crypto::hash>, epee::span<lws::account>, epee::span<const db::pow_sync>)>;
+    using store_func = std::function<bool(boost::asio::io_context&, rpc::client&, net::http::client&, epee::span<const crypto::hash>, epee::span<lws::account>, epee::span<const db::pow_sync>, bool)>;
 
     /*! Run _just_ the inner scanner loop while `self.is_running() == true`.
      *
