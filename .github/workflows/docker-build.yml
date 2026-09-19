@@ -2,7 +2,6 @@ name: Build+Push Daemon/Admin Docker Image
 
 on:
   push:
-    branches: [ "release-v1.0_0.18" ]
     paths-ignore: [ "docs/**", "mkdocs.yml" ]
     tags: ["*"]
 
