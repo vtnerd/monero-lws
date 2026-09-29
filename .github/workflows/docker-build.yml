@@ -12,16 +12,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
-    - name: Build Docker image
-      run: docker build --no-cache --tag vtnerd/monero-lws:master .
-    - name: Add additional tags
-      run: docker image tag vtnerd/monero-lws:master ghcr.io/vtnerd/monero-lws:master
-
-    - name: Add release tags (if release)
-      if: ${{startsWith(github.ref, 'refs/tags/')}}
-      run: >
-        docker image tag vtnerd/monero-lws:1.0 vtnerd/monero-lws:${{ github.ref_name }} &&
-        docker image tag vtnerd/monero-lws:1.0 ghcr.io/vtnerd/monero-lws:${{ github.ref_name }}
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4
@@ -29,13 +19,18 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Push to GitHub Container Registry
-      run: docker push -a ghcr.io/vtnerd/monero-lws
 
     - name: Login to Docker.io
       uses: docker/login-action@v4
       with:
         username: ${{ github.actor }}
         password: ${{ secrets.DOCKER_VTNERD_TOKEN }}
-    - name: Push to Docker.io
-      run: docker push -a vtnerd/monero-lws
+
+    - name: Build and push Docker image
+      run: >
+        docker buildx create --use &&
+        docker buildx build --no-cache --push
+        --platform linux/amd64,linux/arm64
+        --tag vtnerd/monero-lws:${{ github.ref_name }}
+        --tag ghcr.io/vtnerd/monero-lws:${{ github.ref_name }}
+        .
