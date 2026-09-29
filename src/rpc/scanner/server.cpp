@@ -57,6 +57,9 @@ namespace lws { namespace rpc { namespace scanner
     //! Threshold for resetting/replacing state instead of pushing
     constexpr const std::size_t replace_threshold = 10000;
 
+    //! Max incoming message size before valid authentication
+    constexpr const std::size_t max_unauthenticated = 1 * 1024 * 1024;
+
     //! \brief Handler for server to initialize new scanner
     struct initialize_handler
     {
@@ -90,6 +93,11 @@ namespace lws { namespace rpc { namespace scanner
     {
       if (!parent_)
         MONERO_THROW(common_error::kInvalidArgument, "nullptr parent");
+    }
+
+    bool accept(const std::uint32_t length) const noexcept
+    {
+      return authenticated_ || length <= max_unauthenticated;
     }
 
     //! \return Handlers for commands from client
