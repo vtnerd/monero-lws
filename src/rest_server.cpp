@@ -1494,7 +1494,10 @@ namespace lws
           std::get<0>(elem) = std::move(msg);
           std::get<1>(elem) = std::move(resume);
           if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
+          {
+            active->resumers.pop_back();
             return {lws::error::bad_client_tx};
+          }
           return success();
         }
 
