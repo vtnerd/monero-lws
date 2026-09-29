@@ -393,7 +393,7 @@ namespace lws { namespace rpc { namespace scanner
               std::make_move_iterator(new_accounts.end() - user_count),
               std::make_move_iterator(new_accounts.end())
             };
-            new_accounts.erase(new_accounts.end() - user_count);
+            new_accounts.erase(new_accounts.end() - user_count, new_accounts.end());
             write_command(remotes[j], push_accounts{std::move(next)});
             self_->next_thread_ += remotes[j]->threads_;
           }
