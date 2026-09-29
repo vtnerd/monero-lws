@@ -21,6 +21,12 @@ starts. The commands `--rest-ssl-key` and `--rest-ssl-certificate` allow for
 explicit server keys to be used, and they are applied to _every_ `https://`
 REST argument (both wallet API and admin API).
 
+## CORS
+
+By default, a browser blocks the REST API for web pages from a different origin. The option `--access-control-origin` allows an origin, for example `--access-control-origin https://wallet.example`. Use the option one time for each origin, or use `*` to allow all origins. The option applies to the wallet API and the admin API.
+
+When the `Origin` of a request is in the list, the response contains `Access-Control-Allow-Origin` with that origin, and the daemon answers preflight `OPTIONS` requests. Without the option, the daemon does not send CORS headers and rejects `OPTIONS` with `405`.
+
 ## Subaddresses
 
 Subaddresses are disabled by default in the lws daemon - all relevant endpoints
