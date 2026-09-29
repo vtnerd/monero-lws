@@ -233,7 +233,8 @@ namespace lws { namespace rpc { namespace scanner
         if (std::numeric_limits<std::size_t>::max() - total_threads < conn->threads_)
           MONERO_THROW(error::configuration, "Exceeded max threads (size_t) across all systems");
         total_threads += conn->threads_;
-        remotes.push_back(std::move(conn));
+        if (conn->threads_)
+          remotes.push_back(std::move(conn));
       }
 
       if (!total_threads)
