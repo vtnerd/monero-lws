@@ -3403,7 +3403,7 @@ namespace db
         return 0;
 
       expect<std::vector<subaddress_dict>> upserted{error::max_subaddresses};
-      if (major / minor <= std::numeric_limits<decltype(major)>::max())
+      if (major <= std::numeric_limits<decltype(major)>::max() / minor)
       {
         if (major * minor <= max_subaddresses)
         { 
