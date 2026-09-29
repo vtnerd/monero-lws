@@ -1524,7 +1524,7 @@ namespace lws
               }
               else
               {
-                if (self_->parent && self_->parent->mempool)
+                if (value && self_->parent && self_->parent->mempool)
                   self_->parent->mempool->add_txs({std::addressof(std::get<2>(self_->resumers.front())), 1});
 
                 MDEBUG("Completed ZMQ request in /submit_raw_tx");
