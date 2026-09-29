@@ -82,8 +82,8 @@ namespace lws { namespace rpc { namespace scanner
 
     \tparam T concept requirements:
       * Must be derived from `lws::rpc::scanner::connection`.
-      * Must have a `bool accept(size_t)` function that returns true if the
-        upcoming message length is valid.
+      * Must have a `header::length_type::value_type next_size()` function that
+        returns the payload size of the next message, or `0` on error.
       * Must have `cleanup()` function that invokes `base_cleanup()`, and
         does any other necessary work given that the socket connection is being
         terminated.
@@ -119,7 +119,7 @@ namespace lws { namespace rpc { namespace scanner
       if (self_->cleanup_)
         return; // callback queued before cancellation
 
-      std::size_t next_length = 0;
+      header::length_type::value_type next_length = 0;
       BOOST_ASIO_CORO_REENTER(*this)
       {
         for (;;) // multiple commands
@@ -130,8 +130,8 @@ namespace lws { namespace rpc { namespace scanner
           );
 
           std::memcpy(std::addressof(self_->next_), self_->read_buf_.data(), sizeof(self_->next_));
-          next_length = self_->next_.length.value();
-          if (!self_->accept(next_length))
+          next_length = self_->next_size();
+          if (!next_length)
           {
             self_->cleanup();
             return;

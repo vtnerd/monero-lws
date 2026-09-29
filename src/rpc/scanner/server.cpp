@@ -95,9 +95,12 @@ namespace lws { namespace rpc { namespace scanner
         MONERO_THROW(common_error::kInvalidArgument, "nullptr parent");
     }
 
-    bool accept(const std::uint32_t length) const noexcept
+    header::length_type::value_type next_size() const noexcept
     {
-      return authenticated_ || length <= max_unauthenticated;
+      const auto length = next_.length.value();
+      if (authenticated_ || (next_.id == initialize_handler::input::id() && length <= max_unauthenticated))
+        return length;
+      return 0;
     }
 
     //! \return Handlers for commands from client
