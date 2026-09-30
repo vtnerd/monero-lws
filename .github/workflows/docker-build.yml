@@ -10,8 +10,12 @@ jobs:
   build_and_push:
     strategy:
       matrix:
-        platform: [ubuntu-latest, ubuntu-26.04-arm]
-    runs-on: ${{matrix.platform}}
+        include:
+          - platform: ubuntu-latest
+            arch: amd64
+          - platform: ubuntu-26.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.platform }}
 
     steps:
     - uses: actions/checkout@v6
@@ -32,6 +36,40 @@ jobs:
     - name: Build and push Docker image
       run: >
         docker build --no-cache --push
-        --tag vtnerd/monero-lws:${{ github.ref_name }}
-        --tag ghcr.io/vtnerd/monero-lws:${{ github.ref_name }}
+        --tag vtnerd/monero-lws:${{ matrix.platform }}-${{ github.sha }}
+        --tag ghcr.io/vtnerd/monero-lws:${{ matrix.platform }}-${{ github.sha }}
+
+  manifest:
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    steps:
+     - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Login to Docker.io
+      uses: docker/login-action@v4
+      with:
+        username: ${{ github.actor }}
+        password: ${{ secrets.DOCKER_VTNERD_TOKEN }}
+    - name: Docker Manifest Create (docker.io)
+      run: >
+        docker manifest create
+          vtnerd/monero-lws:${{ github.ref }}
+          vtnerd/monero-lws:amd64-${{ github.sha }}
+          vtnerd/monero-lws:arm64-${{ github.sha }}
+    - name: Docker Manifest Push (docker.io)
+      run: docker manifest push vtnerd/monero-lws:${{ github.ref }}
+
+    - name: Docker Manifest Create (ghcr.io)
+      run: >
+        docker manifest create
+          ghcr.io/vtnerd/monero-lws:${{ github.ref }}
+          ghcr.io/vtnerd/monero-lws:amd64-${{ github.sha }}
+          ghcr.io/vtnerd/monero-lws:arm64-${{ github.sha }}
+    - name: Docker Manifest Push (ghcr.io)
+      run: docker manifest push ghcr.io/vtnerd/monero-lws:${{ github.ref }}
         .
