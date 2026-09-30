@@ -36,8 +36,9 @@ jobs:
     - name: Build and push Docker image
       run: >
         docker build --no-cache --push
-        --tag vtnerd/monero-lws:${{ matrix.platform }}-${{ github.sha }}
-        --tag ghcr.io/vtnerd/monero-lws:${{ matrix.platform }}-${{ github.sha }}
+        --tag vtnerd/monero-lws:${{ matrix.arch }}-${{ github.sha }}
+        --tag ghcr.io/vtnerd/monero-lws:${{ matrix.arch }}-${{ github.sha }}
+        .
 
   manifest:
     needs: build_and_push
@@ -72,4 +73,3 @@ jobs:
           ghcr.io/vtnerd/monero-lws:arm64-${{ github.sha }}
     - name: Docker Manifest Push (ghcr.io)
       run: docker manifest push ghcr.io/vtnerd/monero-lws:${{ github.ref }}
-        .
