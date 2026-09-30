@@ -2390,9 +2390,9 @@ namespace db
               }
               else
                 elem = {major_index(major), index_ranges{{index_range{minor_index(0), minor_index(this_minor)}}}};
-
-              err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_NEXT_DUP);
             }
+
+            err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_NEXT_DUP);
           }
         }
       }
@@ -3403,7 +3403,7 @@ namespace db
         return 0;
 
       expect<std::vector<subaddress_dict>> upserted{error::max_subaddresses};
-      if (major / minor <= std::numeric_limits<decltype(major)>::max())
+      if (major <= std::numeric_limits<decltype(major)>::max() / minor)
       {
         if (major * minor <= max_subaddresses)
         { 

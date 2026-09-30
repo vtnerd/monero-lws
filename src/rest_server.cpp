@@ -1494,7 +1494,10 @@ namespace lws
           std::get<0>(elem) = std::move(msg);
           std::get<1>(elem) = std::move(resume);
           if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
+          {
+            active->resumers.pop_back();
             return {lws::error::bad_client_tx};
+          }
           return success();
         }
 
@@ -1524,7 +1527,7 @@ namespace lws
               }
               else
               {
-                if (self_->parent && self_->parent->mempool)
+                if (value && self_->parent && self_->parent->mempool)
                   self_->parent->mempool->add_txs({std::addressof(std::get<2>(self_->resumers.front())), 1});
 
                 MDEBUG("Completed ZMQ request in /submit_raw_tx");
