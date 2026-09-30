@@ -8,7 +8,9 @@ on:
 
 jobs:
   build_and_push:
-    runs-on: ubuntu-latest
+    matrix:
+      platform: [ubuntu-latest, ubuntu-26.04-arm]
+    runs-on: ${{matrix.platform}}
 
     steps:
     - uses: actions/checkout@v6
@@ -28,9 +30,7 @@ jobs:
 
     - name: Build and push Docker image
       run: >
-        docker buildx create --use &&
-        docker buildx build --no-cache --push
-        --platform linux/amd64,linux/arm64
+        docker build build --no-cache --push
         --tag vtnerd/monero-lws:${{ github.ref_name }}
         --tag ghcr.io/vtnerd/monero-lws:${{ github.ref_name }}
         .
