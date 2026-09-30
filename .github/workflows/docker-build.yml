@@ -59,17 +59,17 @@ jobs:
     - name: Docker Manifest Create (docker.io)
       run: >
         docker manifest create
-          vtnerd/monero-lws:${{ github.ref }}
-          vtnerd/monero-lws:amd64-${{ github.sha }}
-          vtnerd/monero-lws:arm64-${{ github.sha }}
+        vtnerd/monero-lws:${{ github.ref }}
+        vtnerd/monero-lws:amd64-${{ github.sha }}
+        vtnerd/monero-lws:arm64-${{ github.sha }}
     - name: Docker Manifest Push (docker.io)
       run: docker manifest push vtnerd/monero-lws:${{ github.ref }}
 
     - name: Docker Manifest Create (ghcr.io)
       run: >
         docker manifest create
-          ghcr.io/vtnerd/monero-lws:${{ github.ref }}
-          ghcr.io/vtnerd/monero-lws:amd64-${{ github.sha }}
-          ghcr.io/vtnerd/monero-lws:arm64-${{ github.sha }}
+        ghcr.io/vtnerd/monero-lws:${{ github.ref }}
+        ghcr.io/vtnerd/monero-lws:amd64-${{ github.sha }}
+        ghcr.io/vtnerd/monero-lws:arm64-${{ github.sha }}
     - name: Docker Manifest Push (ghcr.io)
       run: docker manifest push ghcr.io/vtnerd/monero-lws:${{ github.ref }}
