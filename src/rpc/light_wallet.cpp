@@ -742,11 +742,12 @@ namespace lws
           }
           else
           {
-            if (row.spends.empty() || from_future) break;
-            auto spend = row.spends.front();
             tx.info.link.tx_hash = row.hash;
             tx.info.link.height = db::block_id::txpool;
             tx.info.spend_meta.amount = tx_total;
+
+            if(row.spends.empty() || from_future) continue;
+            const auto& spend = row.spends.front();
             tx.info.spend_meta.mixin_count = spend.mixin_count;
             tx.info.timestamp = spend.timestamp;
             tx.info.unlock_time = spend.unlock_time;
