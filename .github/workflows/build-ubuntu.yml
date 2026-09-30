@@ -21,7 +21,33 @@ env:
   RUN: 'ctest --test-dir "$GITHUB_WORKSPACE/lws/build" --output-on-failure'
 
 jobs:
+  # Uses submoduled monero
   build-beginner:
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04-arm, ubuntu-24.04-arm, ubuntu-22.04-arm]
+    steps:
+      - name: Install Dependencies
+        run: |
+          ${{env.APT_SET_CONF}}
+          sudo apt update
+          sudo ${{env.APT_INSTALL_LINUX}}
+          sudo apt -y install cargo
+      - name: Checkout LWS Source
+        uses: actions/checkout@v6
+        with:
+          path: ${{github.workspace}}/lws
+          submodules: recursive
+      - name: Configure LWS
+        run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -S ${{github.workspace}}/lws
+      - name: Build LWS
+        run: ${{env.BUILD}}
+      - name: Run Tests
+        run: ${{env.RUN}}
+  # Uses external monero source, but uses _deps for monero build
+  build-intermediate:
     runs-on: ${{matrix.os}}
     strategy:
       fail-fast: false
@@ -48,11 +74,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: ${{github.workspace}}/lws
-          submodules: recursive
       - name: Configure LWS
         run: cmake ${{env.CONFIGURE_BASIC}}
       - name: Build LWS
         run: ${{env.BUILD}}
+  # Test various linux flavors that are non-native to GHA
   build-distro:
     runs-on: ubuntu-latest
     container: ${{matrix.distro}}
@@ -108,6 +134,7 @@ jobs:
         run: ${{env.BUILD}}    
       - name: Run Tests
         run: ${{env.RUN}}
+  # Tests building external source AND external monero deps build
   build-advanced:
     runs-on: ${{matrix.os}}
     strategy:
