@@ -35,7 +35,7 @@ jobs:
 
     - name: Build and push Docker image
       run: >
-        docker build --no-cache --push
+        docker build --no-cache --push --provenance=false
         --tag vtnerd/monero-lws:${{ matrix.arch }}-${{ github.sha }}
         --tag ghcr.io/vtnerd/monero-lws:${{ matrix.arch }}-${{ github.sha }}
         .
