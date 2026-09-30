@@ -66,6 +66,9 @@ namespace lws { namespace rpc { namespace scanner
     client& operator=(const client&) = delete;
     client& operator=(client&&) = delete;
 
+    //! \return accept all message sizes
+    header::length_type::value_type next_size() const noexcept;
+
     //! \return Handlers for client commands
     static const std::array<command, 2>& commands() noexcept;
 

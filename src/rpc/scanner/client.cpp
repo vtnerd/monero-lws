@@ -173,6 +173,11 @@ namespace lws { namespace rpc { namespace scanner
   client::~client()
   {}
 
+  header::length_type::value_type client::next_size() const noexcept
+  {
+    return next_.length.value();
+  }
+
   //! \return Handlers for commands from server
   const std::array<client::command, 2>& client::commands() noexcept
   {

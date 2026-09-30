@@ -57,6 +57,9 @@ namespace lws { namespace rpc { namespace scanner
     //! Threshold for resetting/replacing state instead of pushing
     constexpr const std::size_t replace_threshold = 10000;
 
+    //! Max incoming message size before valid authentication
+    constexpr const std::size_t max_unauthenticated = 1 * 1024 * 1024;
+
     //! \brief Handler for server to initialize new scanner
     struct initialize_handler
     {
@@ -90,6 +93,14 @@ namespace lws { namespace rpc { namespace scanner
     {
       if (!parent_)
         MONERO_THROW(common_error::kInvalidArgument, "nullptr parent");
+    }
+
+    header::length_type::value_type next_size() const noexcept
+    {
+      const auto length = next_.length.value();
+      if (authenticated_ || (next_.id == initialize_handler::input::id() && length <= max_unauthenticated))
+        return length;
+      return 0;
     }
 
     //! \return Handlers for commands from client
@@ -233,7 +244,8 @@ namespace lws { namespace rpc { namespace scanner
         if (std::numeric_limits<std::size_t>::max() - total_threads < conn->threads_)
           MONERO_THROW(error::configuration, "Exceeded max threads (size_t) across all systems");
         total_threads += conn->threads_;
-        remotes.push_back(std::move(conn));
+        if (conn->threads_)
+          remotes.push_back(std::move(conn));
       }
 
       if (!total_threads)
@@ -381,7 +393,7 @@ namespace lws { namespace rpc { namespace scanner
               std::make_move_iterator(new_accounts.end() - user_count),
               std::make_move_iterator(new_accounts.end())
             };
-            new_accounts.erase(new_accounts.end() - user_count);
+            new_accounts.erase(new_accounts.end() - user_count, new_accounts.end());
             write_command(remotes[j], push_accounts{std::move(next)});
             self_->next_thread_ += remotes[j]->threads_;
           }
