@@ -8,8 +8,9 @@ on:
 
 jobs:
   build_and_push:
-    matrix:
-      platform: [ubuntu-latest, ubuntu-26.04-arm]
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, ubuntu-26.04-arm]
     runs-on: ${{matrix.platform}}
 
     steps:
