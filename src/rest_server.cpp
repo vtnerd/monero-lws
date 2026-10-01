@@ -100,6 +100,7 @@ namespace lws
 {
   struct runtime_options
   {
+    const std::vector<std::string> access_controls;
     const std::chrono::seconds feed_timeout;
     const std::uint32_t max_subaddresses;
     const epee::net_utils::ssl_verification_t webhook_verify;
@@ -108,7 +109,8 @@ namespace lws
     const bool auto_accept_import;
 
     explicit runtime_options(const rest_server::configuration& config)
-      : feed_timeout(config.feed_timeout),
+      : access_controls(config.access_controls),
+        feed_timeout(config.feed_timeout),
         max_subaddresses(config.max_subaddresses),
         webhook_verify(config.webhook_verify),
         disable_admin_auth(config.disable_admin_auth),
@@ -1966,6 +1968,31 @@ namespace lws
       MDEBUG("Destroying connection " << this);
     }
 
+    void set_cors()
+    {
+      const std::vector<std::string>& origins = data_.global->options.access_controls;
+      if (origins.empty())
+        return;
+
+      // The response echoes the request Origin. Caches must not share it between origins.
+      response_.set(boost::beast::http::field::vary, "Origin");
+
+      const auto& request = parser_->get();
+      const auto origin = request[boost::beast::http::field::origin];
+      if (origin.empty())
+        return;
+      if (std::find(origins.begin(), origins.end(), "*") == origins.end() &&
+          std::find(origins.begin(), origins.end(), origin) == origins.end())
+        return;
+
+      response_.set(boost::beast::http::field::access_control_allow_origin, origin);
+      if (request.method() == boost::beast::http::verb::options)
+      {
+        response_.set(boost::beast::http::field::access_control_allow_methods, "GET, POST, OPTIONS");
+        response_.set(boost::beast::http::field::access_control_allow_headers, "Content-Type");
+      }
+    }
+
     template<typename F>
     void bad_request(const boost::beast::http::status status, F&& resume)
     {
@@ -1974,6 +2001,7 @@ namespace lws
       assert(strand_.running_in_this_thread());
       response_ = {status, parser_->get().version()};
       response_.set(boost::beast::http::field::server, BOOST_BEAST_VERSION_STRING);
+      set_cors();
       response_.keep_alive(keep_alive_);
       response_.prepare_payload();
       resume();
@@ -2008,6 +2036,7 @@ namespace lws
       response_ = {boost::beast::http::status::ok, parser_->get().version(), std::move(body)};
       response_.set(boost::beast::http::field::server, BOOST_BEAST_VERSION_STRING);
       response_.set(boost::beast::http::field::content_type, "application/json");
+      set_cors();
       response_.keep_alive(keep_alive_);
       response_.prepare_payload();
       resume(); // runs in strand
@@ -2117,6 +2146,8 @@ namespace lws
       }
 
       const boost::beast::http::verb verb = self_->parser_->get().method();
+      if (verb == boost::beast::http::verb::options && !self_->data_.global->options.access_controls.empty())
+        return self_->bad_request(boost::beast::http::status::ok, std::forward<F>(resume));
       if (verb != boost::beast::http::verb::post && verb != boost::beast::http::verb::get)
         return self_->bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
 

@@ -93,6 +93,16 @@ namespace
     return {std::string{info->m_body}, info->m_response_code}; 
   }
 
+  const std::string* find_field(const enet::http::http_response_info& info, const boost::string_ref name)
+  {
+    for (const auto& field : info.m_header_info.m_etc_fields)
+    {
+      if (field.first == name)
+        return std::addressof(field.second);
+    }
+    return nullptr;
+  }
+
   std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
   {
     auto result = invoke_base(client, uri, body);
@@ -185,7 +195,7 @@ LWS_CASE("rest_server")
     const auto init_server = [&] (std::shared_ptr<lws::mempool> pool) 
     {
       const lws::rest_server::configuration config{
-        {}, {}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
+        {}, {"http://localhost:5173"}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
       };
       std::vector<std::string> addresses{rest_server};
       server.emplace(
@@ -868,6 +878,43 @@ LWS_CASE("rest_server")
         "],\"all_subaddrs\":["
           "{\"key\":0,\"value\":[[1,20]]}]}"
       );
+    }
+
+    SECTION("CORS")
+    {
+      const enet::http::http_response_info* info = nullptr;
+      const enet::http::fields_list allowed{{"Origin", "http://localhost:5173"}};
+      const enet::http::fields_list preflight{
+        {"Origin", "http://localhost:5173"}, {"Access-Control-Request-Method", "POST"}
+      };
+
+      EXPECT(client.invoke("/get_version", "OPTIONS", "", std::chrono::milliseconds{500}, std::addressof(info), preflight));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(info->m_body.empty());
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Origin") == "http://localhost:5173");
+      EXPECT(find_field(*info, "Access-Control-Allow-Methods") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Methods") == "GET, POST, OPTIONS");
+      EXPECT(find_field(*info, "Access-Control-Allow-Headers") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Headers") == "Content-Type");
+
+      EXPECT(client.invoke("/get_version", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), allowed));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Origin") == "http://localhost:5173");
+      EXPECT(find_field(*info, "Vary") != nullptr);
+      EXPECT(*find_field(*info, "Vary") == "Origin");
+      EXPECT(find_field(*info, "Access-Control-Allow-Methods") == nullptr);
+
+      EXPECT(client.invoke("/not_an_endpoint", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), allowed));
+      EXPECT(info->m_response_code == 404);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+
+      const enet::http::fields_list other{{"Origin", "http://other.example"}};
+      EXPECT(client.invoke("/get_version", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), other));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") == nullptr);
+      EXPECT(find_field(*info, "Vary") != nullptr);
     }
 
     SECTION("feed check")
