@@ -411,6 +411,8 @@ namespace rpc
   {
     submit_raw_tx_response() = delete;
     std::string status;
+    std::string reason;
+    bool not_relayed;
   };
   void write_bytes(wire::json_writer&, submit_raw_tx_response);
 

@@ -705,9 +705,17 @@ paths:
                 type: object
                 properties:
                   status:
-                    description: Typically the response by the monero daemon attempting to relay the transaction.
+                    description: "`OK` when the daemon accepts the transaction. `Failed` when the daemon rejects the transaction."
                     type: string
+                    enum: ["OK", "Failed"]
                     example: "OK"
+                  reason:
+                    description: "The reason from the daemon, for example `double spend and fee too low` when `status` is `Failed`, or `Not relayed`. Not present when the daemon relays the transaction."
+                    type: string
+                    example: "double spend"
+                  not_relayed:
+                    description: "`true` when the daemon accepts the transaction but does not relay it. Not present otherwise."
+                    type: boolean
                 required:
                   - status
         '400':

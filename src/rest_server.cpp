@@ -1509,7 +1509,7 @@ namespace lws
             : boost::asio::coroutine(), self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, expect<copyable_slice> value)
+          void send_response(const boost::system::error_code error, expect<copyable_slice> value, const bool relayed = false)
           {
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
@@ -1527,7 +1527,7 @@ namespace lws
               }
               else
               {
-                if (value && self_->parent && self_->parent->mempool)
+                if (relayed && self_->parent && self_->parent->mempool)
                   self_->parent->mempool->add_txs({std::addressof(std::get<2>(self_->resumers.front())), 1});
 
                 MDEBUG("Completed ZMQ request in /submit_raw_tx");
@@ -1613,12 +1613,14 @@ namespace lws
                   const expect<void> status =
                     rpc::parse_response(daemon_resp, std::move(self.in));
 
-                  if (!status)
+                  if (!status && daemon_resp.status == cryptonote::rpc::Message::STATUS_FAILED)
+                    send_response({}, json_response(async_response{daemon_resp.status, daemon_resp.error_details}));
+                  else if (!status)
                     send_response({}, status.error());
                   else if (!daemon_resp.relayed)
-                    send_response({}, {lws::error::tx_relay_failed});
+                    send_response({}, json_response(async_response{"OK", "Not relayed", true}));
                   else
-                    send_response({}, json_response(async_response{"OK"}));
+                    send_response({}, json_response(async_response{"OK"}), true);
                 }
               }
             }

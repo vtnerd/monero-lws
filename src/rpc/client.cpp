@@ -413,6 +413,9 @@ namespace rpc
       }
 
       MERROR("Server returned RPC error: " << json_error.message << " with code " << json_error.code << " called from " << loc);
+      // Some callers send the daemon status and reason to the REST client
+      parser.status = json_error.error_str;
+      parser.error_details = json_error.message;
     }
     catch (const cryptonote::json::JSON_ERROR& error)
     {

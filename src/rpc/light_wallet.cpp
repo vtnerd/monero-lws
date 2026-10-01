@@ -957,7 +957,11 @@ namespace lws
   }
   void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response self)
   {
-    wire::object(dest, WIRE_FIELD_COPY(status));
+    wire::object(dest,
+      WIRE_FIELD_COPY(status),
+      WIRE_FIELD_DEFAULTED(reason, std::string{}),
+      WIRE_FIELD_DEFAULTED(not_relayed, false)
+    );
   }
 
   void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)
