@@ -192,6 +192,8 @@ else () # NOT MONERO_BUILD_DIR
     set (MONERO_SOURCE_DIR "${monero-lws_SOURCE_DIR}/external/monero")
   endif ()
 
+  # don't support `-march=native` for now
+  set(ARCH "default")
   include(FetchContent)
   FetchContent_Declare(monero SOURCE_DIR "${MONERO_SOURCE_DIR}" EXCLUDE_FROM_ALL)
 
