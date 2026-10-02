@@ -955,10 +955,10 @@ namespace lws
   {
     wire::object(source, WIRE_FIELD(tx));
   }
-  void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response self)
+  void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response& self)
   {
     wire::object(dest,
-      WIRE_FIELD_COPY(status),
+      WIRE_FIELD(status),
       WIRE_FIELD_DEFAULTED(reason, std::string{}),
       WIRE_FIELD_DEFAULTED(not_relayed, false)
     );

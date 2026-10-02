@@ -414,7 +414,7 @@ namespace rpc
     std::string reason;
     bool not_relayed;
   };
-  void write_bytes(wire::json_writer&, submit_raw_tx_response);
+  void write_bytes(wire::json_writer&, const submit_raw_tx_response&);
 
 
   struct upsert_subaddrs_request

@@ -705,21 +705,38 @@ paths:
                 type: object
                 properties:
                   status:
-                    description: "`OK` when the daemon accepts the transaction. `Failed` when the daemon rejects the transaction."
+                    description: Always `OK`.
                     type: string
-                    enum: ["OK", "Failed"]
                     example: "OK"
                   reason:
-                    description: "The reason from the daemon, for example `double spend and fee too low` when `status` is `Failed`, or `Not relayed`. Not present when the daemon relays the transaction."
+                    description: "`Not relayed` when the daemon accepts the transaction but does not relay it. Not present otherwise."
                     type: string
-                    example: "double spend"
+                    example: "Not relayed"
                   not_relayed:
                     description: "`true` when the daemon accepts the transaction but does not relay it. Not present otherwise."
                     type: boolean
                 required:
                   - status
         '400':
-          description: Invalid JSON.
+          description: Invalid JSON, or the transaction cannot be parsed.
+        '422':
+          description: The daemon rejects the transaction.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    description: Always `Failed`.
+                    type: string
+                    example: "Failed"
+                  reason:
+                    description: The reason from the daemon. The daemon joins more than one reason with ` and `.
+                    type: string
+                    example: "double spend and fee too low"
+                required:
+                  - status
+                  - reason
         '405':
           description: Not `POST` method.
         '500':

@@ -897,12 +897,17 @@ LWS_CASE("rest_server")
 
       auto full_account = get_full_account();
 
+      const auto bad_hex = invoke_base(client, "/submit_raw_tx", "{\"tx\":\"zz\"}");
+      EXPECT(bad_hex.second == 400);
+      EXPECT(bad_hex.first.empty());
+
       response = invoke(client, "/submit_raw_tx", message);
       EXPECT(response == "{\"status\":\"OK\",\"reason\":\"Not relayed\",\"not_relayed\":true}");
       EXPECT(pool->scan_account(full_account).empty());
 
-      response = invoke(client, "/submit_raw_tx", message);
-      EXPECT(response == "{\"status\":\"Failed\",\"reason\":\"double spend and fee too low\"}");
+      const auto rejected = invoke_base(client, "/submit_raw_tx", message);
+      EXPECT(rejected.second == 422);
+      EXPECT(rejected.first == "{\"status\":\"Failed\",\"reason\":\"double spend and fee too low\"}");
       EXPECT(pool->scan_account(full_account).empty());
 
       response = invoke(client, "/submit_raw_tx", message);

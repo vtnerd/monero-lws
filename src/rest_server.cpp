@@ -197,21 +197,25 @@ namespace lws
     struct copyable_slice
     {
       epee::byte_slice value;
+      boost::beast::http::status status;
 
-      copyable_slice(epee::byte_slice value) noexcept
-        : value(std::move(value))
+      copyable_slice(epee::byte_slice value, const boost::beast::http::status status = boost::beast::http::status::ok) noexcept
+        : value(std::move(value)), status(status)
       {}
 
       copyable_slice(copyable_slice&&) = default;
       copyable_slice(const copyable_slice& rhs) noexcept
-        : value(rhs.value.clone())
+        : value(rhs.value.clone()), status(rhs.status)
       {}
 
       copyable_slice& operator=(copyable_slice&&) = default;
       copyable_slice& operator=(const copyable_slice& rhs) noexcept
       {
         if (this != std::addressof(rhs))
+        {
           value = rhs.value.clone();
+          status = rhs.status;
+        }
         return *this;
       }
     };
@@ -1614,7 +1618,14 @@ namespace lws
                     rpc::parse_response(daemon_resp, std::move(self.in));
 
                   if (!status && daemon_resp.status == cryptonote::rpc::Message::STATUS_FAILED)
-                    send_response({}, json_response(async_response{daemon_resp.status, daemon_resp.error_details}));
+                  {
+                    expect<epee::byte_slice> body =
+                      json_response(async_response{daemon_resp.status, daemon_resp.error_details});
+                    if (body)
+                      send_response({}, copyable_slice{std::move(*body), boost::beast::http::status::unprocessable_entity});
+                    else
+                      send_response({}, body.error());
+                  }
                   else if (!status)
                     send_response({}, status.error());
                   else if (!daemon_resp.relayed)
@@ -1988,7 +1999,7 @@ namespace lws
       MINFO("REST error: " << error.message() << " from " << sock().remote_endpoint(ec) << " / " << this);
 
       assert(strand_.running_in_this_thread());
-      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount)
+      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount || error == lws::error::bad_client_tx)
         return bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
       else if (error == lws::error::bad_verb)
         return bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
@@ -2002,12 +2013,12 @@ namespace lws
     }
 
     template<typename F>
-    void valid_request(epee::byte_slice body, F&& resume)
+    void valid_request(epee::byte_slice body, F&& resume, const boost::beast::http::status status = boost::beast::http::status::ok)
     {
-      MDEBUG("Sending HTTP 200 OK (" << body.size() << " bytes) to " << this);
+      MDEBUG("Sending HTTP " << int(status) << " (" << body.size() << " bytes) to " << this);
 
       assert(strand_.running_in_this_thread());
-      response_ = {boost::beast::http::status::ok, parser_->get().version(), std::move(body)};
+      response_ = {status, parser_->get().version(), std::move(body)};
       response_.set(boost::beast::http::field::server, BOOST_BEAST_VERSION_STRING);
       response_.set(boost::beast::http::field::content_type, "application/json");
       response_.keep_alive(keep_alive_);
@@ -2139,7 +2150,7 @@ namespace lws
               if (!body)
                 self->bad_request(body.error(), std::move(resume));
               else
-                self->valid_request(std::move(body->value), std::move(resume));
+                self->valid_request(std::move(body->value), std::move(resume), body->status);
             });
         };
       }
