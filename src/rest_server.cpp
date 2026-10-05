@@ -194,22 +194,22 @@ namespace lws
       }
     };
 
-    struct copyable_slice
+    struct http_response
     {
       epee::byte_slice value;
       boost::beast::http::status status;
 
-      copyable_slice(epee::byte_slice value, const boost::beast::http::status status = boost::beast::http::status::ok) noexcept
+      http_response(epee::byte_slice value, const boost::beast::http::status status = boost::beast::http::status::ok) noexcept
         : value(std::move(value)), status(status)
       {}
 
-      copyable_slice(copyable_slice&&) = default;
-      copyable_slice(const copyable_slice& rhs) noexcept
+      http_response(http_response&&) = default;
+      http_response(const http_response& rhs) noexcept
         : value(rhs.value.clone()), status(rhs.status)
       {}
 
-      copyable_slice& operator=(copyable_slice&&) = default;
-      copyable_slice& operator=(const copyable_slice& rhs) noexcept
+      http_response& operator=(http_response&&) = default;
+      http_response& operator=(const http_response& rhs) noexcept
       {
         if (this != std::addressof(rhs))
         {
@@ -219,7 +219,7 @@ namespace lws
         return *this;
       }
     };
-    using async_complete = void(expect<copyable_slice>);
+    using async_complete = void(expect<http_response>);
 
     bool is_locked(std::uint64_t unlock_time, db::block_id last, db::block_id tx_height) noexcept
     {
@@ -344,7 +344,7 @@ namespace lws
             : boost::asio::coroutine(), self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, const expect<copyable_slice>& value)
+          void send_response(const boost::system::error_code error, const expect<http_response>& value)
           {
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
@@ -630,7 +630,7 @@ namespace lws
             : self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, expect<copyable_slice> value) const
+          void send_response(const boost::system::error_code error, expect<http_response> value) const
           {
             assert(self_ != nullptr);
 
@@ -1513,7 +1513,7 @@ namespace lws
             : boost::asio::coroutine(), self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, expect<copyable_slice> value, const bool relayed = false)
+          void send_response(const boost::system::error_code error, expect<http_response> value, const bool relayed = false)
           {
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
@@ -1622,7 +1622,7 @@ namespace lws
                     expect<epee::byte_slice> body =
                       json_response(async_response{daemon_resp.status, daemon_resp.error_details});
                     if (body)
-                      send_response({}, copyable_slice{std::move(*body), boost::beast::http::status::unprocessable_entity});
+                      send_response({}, http_response{std::move(*body), boost::beast::http::status::unprocessable_entity});
                     else
                       send_response({}, body.error());
                   }
@@ -2143,7 +2143,7 @@ namespace lws
           a new callable like `wrap` does (which is deprecated, see dispatch
           below). */
         const auto& self = self_;
-        resumer = [self, resume] (expect<copyable_slice> body) mutable
+        resumer = [self, resume] (expect<http_response> body) mutable
         {
             boost::asio::dispatch(self->strand_, [self, resume = std::move(resume), body = std::move(body)] () mutable
             {
