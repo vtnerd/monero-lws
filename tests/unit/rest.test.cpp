@@ -870,6 +870,51 @@ LWS_CASE("rest_server")
       );
     }
 
+    SECTION("submit_raw_tx")
+    {
+      const auto pool = std::make_shared<lws::mempool>();
+
+      EXPECT(client.disconnect());
+      init_server(pool);
+      EXPECT(client.connect(std::chrono::milliseconds{500}));
+
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      const lws_test::transaction tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+      message = "{\"tx\":\"" + epee::to_hex::string(epee::strspan<std::uint8_t>(cryptonote::tx_to_blob(tx.tx))) + "\"}";
+
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"relayed\":false}}"});
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"error\":{\"code\":-1,\"error_str\":\"Failed\",\"message\":\"double spend and fee too low\"}}"});
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"relayed\":true}}"});
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
+      const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+
+      auto full_account = get_full_account();
+
+      const auto bad_hex = invoke_base(client, "/submit_raw_tx", "{\"tx\":\"zz\"}");
+      EXPECT(bad_hex.second == 400);
+      EXPECT(bad_hex.first.empty());
+
+      response = invoke(client, "/submit_raw_tx", message);
+      EXPECT(response == "{\"status\":\"OK\",\"reason\":\"Not relayed\",\"not_relayed\":true}");
+      EXPECT(pool->scan_account(full_account).empty());
+
+      const auto rejected = invoke_base(client, "/submit_raw_tx", message);
+      EXPECT(rejected.second == 422);
+      EXPECT(rejected.first == "{\"status\":\"Failed\",\"reason\":\"double spend and fee too low\"}");
+      EXPECT(pool->scan_account(full_account).empty());
+
+      response = invoke(client, "/submit_raw_tx", message);
+      EXPECT(response == "{\"status\":\"OK\"}");
+      EXPECT(pool->scan_account(full_account).size() == 1);
+    }
+
     SECTION("feed check")
     {
       auto response = invoke_base(client, "/feed", "");
