@@ -46,11 +46,11 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8_3/expat-2.8.3.tar.bz2 && \
-    echo "b4cc2483927d5e90bf8c40b44a6b95b368b42a8a96e25883fce188b48a92b670 expat-2.8.3.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.8.3.tar.bz2 && \
-    rm expat-2.8.3.tar.bz2 && \
-    cd expat-2.8.3 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.bz2 && \
+    echo "775e8a68f81a748a401dc3168318d4a39484eb4f954726f21517c8f42c0ba984 expat-2.9.0.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.9.0.tar.bz2 && \
+    rm expat-2.9.0.tar.bz2 && \
+    cd expat-2.9.0 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
