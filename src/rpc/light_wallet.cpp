@@ -632,7 +632,7 @@ namespace lws
     vec_lmdb_<T> vec_lmdb(const std::vector<T>& src) { return {src.begin(), src.end()}; }
 
     template<typename T, typename U>
-    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, db::account const* const user, mempool const* const pool, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
+    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, db::account const* const user, db::storage_reader* const reader, mempool const* const pool, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
     {
       // merge input and output info into a single set of txes.
 
@@ -746,7 +746,7 @@ namespace lws
         // Add mempool transactions. Order is not important, since
         // mempool txs cannot depend on each other.
         lws::account full_user{*user, std::move(receives), {}};
-        const auto pool_txs = pool->scan_account(full_user);
+        const auto pool_txs = pool->scan_account(full_user, *reader);
         for (const auto& row: pool_txs)
         {
           // mempool update after block could be delayed
@@ -816,7 +816,7 @@ namespace lws
   {
     std::sort(outputs.begin(), outputs.end(), by_tx_link);
     std::sort(spends.begin(), spends.end(), by_tx_link);
-    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), nullptr, nullptr, outputs.size(), true, true).first;
+    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), nullptr, nullptr, nullptr, outputs.size(), true, true).first;
   }
 
   expect<rpc::get_address_txs_response> rpc::get_address_txs_response::load(db::storage_reader& reader, const db::account& acct, mempool const* const pool, const bool all_outputs)
@@ -842,7 +842,7 @@ namespace lws
     resp.lookahead_fail = db::to_uint(acct.lookahead_fail);
     resp.lookahead = acct.lookahead;
 
-    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), std::addressof(acct), pool, outputs->count(), all_outputs, false);
+    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), std::addressof(acct), std::addressof(reader), pool, outputs->count(), all_outputs, false);
     resp.total_received = safe_uint64(out.second);
     resp.transactions = std::move(out.first);
     return resp;
