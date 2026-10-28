@@ -53,6 +53,7 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
+#include "error.h"
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
@@ -1339,6 +1340,27 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
           EXPECT(done);
         }
       }
+    }
+
+    SECTION("lws::rpc::client::raise_account_change")
+    {
+      auto waiting = MONERO_UNWRAP(rpc.connect());
+      EXPECT(waiting.watch_account_changes());
+      auto other = MONERO_UNWRAP(rpc.connect()); // not watching
+      auto notifier = MONERO_UNWRAP(rpc.connect());
+
+      // nothing publishes blocks, so this would wait for the pub/sub timeout
+      EXPECT(notifier.raise_account_change());
+      const auto start = std::chrono::steady_clock::now();
+      EXPECT(waiting.wait_for_block() == lws::error::account_list_change);
+      EXPECT(std::chrono::steady_clock::now() - start < std::chrono::seconds{10});
+
+      // other waits keep going; REQ socket, so queue a request first
+      EXPECT(waiting.send(epee::byte_slice{std::string{"{}"}}, std::chrono::seconds{1}));
+      EXPECT(other.send(epee::byte_slice{std::string{"{}"}}, std::chrono::seconds{1}));
+      EXPECT(notifier.raise_account_change());
+      EXPECT(waiting.get_message(std::chrono::seconds{1}) == lws::error::daemon_timeout);
+      EXPECT(other.get_message(std::chrono::seconds{1}) == lws::error::daemon_timeout);
     }
   } // SETUP
 } // LWS_CASE

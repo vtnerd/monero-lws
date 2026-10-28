@@ -42,6 +42,7 @@ namespace lws
   {
     // 0 is reserved for no error, as per expect<T>
     account_exists = 1,         //!< Tried to create an account that already exists
+    account_list_change,        //!< In process ZMQ PUB that accounts were given to scan threads
     account_max,                //!< Maximum number of accounts have been created
     account_not_found,          //!< Account address is not in database.
     bad_address,                //!< Invalid base58 public address

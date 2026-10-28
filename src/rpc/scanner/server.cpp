@@ -51,6 +51,14 @@ namespace lws { namespace rpc { namespace scanner
 {
   namespace
   {
+    //! Wake local scan threads waiting at the top of the chain
+    void notify_threads(rpc::client& zclient)
+    {
+      const expect<void> notified = zclient.raise_account_change();
+      if (!notified)
+        MERROR("Failed to notify scan threads of new accounts: " << notified.error().message());
+    }
+
     //! Use remote scanning only if users-per-local-thread exceeds this
     constexpr const std::size_t remote_threshold = 100;
 
@@ -309,6 +317,7 @@ namespace lws { namespace rpc { namespace scanner
         return;
       }
 
+      bool notify = false; // local threads were given accounts
       if (self_->balance_new_addresses_ && !self_->local_.empty())
       {
         // New algorithm: Assign new accounts to thread with highest blockheight not above account height
@@ -361,6 +370,7 @@ namespace lws { namespace rpc { namespace scanner
             std::make_move_iterator(new_accounts.end())
           );
           new_accounts.erase(new_accounts.end() - 1);
+          notify = true;
         }
       }
       else
@@ -377,6 +387,7 @@ namespace lws { namespace rpc { namespace scanner
             );
             new_accounts.erase(new_accounts.end() - 1);
             ++self_->next_thread_;
+            notify = true;
           }
           else
           {
@@ -403,6 +414,8 @@ namespace lws { namespace rpc { namespace scanner
       }
       reader->finish_read();
       self_->accounts_cur_ = current_users.give_cursor();
+      if (notify)
+        notify_threads(self_->zclient_);
     }
   };
 
@@ -472,6 +485,8 @@ namespace lws { namespace rpc { namespace scanner
       local->replace_accounts(std::move(next));
       --remaining_threads;
     }
+    if (!local_.empty())
+      notify_threads(zclient_);
 
     // make sure to notify of zero users too!
     for (auto& remote : remotes)
