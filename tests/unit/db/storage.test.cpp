@@ -29,6 +29,8 @@
 #include "storage.test.h"
 
 #include <boost/filesystem/operations.hpp>
+#include <boost/uuid/random_generator.hpp>
+#include <cstring>
 #include "common/util.h"   // monero/src/
 #include "db/string.h"
 #include "error.h"
@@ -190,6 +192,139 @@ LWS_CASE("lws::db::storage")
       }
     };
 
+
+    SECTION("delete_accounts")
+    {
+      const lws::db::account_id id = get_account().id;
+      const lws::db::output_id out_id{500, 30};
+      const auto make_hashes = [] (const crypto::hash& first)
+      {
+        std::vector<crypto::hash> hashes{first};
+        for (unsigned i = 0; i < 5; ++i)
+          hashes.push_back(crypto::rand<crypto::hash>());
+        return hashes;
+      };
+      const auto make_output = [] (const lws::db::block_id height, const lws::db::output_id out_id)
+      {
+        return lws::db::output{
+          lws::db::transaction_link{height, crypto::rand<crypto::hash>()},
+          lws::db::output::spend_meta_{
+            out_id, std::uint64_t(40000), std::uint32_t(16), std::uint32_t(2), crypto::rand<crypto::public_key>()
+          },
+          std::uint64_t(7000),
+          std::uint64_t(4670),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::public_key>(),
+          crypto::rand<rct::key>(),
+          {0, 0, 0, 0, 0, 0, 0},
+          lws::db::pack(lws::db::extra::ringct_output, 0),
+          crypto::rand<lws::db::output::payment_id_>(),
+          std::uint64_t(100),
+          lws::db::address_index{}
+        };
+      };
+
+      // an output, a spend of it (adds a key image), subaddresses, webhooks and a request
+      const std::vector<crypto::hash> hashes = make_hashes(last_block.hash);
+      {
+        lws::account real_account{get_account(), {}, {}};
+        real_account.add_out(make_output(lws::db::block_id(to_uint(last_block.id) + 1), out_id));
+        real_account.add_spend(
+          lws::db::spend{
+            lws::db::transaction_link{lws::db::block_id(to_uint(last_block.id) + 2), crypto::rand<crypto::hash>()},
+            crypto::rand<crypto::key_image>(),
+            out_id,
+            std::uint64_t(7100),
+            std::uint64_t(0),
+            std::uint32_t(15),
+            {0, 0, 0},
+            0,
+            crypto::hash{},
+            lws::db::address_index{}
+          }
+        );
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      std::vector<lws::db::subaddress_dict> subs{};
+      subs.emplace_back(
+        lws::db::major_index(0),
+        lws::db::index_ranges{{lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(10)}}}
+      );
+      EXPECT(db.upsert_subaddresses(id, account_address, view, subs, 100));
+
+      const auto make_hook = [] ()
+      {
+        return lws::db::webhook_value{
+          lws::db::webhook_dupsort{0, boost::uuids::random_generator{}()},
+          lws::db::webhook_data{"http://the_url", "the_token", 1}
+        };
+      };
+      EXPECT(db.add_webhook(lws::db::webhook_type::tx_confirmation, account_address, make_hook()));
+      EXPECT(db.add_webhook(lws::db::webhook_type::tx_spend, account_address, make_hook()));
+      EXPECT(db.add_webhook(lws::db::webhook_type::new_account, boost::none, make_hook()));
+      EXPECT(db.import_request(account_address, last_block.id, {}));
+
+      const lws::db::block_id scan_height = get_account().scan_height;
+      lws::account stale{get_account(), {}, {}}; // as held by a scanner thread
+      {
+        lws::db::storage_reader reader = MONERO_UNWRAP(db.start_read());
+        EXPECT(!MONERO_UNWRAP(reader.get_outputs(id)).make_range().empty());
+        EXPECT(!MONERO_UNWRAP(reader.get_spends(id)).make_range().empty());
+        EXPECT(!MONERO_UNWRAP(reader.get_images(out_id)).make_range().empty());
+        EXPECT(!MONERO_UNWRAP(reader.get_subaddresses(id)).empty());
+        EXPECT(MONERO_UNWRAP(reader.get_webhooks()).size() == 3);
+        EXPECT(reader.get_request(lws::db::request::import_scan, account_address));
+      }
+
+      const auto deleted = db.delete_accounts({std::addressof(account_address), 1});
+      EXPECT(deleted);
+      EXPECT(deleted->size() == 1);
+      EXPECT(bool(deleted->at(0) == account_address));
+      {
+        lws::db::storage_reader reader = MONERO_UNWRAP(db.start_read());
+        EXPECT(reader.get_account(account_address) == lws::error::account_not_found);
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(id)).make_range().empty());
+        EXPECT(MONERO_UNWRAP(reader.get_spends(id)).make_range().empty());
+        EXPECT(MONERO_UNWRAP(reader.get_images(out_id)).make_range().empty());
+        EXPECT(MONERO_UNWRAP(reader.get_subaddresses(id)).empty());
+        EXPECT(MONERO_UNWRAP(reader.accounts_at_height(scan_height)).empty());
+        EXPECT(!reader.get_request(lws::db::request::import_scan, account_address));
+
+        const auto hooks = MONERO_UNWRAP(reader.get_webhooks());
+        EXPECT(hooks.size() == 1); // new-account hook is not tied to the account
+        EXPECT(hooks.at(0).first.type == lws::db::webhook_type::new_account);
+
+        // only the id is kept
+        const lws::db::account reserved = MONERO_UNWRAP(reader.get_account(lws::db::account_status::hidden, id));
+        EXPECT(reserved.flags == lws::db::account_flags::account_deleted);
+        EXPECT(bool(reserved.address == lws::db::account_address{}));
+        const lws::db::view_key no_key{};
+        EXPECT(std::memcmp(std::addressof(reserved.key), std::addressof(no_key), sizeof(no_key)) == 0);
+      }
+      EXPECT(db.delete_accounts({std::addressof(account_address), 1})->empty());
+
+      // a new account does not reuse the id, and the address can be added again
+      lws::db::account_address other{};
+      crypto::secret_key other_view{};
+      crypto::generate_keys(other.spend_public, other_view);
+      crypto::generate_keys(other.view_public, other_view);
+      EXPECT(db.add_account(other, other_view));
+      EXPECT(MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(other)).second.id == lws::db::account_id(2));
+      EXPECT(db.add_account(account_address, view));
+      EXPECT(get_account().id == lws::db::account_id(3));
+
+      // a scanner thread with the old account writes nothing
+      stale.add_out(make_output(lws::db::block_id(to_uint(scan_height) + 1), lws::db::output_id{500, 31}));
+      EXPECT(db.update(scan_height, epee::to_span(make_hashes(hashes.back())), {std::addressof(stale), 1}, {}));
+      {
+        lws::db::storage_reader reader = MONERO_UNWRAP(db.start_read());
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(id)).make_range().empty());
+        EXPECT(MONERO_UNWRAP(reader.get_outputs(lws::db::account_id(3))).make_range().empty());
+      }
+
+      EXPECT(db.rollback(lws::db::block_id(to_uint(last_block.id) + 1)));
+    }
 
     SECTION("Lookahead with outputs")
     {

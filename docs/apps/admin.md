@@ -41,8 +41,8 @@ available to the normal REST API, but is available to the admin REST API.
 Running `monero-lws-admin list_admin` will display all current admin
 accounts, and their current state ("active", "inactive", or "hidden"). If
 an admin account needs to be revoked, use the `modify_account` command
-to put the account into the "inactive" state. Deleting accounts is not
-currently supported.
+to put the account into the "inactive" state, or `delete_accounts` to remove
+it.
 
 Every admin REST request must be a `POST` that contains a JSON object with
 an `auth` field (in default settings) and an optional `params` field:
@@ -469,6 +469,17 @@ will put the listed address into the "inactive" state.
   ```bash
   monero-lws-admin list_accounts | jq -r '.active | .[] | .address'
   ```
+
+**Delete accounts and everything stored for them:**
+  ```bash
+  monero-lws-admin delete_accounts <base58 address> [base58 address]...
+  ```
+This removes the view key, outputs, spends, subaddresses, webhooks and pending
+requests of each account. It cannot be undone. A row with only the account id
+(and no address or key) stays in the `hidden` list of `debug_database`, so the
+id is never given to another account. The address can be registered again,
+and gets a new id. `delete_accounts` is only available in `monero-lws-admin`,
+not in the admin REST API.
 
 **Auto-accept every pending account creation request:**
   ```bash

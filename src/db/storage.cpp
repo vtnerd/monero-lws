@@ -931,6 +931,7 @@ namespace db
     MDB_val key = lmdb::to_val(height);
     MDB_val value{};
     int err = mdb_cursor_get(curs.accounts_bh_cur.get(), &key, &value, MDB_SET_KEY);
+    if (!err)
     {
       std::size_t count = 0;
       MLWS_LMDB_CHECK(mdb_cursor_count(curs.accounts_bh_cur.get(), &count));
@@ -1579,6 +1580,48 @@ namespace db
       return success();
     }
 
+    //! Delete every value stored under `key_`.
+    template<typename K>
+    expect<void> delete_all(MDB_cursor& cur, const K& key_) noexcept
+    {
+      MDB_val key = lmdb::to_val(key_);
+      MDB_val value{};
+      const int err = mdb_cursor_get(&cur, &key, &value, MDB_SET);
+      if (err == MDB_NOTFOUND)
+        return success();
+      if (err)
+        return log_lmdb_error(err, __LINE__, __FILE__);
+      MLWS_LMDB_CHECK(mdb_cursor_del(&cur, MDB_NODUPDATA));
+      return success();
+    }
+
+    //! Delete `user` from `accounts_by_height`, searching every height if it is not at `height`.
+    expect<void> delete_height_entry(MDB_cursor& accounts_bh_cur, const block_id height, const account_id user) noexcept
+    {
+      MDB_val key = lmdb::to_val(height);
+      MDB_val value = lmdb::to_val(user);
+      int err = mdb_cursor_get(&accounts_bh_cur, &key, &value, MDB_GET_BOTH);
+      if (err == MDB_NOTFOUND)
+      {
+        // index out of step with the account row
+        for (err = mdb_cursor_get(&accounts_bh_cur, &key, &value, MDB_FIRST); !err;
+             err = mdb_cursor_get(&accounts_bh_cur, &key, &value, MDB_NEXT))
+        {
+          const expect<account_lookup> lookup = accounts_by_height.get_value<account_lookup>(value);
+          if (!lookup)
+            return lookup.error();
+          if (lookup->id == user)
+            break;
+        }
+      }
+      if (err == MDB_NOTFOUND)
+        return success();
+      if (err)
+        return log_lmdb_error(err, __LINE__, __FILE__);
+      MLWS_LMDB_CHECK(mdb_cursor_del(&accounts_bh_cur, 0));
+      return success();
+    }
+
     expect<void> rollback_accounts(storage_internal::tables_ const& tables, MDB_txn& txn, block_id height)
     {
       cursor::accounts_by_height accounts_bh_cur;
@@ -2060,6 +2103,103 @@ namespace db
       }
 
       return changed;
+    });
+  }
+
+  expect<std::vector<account_address>>
+  storage::delete_accounts(epee::span<const account_address> addresses)
+  {
+    if (addresses.empty())
+      return std::vector<account_address>{};
+
+    MONERO_PRECOND(db != nullptr);
+    return db->try_write([this, addresses] (MDB_txn& txn) -> expect<std::vector<account_address>>
+    {
+      std::vector<account_address> deleted{};
+      deleted.reserve(addresses.size());
+
+      cursor::accounts            accounts_cur;
+      cursor::accounts_by_address accounts_ba_cur;
+      cursor::accounts_by_height  accounts_bh_cur;
+      cursor::outputs             outputs_cur;
+      cursor::spends              spends_cur;
+      cursor::images              images_cur;
+      cursor::requests            requests_cur;
+      cursor::webhooks            webhooks_cur;
+      cursor::events              events_cur;
+      cursor::subaddress_ranges   ranges_cur;
+      cursor::subaddress_indexes  indexes_cur;
+
+      MONERO_CHECK(check_cursor(txn, this->db->tables.accounts, accounts_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_ba, accounts_ba_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.accounts_bh, accounts_bh_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.outputs, outputs_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.spends, spends_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.images, images_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.requests, requests_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.webhooks, webhooks_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.events, events_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.subaddress_ranges, ranges_cur));
+      MONERO_CHECK(check_cursor(txn, this->db->tables.subaddress_indexes, indexes_cur));
+
+      for (account_address const& address : addresses)
+      {
+        MDB_val key = lmdb::to_val(by_address_version);
+        MDB_val value = lmdb::to_val(address);
+        int err = mdb_cursor_get(accounts_ba_cur.get(), &key, &value, MDB_GET_BOTH);
+        if (err == MDB_NOTFOUND)
+          continue;
+        if (err)
+          return log_lmdb_error(err, __LINE__, __FILE__);
+
+        const expect<account_lookup> lookup =
+          accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(value);
+        if (!lookup)
+          return lookup.error();
+        MLWS_LMDB_CHECK(mdb_cursor_del(accounts_ba_cur.get(), 0));
+
+        key = lmdb::to_val(lookup->status);
+        value = lmdb::to_val(lookup->id);
+        MLWS_LMDB_CHECK(mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_GET_BOTH));
+        const expect<block_id> scan_height = accounts.get_value<MONERO_FIELD(account, scan_height)>(value);
+        if (!scan_height)
+          return scan_height.error();
+        MLWS_LMDB_CHECK(mdb_cursor_del(accounts_cur.get(), 0));
+
+        MONERO_CHECK(delete_height_entry(*accounts_bh_cur, *scan_height, lookup->id));
+        MONERO_CHECK(rollback_spends(lookup->id, block_id(0), *spends_cur, *images_cur));
+        MONERO_CHECK(rollback_outputs(lookup->id, block_id(0), *outputs_cur));
+        MONERO_CHECK(delete_all(*ranges_cur, lookup->id));
+        MONERO_CHECK(delete_all(*indexes_cur, lookup->id));
+        MONERO_CHECK(delete_all(*events_cur, lookup->id));
+        MONERO_CHECK(delete_all(*webhooks_cur, webhook_key{lookup->id, webhook_type::tx_confirmation}));
+        MONERO_CHECK(delete_all(*webhooks_cur, webhook_key{lookup->id, webhook_type::tx_spend}));
+
+        for (const request type : {request::create, request::import_scan})
+        {
+          key = lmdb::to_val(type);
+          value = lmdb::to_val(address);
+          err = mdb_cursor_get(requests_cur.get(), &key, &value, MDB_GET_BOTH);
+          if (!err)
+            MLWS_LMDB_CHECK(mdb_cursor_del(requests_cur.get(), 0));
+          else if (err != MDB_NOTFOUND)
+            return log_lmdb_error(err, __LINE__, __FILE__);
+        }
+
+        /* Keep the id reserved. New ids are the highest id + 1, and scanner
+          threads or `/feed` connections can still hold the old id. */
+        account reserved{};
+        reserved.id = lookup->id;
+        reserved.flags = account_flags::account_deleted;
+        const account_status hidden = account_status::hidden;
+        key = lmdb::to_val(hidden);
+        value = lmdb::to_val(reserved);
+        MLWS_LMDB_CHECK(mdb_cursor_put(accounts_cur.get(), &key, &value, MDB_NODUPDATA));
+
+        deleted.push_back(address);
+      }
+
+      return deleted;
     });
   }
 
@@ -3292,8 +3432,11 @@ namespace db
             continue; // to next account
           }
 
-          status_key =
-            accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(temp_value).value().status;
+          const account_lookup found =
+            accounts_by_address.get_value<MONERO_FIELD(account_by_address, lookup)>(temp_value).value();
+          if (found.id != user_id)
+            continue; // account was deleted, and the address registered again
+          status_key = found.status;
           MLWS_LMDB_CHECK(mdb_cursor_get(accounts_cur.get(), &key, &value, MDB_GET_BOTH));
         }
 

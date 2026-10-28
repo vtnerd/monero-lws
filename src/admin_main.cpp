@@ -205,6 +205,15 @@ namespace
     reader.json_debug(out, prog.show_sensitive);
   }
 
+  void delete_accounts(program prog, std::ostream& out)
+  {
+    if (prog.arguments.empty())
+      throw std::runtime_error{"delete_accounts requires 1 or more arguments"};
+
+    lws::rpc::delete_accounts_req req{get_addresses_(epee::to_span(prog.arguments))};
+    run_command(lws::rpc::delete_accounts, out, std::move(prog.disk), std::move(req));
+  }
+
   void list_accounts(program prog, std::ostream& out)
   {
     if (!prog.arguments.empty())
@@ -328,6 +337,7 @@ namespace
     {"add_account",           &add_account,     "<base58 address> <view key hex>"},
     {"create_admin",          &create_admin,    ""},
     {"debug_database",        &debug_database,  ""},
+    {"delete_accounts",       &delete_accounts, "<base58 address> [base 58 address]..."},
     {"list_accounts",         &list_accounts,   ""},
     {"list_admin",            &list_admin,      ""},
     {"list_requests",         &list_requests,   ""},

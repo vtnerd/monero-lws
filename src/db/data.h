@@ -102,7 +102,8 @@ namespace db
   {
     default_account = 0,
     admin_account   = 1,          //!< Indicates `key` can be used for admin requests
-    account_generated_locally = 2 //!< Flag sent by client on initial login request
+    account_generated_locally = 2,//!< Flag sent by client on initial login request
+    account_deleted = 8           //!< Row only reserves the id of a deleted account
   };
 
   enum class request : std::uint8_t
