@@ -218,7 +218,7 @@ namespace rpc
         const auto start = std::chrono::steady_clock::now();
         const int ready = zmq_poll(items, 2, timeout.count());
         const auto end = std::chrono::steady_clock::now();
-        const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(start - end);
+        const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         timeout -= std::min(spent, timeout);
 
         if (ready == 0)

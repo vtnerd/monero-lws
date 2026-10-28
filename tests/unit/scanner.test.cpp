@@ -44,6 +44,8 @@
 #include <boost/beast/version.hpp>
 #include <boost/thread.hpp>
 #include <boost/uuid/random_generator.hpp>
+#include <pthread.h>
+#include <signal.h>
 
 #include "cryptonote_basic/account.h" // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
@@ -53,6 +55,7 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
+#include "error.h"
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
@@ -400,6 +403,49 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
     {
       return MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(account)).second;
     };
+
+    SECTION("lws::rpc::client::get_message timeout with EINTR")
+    {
+      // A signal handler makes zmq_poll return EINTR. The remaining timeout
+      // has to shrink across retries, otherwise signals extend the wait.
+      struct sigaction action{};
+      action.sa_handler = [] (int) {};
+      sigemptyset(&action.sa_mask);
+      struct sigaction previous{};
+      EXPECT(sigaction(SIGUSR1, &action, &previous) == 0);
+      struct restore_
+      {
+        struct sigaction& previous;
+        ~restore_() { sigaction(SIGUSR1, &previous, nullptr); }
+      } restore{previous};
+
+      // REQ socket, so a request must be queued before waiting for a reply
+      auto client = MONERO_UNWRAP(rpc.connect());
+      EXPECT(client.send(epee::byte_slice{std::string{"{}"}}, std::chrono::seconds{1}));
+
+      std::atomic<bool> done{false};
+      const pthread_t waiting = pthread_self();
+      boost::thread interrupter{[&done, waiting] ()
+      {
+        // start once get_message() is waiting, stop after 2 seconds
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{100});
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        while (!done && std::chrono::steady_clock::now() < end)
+        {
+          pthread_kill(waiting, SIGUSR1);
+          boost::this_thread::sleep_for(boost::chrono::milliseconds{50});
+        }
+      }};
+      const join on_scope_exit{interrupter};
+
+      const auto start = std::chrono::steady_clock::now();
+      const auto message = client.get_message(std::chrono::seconds{1});
+      const auto spent = std::chrono::steady_clock::now() - start;
+      done = true;
+
+      EXPECT(message == lws::error::daemon_timeout);
+      EXPECT(spent < std::chrono::milliseconds{2500});
+    }
 
     SECTION("lws::scanner::sync Invalid Response")
     {
