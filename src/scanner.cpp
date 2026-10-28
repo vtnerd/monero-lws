@@ -673,7 +673,7 @@ namespace lws
       const scanner_options& opts)
     {
       assert(users.size() == active.size());
-      assert(thread_count || !lws_server_addr.empty());
+      assert(thread_count || !lws_server.address.empty());
       assert(!thread_count || !users.empty());
 
       std::vector<boost::thread> threads{};
