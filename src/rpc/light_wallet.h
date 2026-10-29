@@ -154,6 +154,7 @@ namespace rpc
     std::uint64_t lookahead_fail;
     std::vector<get_transaction> transactions;
     db::address_index lookahead;
+    boost::optional<crypto::secret_key> user_key;
   };
   void write_bytes(wire::json_writer&, const get_address_txs_response&);
 
@@ -267,6 +268,15 @@ namespace rpc
   };
   void write_bytes(wire::json_writer&, const get_address_info_response&);
  
+
+  struct get_address_txs_request
+  {
+    get_address_txs_request() = delete;
+    account_credentials creds;
+    bool receives;
+  };
+  void read_bytes(wire::json_reader&, get_address_txs_request&);
+
 
   struct get_random_outs_request
   {
