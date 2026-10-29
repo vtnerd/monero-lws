@@ -573,7 +573,6 @@ namespace lws
           static_assert(std::is_trivially_copyable<U>(), "value type must be memcpy safe");
           static_assert(std::is_trivially_copyable<G>(), "field type must be memcpy safe");
           static_assert(sizeof(G) + uoffset <= sizeof(U), "bad field and/or offset");
-          assert(sizeof(G) + uoffset <= end - pos);
           assert(!is_end());
 
           G value;
