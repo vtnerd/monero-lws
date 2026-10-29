@@ -553,17 +553,20 @@ namespace lws
 
     struct get_address_txs
     {
-      using request = rpc::account_credentials;
+      using request = rpc::get_address_txs_request;
       using response = rpc::get_address_txs_response;
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = lws::rpc::open_account(req, data.global->disk);
+        auto user = lws::rpc::open_account(req.creds, data.global->disk);
         if (!user)
           return user.error();
 
         data.passed_login = true;
-        return response::load(user->second, user->first, data.global->mempool.get(), false);
+        auto resp = response::load(user->second, user->first, data.global->mempool.get(), req.receives);
+        if (resp && req.receives)
+          resp->user_key = req.creds.key;
+        return resp;
       }
     };
 

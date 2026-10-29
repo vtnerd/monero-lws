@@ -142,6 +142,10 @@ paths:
                   description: Block hash of most recent tx
                   allOf:
                     - $ref: '#/components/schemas/binary32'
+                receives:
+                  description: Return the received outputs of each transaction in `receives`
+                  type: boolean
+                  default: false
         required: true
       responses:
         '200':
@@ -1042,6 +1046,40 @@ components:
         - spend_key_images
         - timestamp
         - height
+    received_output:
+      description: |
+        A received output in a transaction. The fields have the same format as in `output`.
+
+        `global_index` does not have a valid value when the transaction is in the mempool.
+      type: object
+      properties:
+        amount:
+          $ref: '#/components/schemas/uint64-string'
+        public_key:
+          $ref: '#/components/schemas/binary32'
+        index:
+          description: Index within vout vector
+          allOf:
+            - $ref: '#/components/schemas/uint16'
+        global_index:
+          description: Index within amount (determined by blockchain order)
+          allOf:
+            - $ref: '#/components/schemas/uint64'
+        tx_pub_key:
+          description: Bytes of the ephermal tx public key
+          allOf:
+            - $ref: '#/components/schemas/binary32'
+        rct:
+          $ref: '#/components/schemas/ringct-packed'
+        recipient:
+          $ref: '#/components/schemas/address_meta'
+      required:
+        - amount
+        - public_key
+        - index
+        - global_index
+        - tx_pub_key
+        - recipient
     rates:
       description: "Conversion rates into common/popular currencies"
       type: object
@@ -1188,6 +1226,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/spend'
+        receives:
+          description: Received outputs. Sent only when the request has `receives` set to true. Omitted when the transaction has no received outputs.
+          type: array
+          items:
+            $ref: '#/components/schemas/received_output'
         payment_id:
           $ref: '#/components/schemas/payment-id'
         coinbase:

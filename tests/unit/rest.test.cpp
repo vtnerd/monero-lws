@@ -793,6 +793,85 @@ LWS_CASE("rest_server")
         })";
       verify_json(lest_env, "/get_address_txs", response, expected);
 
+      const auto block_rct = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
+      const auto pool_rct = get_rct_bytes(view, tx.pub_keys.at(0), tx.ringct.at(0), 8000, 0, false);
+      const std::string receives_message =
+        "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"receives\":true}";
+      response = invoke(client, "/get_address_txs", receives_message);
+      const std::string expected_receives =
+        R"({
+          "total_received":"48000",
+          "scanned_height":)" + scan_height + R"(,
+          "scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + start_height + R"(,
+          "transaction_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[
+            {
+              "id":0,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"40000",
+              "total_sent":"40000",
+              "fee":"100",
+              "unlock_time":4670,
+              "height":4000,
+              "payment_id":")" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + R"(",
+              "coinbase":true,
+              "mempool":false,
+              "mixin":16,
+              "recipient":{"maj_i":2,"min_i":66},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(image)) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":16,
+                "sender":{"maj_i":4,"min_i":55}
+              }],
+              "receives":[{
+                "amount":"40000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub)) + R"(",
+                "index":2,
+                "global_index":35,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(block_rct)) + R"(",
+                "recipient":{"maj_i":2,"min_i":66}
+              }]
+            },{
+              "id":1,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(get_transaction_hash(tx.tx))) + R"(",
+              "total_received":"8000",
+              "total_sent":"40000",
+              "fee":"12000",
+              "unlock_time":0,
+              "payment_id":"0000000000000000",
+              "coinbase":false,
+              "mempool":true,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(tx.images.at(0))) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":15,
+                "sender":{"maj_i":2, "min_i": 66}
+              }],
+              "receives":[{
+                "amount":"8000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(tx.spend_publics.at(0))) + R"(",
+                "index":0,
+                "global_index":18446744073709551615,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx.pub_keys.at(0))) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(pool_rct)) + R"(",
+                "recipient":{"maj_i":0,"min_i":0}
+              }]
+            }
+          ]
+        })";
+      verify_json(lest_env, "/get_address_txs receives", response, expected_receives);
+
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
       std::atomic<bool> ready{false};
@@ -824,6 +903,147 @@ LWS_CASE("rest_server")
           "\"recipient\":{\"maj_i\":2,\"min_i\":66}}"
         "],\"fees\":[40,41]}"
       );
+    }
+
+    SECTION("get_address_txs receives")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+
+      const lws::db::transaction_link link_a{
+        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+      };
+      const lws::db::transaction_link link_b{
+        lws::db::block_id(4001), crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
+      const crypto::public_key pub_a0 = crypto::rand<crypto::public_key>();
+      const crypto::public_key pub_a1 = crypto::rand<crypto::public_key>();
+      const crypto::public_key pub_b = crypto::rand<crypto::public_key>();
+      const rct::key mask_a0 = crypto::rand<rct::key>();
+      const rct::key mask_a1 = crypto::rand<rct::key>();
+      const auto ringct = lws::db::pack(lws::db::extra::ringct_output, 0);
+      const auto legacy = lws::db::pack(lws::db::extra(0), 0);
+
+      const auto make_output = [&] (const lws::db::transaction_link& link, const lws::db::output_id id, const std::uint64_t amount, const std::uint32_t index, const crypto::public_key& pub, const rct::key& mask, const lws::db::extra_and_length extra, const lws::db::address_index recipient)
+      {
+        return lws::db::output{
+          link,
+          lws::db::output::spend_meta_{id, amount, std::uint32_t(15), index, tx_public},
+          std::uint64_t(7000),
+          std::uint64_t(0),
+          crypto::rand<crypto::hash>(),
+          pub,
+          mask,
+          {0, 0, 0, 0, 0, 0, 0},
+          extra,
+          {},
+          std::uint64_t(100),
+          recipient
+        };
+      };
+
+      lws::account real_account{account, {}, {}};
+      real_account.add_out(make_output(link_a, {0, 40}, 10000, 0, pub_a0, mask_a0, ringct, {}));
+      real_account.add_out(
+        make_output(link_a, {0, 41}, 20000, 1, pub_a1, mask_a1, ringct, {lws::db::major_index(1), lws::db::minor_index(3)})
+      );
+      real_account.add_out(make_output(link_b, {5000, 7}, 5000, 0, pub_b, rct::key{}, legacy, {}));
+
+      {
+        std::vector<crypto::hash> hashes{
+          last_block.hash,
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>()
+        };
+
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      const std::string credentials = "\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"";
+      const std::string response_default = invoke(client, "/get_address_txs", "{" + credentials + "}");
+      EXPECT(response_default.find("\"receives\"") == std::string::npos);
+
+      response = invoke(client, "/get_address_txs", "{" + credentials + ",\"receives\":false}");
+      EXPECT(response == response_default);
+
+      const auto rct_a0 = get_rct_bytes(view, tx_public, mask_a0, 10000, 0, false);
+      const auto rct_a1 = get_rct_bytes(view, tx_public, mask_a1, 20000, 1, false);
+      response = invoke(client, "/get_address_txs", "{" + credentials + ",\"receives\":true}");
+      const std::string expected =
+        R"({
+          "total_received":"35000",
+          "scanned_height":)" + scan_height + R"(,
+          "scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + start_height + R"(,
+          "transaction_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[
+            {
+              "id":0,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link_a.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"30000",
+              "total_sent":"0",
+              "fee":"100",
+              "unlock_time":0,
+              "height":4000,
+              "coinbase":false,
+              "mempool":false,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "receives":[
+                {
+                  "amount":"10000",
+                  "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_a0)) + R"(",
+                  "index":0,
+                  "global_index":40,
+                  "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                  "rct":")" + epee::to_hex::string(epee::as_byte_span(rct_a0)) + R"(",
+                  "recipient":{"maj_i":0,"min_i":0}
+                },{
+                  "amount":"20000",
+                  "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_a1)) + R"(",
+                  "index":1,
+                  "global_index":41,
+                  "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                  "rct":")" + epee::to_hex::string(epee::as_byte_span(rct_a1)) + R"(",
+                  "recipient":{"maj_i":1,"min_i":3}
+                }
+              ]
+            },{
+              "id":1,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link_b.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"5000",
+              "total_sent":"0",
+              "fee":"100",
+              "unlock_time":0,
+              "height":4001,
+              "coinbase":false,
+              "mempool":false,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "receives":[{
+                "amount":"5000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_b)) + R"(",
+                "index":0,
+                "global_index":7,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "recipient":{"maj_i":0,"min_i":0}
+              }]
+            }
+          ]
+        })";
+      verify_json(lest_env, "/get_address_txs receives", response, expected);
     }
 
     SECTION("provision_subaddrs")
