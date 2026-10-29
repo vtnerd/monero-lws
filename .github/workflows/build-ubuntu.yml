@@ -46,6 +46,32 @@ jobs:
         run: ${{env.BUILD}}
       - name: Run Tests
         run: ${{env.RUN}}
+  # Debug build, so `assert`s are enabled while running tests. Shared libraries
+  # (the default for Debug) do not link, so they are disabled.
+  build-debug-tests:
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - name: Install Dependencies
+        run: |
+          ${{env.APT_SET_CONF}}
+          sudo apt update
+          sudo ${{env.APT_INSTALL_LINUX}}
+          sudo apt -y install cargo
+      - name: Checkout LWS Source
+        uses: actions/checkout@v6
+        with:
+          path: ${{github.workspace}}/lws
+          submodules: recursive
+      - name: Configure LWS
+        run: cmake -B ${{github.workspace}}/lws/build -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=ON -S ${{github.workspace}}/lws
+      - name: Build LWS
+        run: ${{env.BUILD}}
+      - name: Run Tests
+        run: ${{env.RUN}}
   # Uses external monero source, but uses _deps for monero build
   build-intermediate:
     runs-on: ${{matrix.os}}
