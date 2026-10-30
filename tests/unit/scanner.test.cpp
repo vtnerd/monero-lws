@@ -40,6 +40,7 @@
 #include "db/chain.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
+#include "error.h"
 #include "hardforks/hardforks.h"     // monero/src
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
