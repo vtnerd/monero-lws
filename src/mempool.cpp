@@ -32,6 +32,7 @@
 #include <boost/thread/lock_guard.hpp>
 #include "common/error.h"
 #include "cryptonote_basic/cryptonote_format_utils.h"
+#include "db/storage.h"
 #include "error.h"
 #include "misc_log_ex.h"
 #include "rpc/daemon_messages.h" // external/monero/src
@@ -66,19 +67,20 @@ namespace lws
     state_ = std::move(txs);
   }
 
-  std::unordered_set<crypto::hash> mempool::address_cache::get(const db::account_address& address) const
+  std::unordered_set<crypto::hash> mempool::address_cache::get(const db::account_address& address, const std::vector<db::subaddress_dict>& subaddrs) const
   {
     auto it = map_.find(address);
-    if (it == map_.end())
+    if (it == map_.end() || it->second.subaddrs != subaddrs)
       return {};
     return {it->second.txids.begin(), it->second.txids.end()};
   }
 
-  void mempool::address_cache::set(const db::account_address& address, std::vector<crypto::hash>&& txids)
+  void mempool::address_cache::set(const db::account_address& address, std::vector<db::subaddress_dict>&& subaddrs, std::vector<crypto::hash>&& txids)
   {
     // find or create entry for this address
     auto status = map_.emplace(address, entry{});
     entry& e = status.first->second;
+    e.subaddrs = std::move(subaddrs);
     e.txids = std::move(txids);
     if (status.second)
     {
@@ -99,13 +101,22 @@ namespace lws
       order_.splice(order_.begin(), order_, e.order);
   }
 
-  std::vector<found_pool_tx> mempool::scan_account(lws::account& user) const
+  std::vector<found_pool_tx> mempool::scan_account(lws::account& user, db::storage_reader& reader) const
   {
+    std::vector<db::subaddress_dict> subaddrs;
+    {
+      auto read = reader.get_subaddresses(user.id());
+      if (read)
+        subaddrs = std::move(*read);
+      else
+        MERROR("Failed to read subaddresses of " << user.address() << ": " << read.error().message());
+    }
+
     std::unordered_set<crypto::hash> skip;
     std::shared_ptr<const pool_snapshot> snapshot;
     {
       const boost::lock_guard<boost::mutex> lock{mutex_};
-      skip = cache_.get(user.db_address());
+      skip = cache_.get(user.db_address(), subaddrs);
 
       if (!snapshot_)
       {
@@ -133,6 +144,8 @@ namespace lws
         found.back().outputs.push_back(std::move(output));
       }
     };
+    // The caller has a read txn open, and a second one on this thread fails
+    scan_transaction.enable_subaddresses(reader);
 
     // uint64::max is for txpool
     static const std::vector<std::uint64_t> fake_outs(
@@ -156,7 +169,7 @@ namespace lws
 
     {
       const boost::lock_guard<boost::mutex> lock{mutex_};
-      cache_.set(user.db_address(), std::move(skipped));
+      cache_.set(user.db_address(), std::move(subaddrs), std::move(skipped));
     }
 
     return found;

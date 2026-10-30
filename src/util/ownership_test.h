@@ -42,11 +42,16 @@ namespace lws
   public:
     subaddress_reader(db::storage const& disk_in, const std::uint32_t max_subaddresses);
 
+    //! Lookup only, the lookahead does not change. `borrowed_in` must stay valid.
+    explicit subaddress_reader(db::storage_reader& borrowed_in);
+
     expect<db::address_index> find_subaddress(const account& user, crypto::public_key const& pubkey);
     expect<void> update_lookahead(const account& user, const db::address_index& match, db::block_id height);
 
     db::storage_reader* get_reader() noexcept
     {
+      if (borrowed)
+        return borrowed;
       if (reader)
         return std::addressof(*reader);
       return nullptr;
@@ -54,6 +59,7 @@ namespace lws
 
   private:
     expect<db::storage_reader> reader;
+    db::storage_reader* borrowed;
     db::storage disk;
     db::cursor::subaddress_indexes cur;
     const std::uint32_t max_subaddresses;
@@ -97,6 +103,8 @@ namespace lws
     );
 
     void enable_subaddresses(const db::storage& disk, const std::uint32_t max_subaddresses);
+    //! Lookup only, the lookahead does not change. `reader` must stay valid.
+    void enable_subaddresses(db::storage_reader& reader);
     void disable_subaddresses();
 
   private:

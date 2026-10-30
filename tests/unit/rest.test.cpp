@@ -39,6 +39,7 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "db/string.h"
+#include "device/device_default.hpp"             // monero/src
 #include "error.h"
 #include "hex.h" // monero/epee/contrib/include
 #include "mempool.h"
@@ -1046,6 +1047,56 @@ LWS_CASE("rest_server")
       verify_json(lest_env, "/get_address_txs receives", response, expected);
     }
 
+    SECTION("mempool subaddress")
+    {
+      const auto pool = std::make_shared<lws::mempool>();
+
+      EXPECT(client.disconnect());
+      init_server(pool);
+      EXPECT(client.connect(std::chrono::milliseconds{500}));
+
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+        EXPECT(db.upsert_subaddresses(account.id, account_address, view, indexes, 2));
+      }
+
+      hw::core::device_default hw{};
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      destinations.emplace_back();
+      destinations.back().amount = 2000;
+      destinations.back().addr = hw.get_subaddress(base, cryptonote::subaddress_index{0, 1});
+      destinations.back().is_subaddress = true;
+      const auto tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+      pool->reset_txs(
+        lws::mempool::pool_table{
+          {get_transaction_hash(tx.tx), std::make_shared<lws::mempool::pool_entry>(cryptonote::transaction{tx.tx}, now)}
+        }
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_txs", message);
+
+      rapidjson::Document doc;
+      doc.Parse(response.c_str());
+      EXPECT(!doc.HasParseError());
+      EXPECT(doc["total_received"] == "10000");
+      EXPECT(doc["transactions"].Size() == 1u);
+      EXPECT(doc["transactions"][0u]["mempool"] == true);
+      EXPECT(doc["transactions"][0u]["total_received"] == "10000");
+      EXPECT(get_account().lookahead == account.lookahead);
+    }
+
     SECTION("provision_subaddrs")
     {
       const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
@@ -1126,6 +1177,7 @@ LWS_CASE("rest_server")
         boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       auto full_account = get_full_account();
+      auto reader = MONERO_UNWRAP(db.start_read());
 
       const auto bad_hex = invoke_base(client, "/submit_raw_tx", "{\"tx\":\"zz\"}");
       EXPECT(bad_hex.second == 400);
@@ -1133,16 +1185,16 @@ LWS_CASE("rest_server")
 
       response = invoke(client, "/submit_raw_tx", message);
       EXPECT(response == "{\"status\":\"OK\",\"reason\":\"Not relayed\",\"not_relayed\":true}");
-      EXPECT(pool->scan_account(full_account).empty());
+      EXPECT(pool->scan_account(full_account, reader).empty());
 
       const auto rejected = invoke_base(client, "/submit_raw_tx", message);
       EXPECT(rejected.second == 422);
       EXPECT(rejected.first == "{\"status\":\"Failed\",\"reason\":\"double spend and fee too low\"}");
-      EXPECT(pool->scan_account(full_account).empty());
+      EXPECT(pool->scan_account(full_account, reader).empty());
 
       response = invoke(client, "/submit_raw_tx", message);
       EXPECT(response == "{\"status\":\"OK\"}");
-      EXPECT(pool->scan_account(full_account).size() == 1);
+      EXPECT(pool->scan_account(full_account, reader).size() == 1);
     }
     
     SECTION("CORS")

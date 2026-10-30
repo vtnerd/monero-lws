@@ -81,20 +81,22 @@ namespace lws
     void reset_txs(pool_table&&);
 
     //! Scans the pool for transactions belonging to an address. Thread-safe.
-    std::vector<found_pool_tx> scan_account(lws::account& user) const;
+    std::vector<found_pool_tx> scan_account(lws::account& user, db::storage_reader& reader) const;
 
   private:
     //! Remembers which txid's that do *not* belong to an address,
     // since there is no need for the scanner to revisit these.
+    // A change of the subaddresses makes the entry not valid.
     class address_cache
     {
     public:
-      std::unordered_set<crypto::hash> get(const db::account_address& address) const;
-      void set(const db::account_address& address, std::vector<crypto::hash>&& txids);
+      std::unordered_set<crypto::hash> get(const db::account_address& address, const std::vector<db::subaddress_dict>& subaddrs) const;
+      void set(const db::account_address& address, std::vector<db::subaddress_dict>&& subaddrs, std::vector<crypto::hash>&& txids);
 
     private:
       struct entry
       {
+        std::vector<db::subaddress_dict> subaddrs;
         std::vector<crypto::hash> txids;
         std::list<db::account_address>::iterator order;
       };
