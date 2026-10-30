@@ -247,6 +247,13 @@ namespace db
       change_status(account_status status, epee::span<const account_address> addresses);
 
 
+    /*! Delete `addresses` and everything stored for them: view key, outputs,
+      spends, subaddresses, webhooks and pending requests. A row with only
+      the account id is kept (hidden), so the id is never given to a new
+      account. \return Deleted `addresses`. */
+    expect<std::vector<account_address>>
+      delete_accounts(epee::span<const account_address> addresses);
+
     //! Add an account, for immediate inclusion in the active list.
     expect<void> add_account(account_address const& address, crypto::secret_key const& key, account_flags flags = account_flags::default_account) noexcept;
 

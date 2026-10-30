@@ -57,6 +57,12 @@ namespace rpc
   };
   void read_bytes(wire::reader&, address_requests&);
 
+  struct delete_accounts_req
+  {
+    std::vector<db::account_address> addresses;
+  };
+  void read_bytes(wire::reader&, delete_accounts_req&);
+
   struct modify_account_req
   {
     std::vector<db::account_address> addresses;
@@ -126,6 +132,13 @@ namespace rpc
     expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
   };
   constexpr const add_account_ add_account{};
+
+  struct delete_accounts_
+  {
+    using request = delete_accounts_req;
+    expect<void> operator()(wire::writer& dest, db::storage disk, const request& req) const;
+  };
+  constexpr const delete_accounts_ delete_accounts{};
 
   struct list_accounts_
   {

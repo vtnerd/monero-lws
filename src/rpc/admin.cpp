@@ -27,6 +27,7 @@
 
 #include "admin.h"
 
+#include <boost/range/adaptor/filtered.hpp>
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/iterator_range.hpp>
 #include <boost/uuid/random_generator.hpp>
@@ -99,6 +100,15 @@ namespace
   {
     const auto truncate = [] (V src) { return truncated<V>{std::move(src)}; };
     wire_write::bytes(dest, wire::array(boost::adaptors::transform(std::move(self.value), truncate)));
+  }
+
+  void write_bytes(wire::json_writer& dest, const truncated<boost::iterator_range<lmdb::value_iterator<lws::db::account>>> self)
+  {
+    // skip rows that only reserve the id of a deleted account
+    const auto filter = [] (const lws::db::account& src)
+    { return !(src.flags & lws::db::account_flags::account_deleted); };
+    const auto truncate = [] (lws::db::account src) { return truncated<lws::db::account>{std::move(src)}; };
+    wire_write::bytes(dest, wire::array(self.value | boost::adaptors::filtered(filter) | boost::adaptors::transformed(truncate)));
   }
 
   template<typename K, typename V, typename C>
@@ -199,6 +209,10 @@ namespace lws { namespace rpc
   {
     read_addresses(source, self);
   }
+  void read_bytes(wire::reader& source, delete_accounts_req& self)
+  {
+    read_addresses(source, self);
+  }
 
   void read_bytes(wire::reader& source, webhook_delete_uuid_req& self)
   {
@@ -232,6 +246,11 @@ namespace lws { namespace rpc
     if (!reader)
       return reader.error();
     return stream_object(dest, reader->get_requests());
+  }
+
+  expect<void> delete_accounts_::operator()(wire::writer& dest, db::storage disk, const request& req) const
+  {
+    return write_addresses(dest, disk.delete_accounts(epee::to_span(req.addresses)));
   }
 
   expect<void> modify_account_::operator()(wire::writer& dest, db::storage disk, const request& req) const
