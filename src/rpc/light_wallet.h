@@ -154,6 +154,7 @@ namespace rpc
     std::uint64_t lookahead_fail;
     std::vector<get_transaction> transactions;
     db::address_index lookahead;
+    boost::optional<crypto::secret_key> user_key;
   };
   void write_bytes(wire::json_writer&, const get_address_txs_response&);
 
@@ -313,6 +314,7 @@ namespace rpc
     std::uint64_t lookahead_fail;
     std::vector<std::pair<db::output, std::vector<crypto::key_image>>> outputs;
     std::vector<std::uint64_t> fees;
+    crypto::secret_key user_key;
   };
   void write_bytes(wire::json_writer&, const get_unspent_outs_response&);
 

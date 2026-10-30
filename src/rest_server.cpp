@@ -563,7 +563,10 @@ namespace lws
           return user.error();
 
         data.passed_login = true;
-        return response::load(user->second, user->first, data.global->mempool.get(), req.receives);
+        auto resp = response::load(user->second, user->first, data.global->mempool.get(), req.receives);
+        if (resp && req.receives)
+          resp->user_key = req.creds.key;
+        return resp;
       }
     };
 
