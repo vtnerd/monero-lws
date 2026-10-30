@@ -360,7 +360,7 @@ namespace lws
       cryptonote::tx_extra_pub_key key;
       boost::optional<crypto::hash> prefix_hash;
       boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
-      std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+      std::pair<std::uint8_t, db::output::payment_id_> unencrypted_payment_id;
       cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
       std::vector<crypto::key_derivation> additional_derivations;
 
@@ -375,8 +375,8 @@ namespace lws
         extra_nonce.emplace();
         if (cryptonote::find_tx_extra_field_by_type(extra, *extra_nonce))
         {
-          if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.long_))
-            payment_id.first = sizeof(crypto::hash);
+          if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, unencrypted_payment_id.second.long_))
+            unencrypted_payment_id.first = sizeof(crypto::hash);
         }
         else
           extra_nonce = boost::none;
@@ -412,6 +412,7 @@ namespace lws
 
         db::extra ext{};
         std::uint32_t mixin = 0;
+        std::pair<std::uint8_t, db::output::payment_id_> payment_id = unencrypted_payment_id;
         for (auto const& in : tx.vin)
         {
           cryptonote::txin_to_key const* const in_data =
