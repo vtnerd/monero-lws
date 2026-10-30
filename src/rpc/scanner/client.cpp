@@ -52,6 +52,14 @@ namespace lws { namespace rpc { namespace scanner
     //! Retry connection timeout
     constexpr const std::chrono::seconds reconnect_interval{10};
 
+    //! Wake local scan threads waiting at the top of the chain
+    void notify_threads(rpc::client& zclient)
+    {
+      const expect<void> notified = zclient.raise_account_change();
+      if (!notified)
+        MERROR("Failed to notify scan threads of new accounts: " << notified.error().message());
+    }
+
     struct push_accounts_handler
     {
       using input = push_accounts;
@@ -154,9 +162,10 @@ namespace lws { namespace rpc { namespace scanner
     }
   };
 
-  client::client(boost::asio::io_context& io, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local)
+  client::client(boost::asio::io_context& io, rpc::client zclient, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local)
     : connection(io),
       local_(std::move(local)),
+      zclient_(std::move(zclient)),
       pass_(std::move(pass)),
       next_push_(0),
       connect_timer_(io),
@@ -224,6 +233,8 @@ namespace lws { namespace rpc { namespace scanner
           );
           self->next_push_ %= self->local_.size();
         }
+        if (!users.empty())
+          notify_threads(self->zclient_);
       }
     );
   }
@@ -250,6 +261,7 @@ namespace lws { namespace rpc { namespace scanner
           self->local_[i]->replace_accounts(std::move(next));
         }
         self->next_push_ = 0;
+        notify_threads(self->zclient_);
       }
     );
   }

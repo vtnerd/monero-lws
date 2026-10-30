@@ -166,7 +166,14 @@ namespace rpc
     //! `wait`, `send`, and `receive` will watch for `raise_abort_scan()`.
     expect<void> watch_scan_signals() noexcept;
 
-    //! Wait for new block announce or internal timeout.
+    //! `wait_for_block()` will return `error::account_list_change` after `raise_account_change()`.
+    expect<void> watch_account_changes() noexcept;
+
+    //! Tell clients watching account changes that a scan queue has new accounts.
+    expect<void> raise_account_change() noexcept;
+
+    /*! Wait for new block announce, internal timeout, or
+      `error::account_list_change` (see `watch_account_changes()`). */
     expect<std::vector<std::pair<topic, std::string>>> wait_for_block();
 
     using rpc_handler = std::function<expect<void>(std::string&&)>;
