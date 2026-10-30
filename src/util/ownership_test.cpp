@@ -74,7 +74,7 @@ namespace lws
     cryptonote::tx_extra_pub_key key;
     boost::optional<crypto::hash> prefix_hash;
     boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
-    std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+    std::pair<std::uint8_t, db::output::payment_id_> unencrypted_id;
     cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
     std::vector<crypto::key_derivation> additional_derivations;
 
@@ -97,8 +97,8 @@ namespace lws
       extra_nonce.emplace();
       if (cryptonote::find_tx_extra_field_by_type(extra, *extra_nonce))
       {
-        if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.long_))
-          payment_id.first = sizeof(crypto::hash);
+        if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, unencrypted_id.second.long_))
+          unencrypted_id.first = sizeof(crypto::hash);
       }
       else
         extra_nonce = boost::none;
@@ -115,6 +115,10 @@ namespace lws
       crypto::key_derivation derived;
       if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
         continue;
+
+      // An encrypted payment id decrypts correctly for one recipient only, so
+      // every account decrypts its own copy.
+      std::pair<std::uint8_t, db::output::payment_id_> payment_id = unencrypted_id;
 
       if (subaddress && additional_tx_pub_keys.data.size() == tx.vout.size())
       {
