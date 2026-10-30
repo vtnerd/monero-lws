@@ -78,6 +78,9 @@ namespace lws { namespace rpc { namespace scanner
     //! Update the current minimum scan height for this thread
     void update_min_height(db::block_id height);
 
+    //! \return True if `get_accounts()` has replacement or "push" accounts.
+    bool has_accounts();
+
     //! \return Replacement and "push" accounts
     status get_accounts();
 
