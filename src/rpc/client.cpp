@@ -215,13 +215,13 @@ namespace rpc
         {signal_sub, 0, short(ZMQ_POLLIN | ZMQ_POLLERR), 0}
       };
 
+      // retries (EINTR, ignored signals) wait only for what is left of `timeout`
+      const auto start = std::chrono::steady_clock::now();
       for (;;)
       {
-        const auto start = std::chrono::steady_clock::now();
-        const int ready = zmq_poll(items, 2, timeout.count());
-        const auto end = std::chrono::steady_clock::now();
-        const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(start - end);
-        timeout -= std::min(spent, timeout);
+        const auto spent =
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+        const int ready = zmq_poll(items, 2, (timeout - std::min(spent, timeout)).count());
 
         if (ready == 0)
           return {lws::error::daemon_timeout};
