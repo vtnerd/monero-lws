@@ -60,7 +60,7 @@ namespace lws
   private:
     expect<db::storage_reader> reader;
     db::storage_reader* borrowed;
-    boost::optional<db::storage> disk;
+    db::storage disk;
     db::cursor::subaddress_indexes cur;
     const std::uint32_t max_subaddresses;
 
@@ -103,6 +103,7 @@ namespace lws
     );
 
     void enable_subaddresses(const db::storage& disk, const std::uint32_t max_subaddresses);
+    //! Lookup only, the lookahead does not change. `reader` must stay valid.
     void enable_subaddresses(db::storage_reader& reader);
     void disable_subaddresses();
 

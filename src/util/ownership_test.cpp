@@ -315,7 +315,7 @@ namespace lws
   }
 
   subaddress_reader::subaddress_reader(db::storage_reader& borrowed_in)
-    : reader(common_error::kInvalidArgument), borrowed(std::addressof(borrowed_in)), disk(), cur(nullptr), max_subaddresses(0)
+    : reader(common_error::kInvalidArgument), borrowed(std::addressof(borrowed_in)), disk(db::storage::none()), cur(nullptr), max_subaddresses(0)
   {}
 
   void subaddress_reader::update_reader()
@@ -325,7 +325,7 @@ namespace lws
     // is still open on this thread, which LMDB's default (non-MDB_NOTLS) reader-slot tracking
     // does not support and reports as MDB_BAD_RSLOT.
     reader = expect<db::storage_reader>{common_error::kInvalidArgument};
-    reader = disk->start_read();
+    reader = disk.start_read();
     if (!reader)
       MERROR("Subadress lookup failure: " << reader.error().message());
   }
@@ -343,13 +343,13 @@ namespace lws
     if (match.is_zero())
       return {}; // keep subaddress disabled servers quick
 
-    if (borrowed)
-      return {}; // the scanner updates the lookahead
+    if (!disk)
+      return {}; // borrowed reader, the scanner updates the lookahead
 
     if (height == db::block_id::txpool)
       height = user.scan_height();
 
-    auto upserted = disk->update_lookahead(user.db_address(), height, match, max_subaddresses);
+    auto upserted = disk.update_lookahead(user.db_address(), height, match, max_subaddresses);
     if (!upserted)
       return upserted.error();
     if (0 < *upserted)

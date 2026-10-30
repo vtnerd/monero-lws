@@ -636,7 +636,7 @@ namespace lws
     {
       // merge input and output info into a single set of txes.
 
-      const bool has_pool = (user && pool);
+      const bool has_pool = (user && reader && pool);
       std::uint64_t total = 0;
       std::vector<rpc::get_transaction> out{};
       std::vector<db::output::spend_meta_> metas{};
