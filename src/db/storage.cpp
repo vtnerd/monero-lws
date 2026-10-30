@@ -2119,7 +2119,8 @@ namespace db
         return user.error();
 
       const block_id current_height = user->scan_height;
-      user->scan_height = std::min(height, user->scan_height);
+      const block_id new_height = std::min(height, current_height);
+      user->scan_height = new_height;
       user->start_height = std::min(height, user->start_height);
 
       key = lmdb::to_val(lookup->status);
@@ -2134,7 +2135,8 @@ namespace db
       );
       MLWS_LMDB_CHECK(mdb_cursor_del(&accounts_bh_cur, 0));
 
-      key = lmdb::to_val(height);
+      // index must match `scan_height`, which never moves forward here
+      key = lmdb::to_val(new_height);
       value = lmdb::to_val(*lookup);
       MLWS_LMDB_CHECK(
         mdb_cursor_put(&accounts_bh_cur, &key, &value, MDB_NODUPDATA)
