@@ -314,6 +314,7 @@ namespace lws
           {
             auto new_client = MONERO_UNWRAP(client.clone());
             MONERO_UNWRAP(new_client.watch_scan_signals());
+            MONERO_UNWRAP(new_client.watch_account_changes());
             user_data store_local{disk.clone()};
             if (!scanner::loop(self, std::move(store_local), disk.clone(), std::move(new_client), std::move(users), *queue, opts, thread_n))
               return;
@@ -480,6 +481,16 @@ namespace lws
               expect<std::vector<std::pair<rpc::client::topic, std::string>>> new_pubs = client.wait_for_block();
               if (new_pubs.matches(std::errc::interrupted))
                 return false; // reset entire state (maybe shutdown)
+
+              /* New accounts are only read from `queue` after a block fetch,
+                so fetch now if this thread has some. Otherwise they would
+                wait for the next block. */
+              if (new_pubs == lws::error::account_list_change)
+              {
+                if (queue.has_accounts())
+                  break;
+                continue; // accounts were for another thread
+              }
 
               if (!new_pubs)
                 break; // exit wait for block loop, and try fetching new blocks

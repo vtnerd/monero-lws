@@ -256,6 +256,7 @@ namespace
 
           auto new_client = MONERO_UNWRAP(zclient.clone());
           MONERO_UNWRAP(new_client.watch_scan_signals());
+          MONERO_UNWRAP(new_client.watch_account_changes());
           send_users send{client};
           if (!lws::scanner::loop(self, std::move(send), boost::none, std::move(new_client), std::move(users), *queue, opts, false))
             return;
@@ -315,7 +316,7 @@ namespace
       }
 
       auto client = std::make_shared<lws::rpc::scanner::client>(
-        self.io_, prog.lws_daemon, prog.lws_pass, queues
+        self.io_, MONERO_UNWRAP(ctx.connect()), prog.lws_daemon, prog.lws_pass, queues
       );
       lws::rpc::scanner::client::connect(client);
 

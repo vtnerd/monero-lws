@@ -73,6 +73,7 @@ namespace rpc
     constexpr const char account_endpoint[] = "inproc://account";
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
+    constexpr const char account_change_signal[] = "ACCOUNT";
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
@@ -202,7 +203,8 @@ namespace rpc
     };
 #endif
 
-    expect<void> do_wait(void* daemon, void* signal_sub, short events, std::chrono::milliseconds timeout) noexcept
+    //! \param account_changes Return on `account_change_signal`, otherwise keep waiting.
+    expect<void> do_wait(void* daemon, void* signal_sub, short events, std::chrono::milliseconds timeout, const bool account_changes = false) noexcept
     {
       if (timeout <= std::chrono::seconds{0})
         return {lws::error::daemon_timeout};
@@ -222,28 +224,35 @@ namespace rpc
 
         if (ready == 0)
           return {lws::error::daemon_timeout};
-        if (0 < ready)
+        if (ready < 0)
+        {
+          const int err = zmq_errno();
+          if (err != EINTR)
+            return ::net::zmq::make_error_code(err);
+          continue;
+        }
+
+        if (items[0].revents)
+          return success();
+
+        char buf[1];
+        MONERO_ZMQ_CHECK(zmq_recv(signal_sub, buf, 1, 0));
+
+        switch (buf[0])
+        {
+        case 'A':
+          if (account_changes)
+            return {lws::error::account_list_change};
+          continue; // only `wait_for_block` reports this
+        case 'P':
+          return {lws::error::signal_abort_process};
+        case 'S':
+          return {lws::error::signal_abort_scan};
+        default:
           break;
-        const int err = zmq_errno();
-        if (err != EINTR)
-          return ::net::zmq::make_error_code(err);
+        }
+        return {lws::error::signal_unknown};
       }
-      if (items[0].revents)
-        return success();
-
-      char buf[1];
-      MONERO_ZMQ_CHECK(zmq_recv(signal_sub, buf, 1, 0));
-
-      switch (buf[0])
-      {
-      case 'P':
-        return {lws::error::signal_abort_process};
-      case 'S':
-        return {lws::error::signal_abort_scan};
-      default:
-        break;
-      }
-      return {lws::error::signal_unknown};
     }
 
     template<std::size_t N>
@@ -361,6 +370,7 @@ namespace rpc
         , sync_pub()
         , sync_rates()
         , sync_internal_pub()
+        , sync_signal()
         , untrusted_daemon(untrusted_daemon)
         , rates_running()
       {
@@ -387,6 +397,7 @@ namespace rpc
       boost::mutex sync_pub;
       boost::mutex sync_rates;
       boost::mutex sync_internal_pub;
+      boost::mutex sync_signal; //!< For writes to `signal_pub`
       const bool untrusted_daemon;
       std::atomic_flag rates_running;
     };
@@ -533,6 +544,21 @@ namespace rpc
     return do_subscribe(signal_sub.get(), abort_scan_signal);
   }
 
+  expect<void> client::watch_account_changes() noexcept
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(signal_sub != nullptr);
+    return do_subscribe(signal_sub.get(), account_change_signal);
+  }
+
+  expect<void> client::raise_account_change() noexcept
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
+    return do_signal(ctx->signal_pub.get(), account_change_signal);
+  }
+
   expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -541,12 +567,12 @@ namespace rpc
 
     if (daemon_sub == nullptr)
     {
-      MONERO_CHECK(do_wait(daemon.get(), signal_sub.get(), 0, chain_poll_timeout));
+      MONERO_CHECK(do_wait(daemon.get(), signal_sub.get(), 0, chain_poll_timeout, true));
       return {lws::error::daemon_timeout};
     }
 
     {
-      const expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, chain_sub_timeout);
+      const expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, chain_sub_timeout, true);
       if (!ready)
       {
         if (ready == lws::error::daemon_timeout)
@@ -998,6 +1024,7 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
     return do_signal(ctx->signal_pub.get(), abort_scan_signal);
   }
 
@@ -1005,6 +1032,7 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
     return do_signal(ctx->signal_pub.get(), abort_process_signal);
   }
 
