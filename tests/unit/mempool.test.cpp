@@ -27,11 +27,15 @@
 
 #include "framework.test.h"
 
+#include <algorithm>
 #include <cstring>
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "cryptonote_core/cryptonote_tx_utils.h"      // monero/src
 #include "db/account.h"
 #include "db/data.h"
+#include "db/storage.h"
+#include "db/storage.test.h"
+#include "device/device_default.hpp"                  // monero/src
 #include "mempool.h"
 #include "util/account.test.h"
 #include "util/transaction.test.h"
@@ -55,12 +59,15 @@ LWS_CASE("mempool")
 
   SETUP("mempool")
   {
+    lws::db::test::cleanup_db on_scope_exit{};
+    lws::db::storage db = lws::db::test::get_fresh_db();
     lws::mempool pool{};
     lws::account account{make_account(base), {}, {}};
 
     SECTION("empty")
     {
-      EXPECT(pool.scan_account(account).empty());
+      auto reader = MONERO_UNWRAP(db.start_read());
+      EXPECT(pool.scan_account(account, reader).empty());
     }
 
     SECTION("add_txs")
@@ -81,7 +88,8 @@ LWS_CASE("mempool")
       std::array<cryptonote::transaction, 2> txes{{tx1.tx, tx2.tx}};
       pool.add_txs(epee::to_mut_span(txes));
 
-      auto results = pool.scan_account(account);
+      auto reader = MONERO_UNWRAP(db.start_read());
+      auto results = pool.scan_account(account, reader);
       EXPECT(results.size() == 1);
       EXPECT(results.at(0).hash == get_transaction_hash(tx1.tx));
       EXPECT(results.at(0).spends.size() == 0);
@@ -89,7 +97,7 @@ LWS_CASE("mempool")
       EXPECT(results.at(0).outputs.at(0).link.height == lws::db::block_id::txpool);
       EXPECT(results.at(0).outputs.at(0).link.tx_hash == get_transaction_hash(tx1.tx));
 
-      results = pool.scan_account(account);
+      results = pool.scan_account(account, reader);
       EXPECT(results.size() == 1);
       EXPECT(results.at(0).hash == get_transaction_hash(tx1.tx));
       EXPECT(results.at(0).spends.size() == 0);
@@ -98,7 +106,7 @@ LWS_CASE("mempool")
       EXPECT(results.at(0).outputs.at(0).link.tx_hash == get_transaction_hash(tx1.tx));
 
       pool.reset_txs(lws::mempool::pool_table{});
-      results = pool.scan_account(account);
+      results = pool.scan_account(account, reader);
       EXPECT(results.empty());
     }
 
@@ -125,13 +133,128 @@ LWS_CASE("mempool")
         }
       );
 
-      auto results = pool.scan_account(account);
+      auto reader = MONERO_UNWRAP(db.start_read());
+      auto results = pool.scan_account(account, reader);
       EXPECT(results.size() == 1);
       EXPECT(results.at(0).hash == get_transaction_hash(tx1.tx));
       EXPECT(results.at(0).spends.size() == 0);
       EXPECT(results.at(0).outputs.size() == 1);
       EXPECT(results.at(0).outputs.at(0).link.height == lws::db::block_id::txpool);
       EXPECT(results.at(0).outputs.at(0).link.tx_hash == get_transaction_hash(tx1.tx));
+    }
+
+    SECTION("subaddress")
+    {
+      const lws::db::account_address address{
+        base.m_account_address.m_view_public_key,
+        base.m_account_address.m_spend_public_key
+      };
+      EXPECT(db.add_account(address, base.m_view_secret_key));
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), address, base.m_view_secret_key, indexes, 2));
+      }
+
+      hw::core::device_default hw{};
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      destinations.emplace_back();
+      destinations.back().amount = 2000;
+      destinations.back().addr = hw.get_subaddress(base, cryptonote::subaddress_index{0, 1});
+      destinations.back().is_subaddress = true;
+      const auto tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+      std::array<cryptonote::transaction, 1> txes{{tx.tx}};
+      pool.add_txs(epee::to_mut_span(txes));
+
+      lws::db::address_index lookahead{};
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        const lws::db::account db_account = MONERO_UNWRAP(reader.get_account(address)).second;
+        lookahead = db_account.lookahead;
+        lws::account full_account{db_account, {}, {}};
+
+        const auto results = pool.scan_account(full_account, reader);
+        EXPECT(results.size() == 1);
+        EXPECT(results.at(0).hash == get_transaction_hash(tx.tx));
+        EXPECT(results.at(0).outputs.size() == 2);
+
+        const lws::db::address_index subaddress{lws::db::major_index::primary, lws::db::minor_index(1)};
+        const auto& outputs = results.at(0).outputs;
+        const auto to_subaddress = std::find_if(outputs.begin(), outputs.end(), [&] (const lws::db::output& out) {
+          return out.recipient == subaddress;
+        });
+        EXPECT(to_subaddress != outputs.end());
+        EXPECT(to_subaddress->spend_meta.amount == 2000u);
+      }
+
+      // The REST scan must not change the lookahead
+      EXPECT(MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_account(address)).second.lookahead == lookahead);
+    }
+
+    SECTION("subaddress after skip")
+    {
+      // make_tx decodes all outputs with the view key of the sender, so the
+      // scanned account uses the same view key with a different spend key
+      cryptonote::account_keys other = lws_test::make_account();
+      other.m_account_address.m_view_public_key = base.m_account_address.m_view_public_key;
+      other.m_view_secret_key = base.m_view_secret_key;
+
+      const lws::db::account_address address{
+        other.m_account_address.m_view_public_key,
+        other.m_account_address.m_spend_public_key
+      };
+      EXPECT(db.add_account(address, other.m_view_secret_key));
+
+      hw::core::device_default hw{};
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      destinations.emplace_back();
+      destinations.back().amount = 2000;
+      destinations.back().addr = hw.get_subaddress(other, cryptonote::subaddress_index{0, 1});
+      destinations.back().is_subaddress = true;
+      const auto tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+      std::array<cryptonote::transaction, 1> txes{{tx.tx}};
+      pool.add_txs(epee::to_mut_span(txes));
+
+      {
+        auto reader = MONERO_UNWRAP(db.start_read());
+        lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}};
+        EXPECT(pool.scan_account(full_account, reader).empty());
+      }
+
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+        EXPECT(db.upsert_subaddresses(lws::db::account_id(1), address, other.m_view_secret_key, indexes, 2));
+      }
+
+      auto reader = MONERO_UNWRAP(db.start_read());
+      lws::account full_account{MONERO_UNWRAP(reader.get_account(address)).second, {}, {}};
+      const auto results = pool.scan_account(full_account, reader);
+      EXPECT(results.size() == 1);
+      EXPECT(results.at(0).hash == get_transaction_hash(tx.tx));
+      EXPECT(results.at(0).outputs.size() == 1);
+      EXPECT(results.at(0).outputs.at(0).recipient == (lws::db::address_index{lws::db::major_index::primary, lws::db::minor_index(1)}));
+      EXPECT(results.at(0).outputs.at(0).spend_meta.amount == 2000u);
     }
   }
 }

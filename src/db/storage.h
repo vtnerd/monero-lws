@@ -223,6 +223,12 @@ namespace db
     //! \return A copy of the LMDB environment, but not reusable txn/cursors.
     storage clone() const noexcept;
 
+    //! \return Storage without an LMDB environment, like a moved-from object.
+    static storage none() noexcept { return storage{nullptr}; }
+
+    //! \return False if `this` has no LMDB environment.
+    explicit operator bool() const noexcept { return bool(db); }
+
     //! Rollback chain and accounts to `height`.
     expect<void> rollback(block_id height);
 
