@@ -335,12 +335,16 @@ namespace lws
     if (height == db::block_id::txpool)
       height = user.scan_height();
 
+    // release reader first - update_lookahead() below can trigger resize(),
+    // which takes ctx.sync exclusive while this reader holds it shared
+    reader = expect<db::storage_reader>{common_error::kInvalidArgument};
+
     auto upserted = disk.update_lookahead(user.db_address(), height, match, max_subaddresses);
+    update_reader(); // reacquire - released above regardless of outcome
+
     if (!upserted)
       return upserted.error();
-    if (0 < *upserted)
-      update_reader(); // update reader after upsert added new addresses
-    else if (*upserted < 0)
+    if (*upserted < 0)
       return {error::max_subaddresses};
     return success();
   }
