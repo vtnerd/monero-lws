@@ -136,8 +136,8 @@ LWS_CASE("lws::ownership_test")
 {
   const auto sender = lws_test::make_account();
   const auto receiver = lws_test::make_account();
-  const lws::db::account_id sender_id{1};
-  const lws::db::account_id receiver_id{2};
+  const auto sender_id = lws::db::account_id(1);
+  const auto receiver_id = lws::db::account_id(2);
 
   SETUP("Encrypted payment id with sender and receiver both registered")
   {
