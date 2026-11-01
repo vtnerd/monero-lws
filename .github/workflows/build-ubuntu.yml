@@ -15,7 +15,7 @@ env:
         echo "Acquire::Retries \"3\";"         | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::http::Timeout \"120\";" | sudo tee -a /etc/apt/apt.conf.d/80-custom
         echo "Acquire::ftp::Timeout \"120\";"  | sudo tee -a /etc/apt/apt.conf.d/80-custom
-  BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl zmq libpgm miniupnpc expat libunwind-headers unbound'
+  BREW_INSTALL_MAC: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install boost hidapi openssl@3 zmq libpgm miniupnpc expat libunwind-headers unbound'
   CONFIGURE_BASIC: '-B "$GITHUB_WORKSPACE/lws/build" -DMONERO_SOURCE_DIR="$GITHUB_WORKSPACE/monero" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -S "$GITHUB_WORKSPACE/lws"'
   BUILD: 'cmake --build "$GITHUB_WORKSPACE/lws/build" -j$(nproc)'
   RUN: 'ctest --test-dir "$GITHUB_WORKSPACE/lws/build" --output-on-failure'
