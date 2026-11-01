@@ -168,14 +168,31 @@ namespace rct
       using clsags_max = max_inputs_per_tx;
       using pseudo_outs_min_size = wire::min_element_sizeof<key>;
 
+      // FCMP++ only, and part of the tx hash
+      std::optional<std::uint64_t> reference_block;
+      std::optional<std::uint8_t> n_tree_layers;
+      std::optional<fcmp_pp::FcmpPpProof> fcmp_pp;
+
       wire::object(source,
         wire::field("range_proofs", wire::array<rf_min_size>(std::ref(self.prunable.rangeSigs))),
         wire::field("bulletproofs", wire::array<bf_max>(std::ref(self.prunable.bulletproofs))),
         wire::field("bulletproofs_plus", wire::array<bf_plus_max>(std::ref(self.prunable.bulletproofs_plus))),
         wire::field("mlsags", wire::array<mlsags_max>(std::ref(self.prunable.MGs))),
         wire::field("clsags", wire::array<clsags_max>(std::ref(self.prunable.CLSAGs))),
-        wire::field("pseudo_outs", wire::array<pseudo_outs_min_size>(std::ref(self.pseudo_outs)))
+        wire::field("pseudo_outs", wire::array<pseudo_outs_min_size>(std::ref(self.pseudo_outs))),
+        wire::optional_field("reference_block", std::ref(reference_block)),
+        wire::optional_field("n_tree_layers", std::ref(n_tree_layers)),
+        wire::optional_field("fcmp_pp", std::ref(fcmp_pp))
       );
+
+      if (reference_block || n_tree_layers || fcmp_pp)
+      {
+        if (!reference_block || !n_tree_layers || !fcmp_pp)
+          WIRE_DLOG_THROW(wire::error::schema::missing_key, "Expected `reference_block`, `n_tree_layers`, and `fcmp_pp`");
+        self.prunable.reference_block = *reference_block;
+        self.prunable.n_tree_layers = *n_tree_layers;
+        self.prunable.fcmp_pp = std::move(*fcmp_pp);
+      }
 
       const bool pruned =
         self.prunable.rangeSigs.empty() &&
@@ -183,7 +200,8 @@ namespace rct
         self.prunable.bulletproofs_plus.empty() &&
         self.prunable.MGs.empty() &&
         self.prunable.CLSAGs.empty() &&
-        self.pseudo_outs.empty();
+        self.pseudo_outs.empty() &&
+        self.prunable.fcmp_pp.empty();
 
       if (pruned)
         WIRE_DLOG_THROW(wire::error::schema::array, "Expected at least one prunable field");
