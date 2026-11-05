@@ -29,6 +29,7 @@
 
 #include "carrot_core/account_secrets.h"     // monero/src
 #include "carrot_core/address_utils.h"       // monero/src
+#include "carrot_core/carrot_enote_types.h"  // monsro/src
 #include "carrot_core/device.h"              // monero/src
 #include "carrot_core/device_ram_borrowed.h" // monero/src
 #include "carrot_core/enote_utils.h"         // monero/src
@@ -137,7 +138,7 @@ namespace lws { namespace carrot
         ::carrot::CarrotOutputOpeningHintV1{
           ::carrot::CarrotEnoteV1{
             source.pub,
-            rct::commit(source.spend_meta.amount, source.ringct_mask),
+            ::carrot::commit_carrot_amount(source.spend_meta.amount, rct::rct2sk(source.ringct_mask)),
             ::carrot::encrypt_carrot_amount(source.spend_meta.amount, ctx, source.pub),
             source.anchor,
             tag,
@@ -166,7 +167,7 @@ namespace lws { namespace carrot
     const auto image_device = std::make_shared<::carrot::generate_image_key_ram_borrowed_device>(secrets.kgi);
     const auto generate_device = std::make_shared<::carrot::generate_address_secret_ram_borrowed_device>(secrets.sga);
     const auto carrot_device = std::make_shared<::carrot::carrot_hierarchy_address_device>(
-      generate_device, primary.spend_public, get_account_view_public(primary.spend_public, secrets.kv)
+      generate_device, primary.spend_public, get_account_view_public(primary.spend_public, secrets.kv), primary.view_public
     );
     const auto hybrid_device = std::make_shared<::carrot::hybrid_hierarchy_address_device>(
       carrot_device, nullptr

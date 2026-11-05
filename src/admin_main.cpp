@@ -36,6 +36,7 @@
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -286,6 +287,55 @@ namespace
     json.finish();
   }
 
+  void webhook_add(program prog, std::ostream& out)
+  {
+    if (prog.arguments.size() < 2)
+      throw std::runtime_error{"webhook_add requires 2 or more arguments"};
+
+    lws::rpc::webhook_add_req req{};
+    req.type = MONERO_UNWRAP(lws::db::webhook_type_from_string(prog.arguments[0]));
+    req.url = prog.arguments[1];
+
+    // remaining arguments are an optional address, and `name=value` options
+    for (std::size_t i = 2; i < prog.arguments.size(); ++i)
+    {
+      const std::string& arg = prog.arguments[i];
+      const std::size_t split = arg.find('=');
+      if (split == std::string::npos)
+      {
+        if (req.address)
+          throw std::runtime_error{"webhook_add given more than one address"};
+        req.address = lws::db::address_string(arg).value();
+        continue;
+      }
+
+      const boost::string_ref name{arg.data(), split};
+      const std::string value = arg.substr(split + 1);
+      if (name == "payment_id")
+      {
+        crypto::hash8 payment_id{};
+        if (!epee::string_tools::hex_to_pod(value, payment_id))
+          throw std::runtime_error{"webhook_add given invalid payment_id"};
+        req.payment_id = payment_id;
+      }
+      else if (name == "confirmations")
+      {
+        if (value.empty() || 10 < value.size() || value.find_first_not_of("0123456789") != std::string::npos)
+          throw std::runtime_error{"webhook_add given invalid confirmations"};
+        const std::uint64_t confirmations = std::stoull(value);
+        if (std::numeric_limits<std::uint32_t>::max() < confirmations)
+          throw std::runtime_error{"webhook_add given invalid confirmations"};
+        req.confirmations = std::uint32_t(confirmations);
+      }
+      else if (name == "token")
+        req.token = value;
+      else
+        throw std::runtime_error{"webhook_add given unknown option " + std::string{name}};
+    }
+
+    run_command(lws::rpc::webhook_add, out, std::move(prog.disk), std::move(req));
+  }
+
   void webhook_delete(program prog, std::ostream& out)
   {
     if (prog.arguments.size() < 1)
@@ -315,6 +365,13 @@ namespace
     run_command(lws::rpc::webhook_delete_uuid, out, std::move(prog.disk), std::move(req));
   }
 
+  void webhook_list(program prog, std::ostream& out)
+  {
+    if (!prog.arguments.empty())
+      throw std::runtime_error{"webhook_list takes zero arguments"};
+    run_command(lws::rpc::webhook_list, out, std::move(prog.disk));
+  }
+
   struct command
   {
     char const* const name;
@@ -335,8 +392,10 @@ namespace
     {"reject_requests",       &reject_requests, "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
     {"rescan",                &rescan,          "<height> <base58 address> [base 58 address]..."},
     {"rollback",              &rollback,        "<height>"},
+    {"webhook_add",           &webhook_add,     "<\"tx-confirmation\"|\"tx-spend\"|\"new-account\"> <url> [base58 address] [payment_id=<hex>] [confirmations=<count>] [token=<string>]"},
     {"webhook_delete",        &webhook_delete,  "<base58 address> [base 58 address]..."},
-    {"webhook_delete_uuid",   &webhook_delete_uuid, "<event_id> [event_id]..."}
+    {"webhook_delete_uuid",   &webhook_delete_uuid, "<event_id> [event_id]..."},
+    {"webhook_list",          &webhook_list,    ""}
   };
 
   void print_help(std::ostream& out)

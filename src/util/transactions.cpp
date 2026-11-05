@@ -59,10 +59,9 @@ std::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct::
   rct::addKeys2(Ctmp, copy.mask, copy.amount, rct::H);
   if (rct::equalKeys(commitment, Ctmp))
   {
-    /*rct::xmr_amount out = 0;
+    rct::xmr_amount out = 0;
     if (rct::h2d(out, copy.amount))
-      return {{out, copy.mask}}; */
-    return {{rct::h2d(copy.amount), copy.mask}};
+      return {{out, copy.mask}};
   }
   return std::nullopt;
 }

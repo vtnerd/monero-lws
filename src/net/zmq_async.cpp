@@ -27,6 +27,7 @@
 
 #include "zmq_async.h"
 
+#include "rpc/client.h"
 #include <stdexcept>
 
 namespace net { namespace zmq
@@ -86,6 +87,13 @@ namespace net { namespace zmq
     }
   }
 
+  expect<std::string> read_msg_op::read()
+  {
+    // net::zmq::read has a small limit designed for RPC server usage
+    MONERO_PRECOND(sock_);
+    return lws::rpc::read_msg(sock_->zsock.get(), ZMQ_DONTWAIT, sock_->msg_limit);
+  }
+
   expect<async_client> async_client::make(boost::asio::io_context& io, socket zsock)
   {
     MONERO_PRECOND(zsock != nullptr);
@@ -95,7 +103,7 @@ namespace net { namespace zmq
     if (zmq_getsockopt(zsock.get(), ZMQ_FD, &fd, &length) != 0)
       return net::zmq::get_error_code();
 
-    async_client out{std::move(zsock), nullptr, false};
+    async_client out{std::move(zsock), nullptr, std::numeric_limits<std::uint32_t>::max(), false};
     out.asock.reset(new adescriptor{io, fd});
     return out;
   }

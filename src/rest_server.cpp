@@ -100,6 +100,7 @@ namespace lws
 {
   struct runtime_options
   {
+    const std::vector<std::string> access_controls;
     const std::chrono::seconds feed_timeout;
     const std::uint32_t max_subaddresses;
     const epee::net_utils::ssl_verification_t webhook_verify;
@@ -108,7 +109,8 @@ namespace lws
     const bool auto_accept_import;
 
     explicit runtime_options(const rest_server::configuration& config)
-      : feed_timeout(config.feed_timeout),
+      : access_controls(config.access_controls),
+        feed_timeout(config.feed_timeout),
         max_subaddresses(config.max_subaddresses),
         webhook_verify(config.webhook_verify),
         disable_admin_auth(config.disable_admin_auth),
@@ -194,28 +196,32 @@ namespace lws
       }
     };
 
-    struct copyable_slice
+    struct http_response
     {
       epee::byte_slice value;
+      boost::beast::http::status status;
 
-      copyable_slice(epee::byte_slice value) noexcept
-        : value(std::move(value))
+      http_response(epee::byte_slice value, const boost::beast::http::status status = boost::beast::http::status::ok) noexcept
+        : value(std::move(value)), status(status)
       {}
 
-      copyable_slice(copyable_slice&&) = default;
-      copyable_slice(const copyable_slice& rhs) noexcept
-        : value(rhs.value.clone())
+      http_response(http_response&&) = default;
+      http_response(const http_response& rhs) noexcept
+        : value(rhs.value.clone()), status(rhs.status)
       {}
 
-      copyable_slice& operator=(copyable_slice&&) = default;
-      copyable_slice& operator=(const copyable_slice& rhs) noexcept
+      http_response& operator=(http_response&&) = default;
+      http_response& operator=(const http_response& rhs) noexcept
       {
         if (this != std::addressof(rhs))
+        {
           value = rhs.value.clone();
+          status = rhs.status;
+        }
         return *this;
       }
     };
-    using async_complete = void(expect<copyable_slice>);
+    using async_complete = void(expect<http_response>);
 
     bool is_locked(std::uint64_t unlock_time, db::block_id last, db::block_id tx_height) noexcept
     {
@@ -232,7 +238,7 @@ namespace lws
       if (minor)
       {
         const auto major = to_uint(lookahead.maj_i);
-        if (std::numeric_limits<std::uint32_t>::max() < major / minor)
+        if (std::numeric_limits<std::uint32_t>::max() / minor < major)
           return false;
         return major * minor <= data.global->options.max_subaddresses;
       }
@@ -339,7 +345,7 @@ namespace lws
             : boost::asio::coroutine(), self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, const expect<copyable_slice>& value)
+          void send_response(const boost::system::error_code error, const expect<http_response>& value)
           {
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
@@ -550,17 +556,20 @@ namespace lws
 
     struct get_address_txs
     {
-      using request = rpc::account_credentials;
+      using request = rpc::get_address_txs_request;
       using response = rpc::get_address_txs_response;
 
       static expect<response> handle(const request& req, connection_data& data, std::function<async_complete>&&)
       {
-        auto user = lws::rpc::open_account(req, data.global->disk);
+        auto user = lws::rpc::open_account(req.creds, data.global->disk);
         if (!user)
           return user.error();
 
         data.passed_login = true;
-        return response::load(user->second, user->first, data.global->mempool.get(), false);
+        auto resp = response::load(user->second, user->first, data.global->mempool.get(), req.receives);
+        if (resp && req.receives)
+          resp->user_key = req.creds.key;
+        return resp;
       }
     };
 
@@ -629,7 +638,7 @@ namespace lws
             : self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, expect<copyable_slice> value) const
+          void send_response(const boost::system::error_code error, expect<http_response> value) const
           {
             assert(self_ != nullptr);
 
@@ -1502,7 +1511,10 @@ namespace lws
           std::get<0>(elem) = std::move(msg);
           std::get<1>(elem) = std::move(resume);
           if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, std::get<2>(elem)))
+          {
+            active->resumers.pop_back();
             return {lws::error::bad_client_tx};
+          }
           return success();
         }
 
@@ -1514,7 +1526,7 @@ namespace lws
             : boost::asio::coroutine(), self_(std::move(self))
           {}
 
-          void send_response(const boost::system::error_code error, expect<copyable_slice> value)
+          void send_response(const boost::system::error_code error, expect<http_response> value, const bool relayed = false)
           {
             assert(self_ != nullptr);
             assert(self_->strand.running_in_this_thread());
@@ -1532,7 +1544,7 @@ namespace lws
               }
               else
               {
-                if (self_->parent && self_->parent->mempool)
+                if (relayed && self_->parent && self_->parent->mempool)
                   self_->parent->mempool->add_txs({std::addressof(std::get<2>(self_->resumers.front())), 1});
 
                 MDEBUG("Completed ZMQ request in /submit_raw_tx");
@@ -1618,12 +1630,21 @@ namespace lws
                   const expect<void> status =
                     rpc::parse_response(daemon_resp, std::move(self.in));
 
-                  if (!status)
+                  if (!status && daemon_resp.status == cryptonote::rpc::Message::STATUS_FAILED)
+                  {
+                    expect<epee::byte_slice> body =
+                      json_response(async_response{daemon_resp.status, daemon_resp.error_details});
+                    if (body)
+                      send_response({}, http_response{std::move(*body), boost::beast::http::status::unprocessable_entity});
+                    else
+                      send_response({}, body.error());
+                  }
+                  else if (!status)
                     send_response({}, status.error());
                   else if (!daemon_resp.relayed)
-                    send_response({}, {lws::error::tx_relay_failed});
+                    send_response({}, json_response(async_response{"OK", "Not relayed", true}));
                   else
-                    send_response({}, json_response(async_response{"OK"}));
+                    send_response({}, json_response(async_response{"OK"}), true);
                 }
               }
             }
@@ -1833,7 +1854,7 @@ namespace lws
       {"/webhook_list",          call_admin<rpc::webhook_list_>,          100, false}
     };
     constexpr const unsigned max_admin_endpoint_size =
-      get_max(std::begin(endpoints), std::end(endpoints));
+      get_max(std::begin(admin_endpoints), std::end(admin_endpoints));
 
     constexpr const unsigned max_endpoint_size =
       std::max(max_standard_endpoint_size, max_admin_endpoint_size);
@@ -1971,6 +1992,31 @@ namespace lws
       MDEBUG("Destroying connection " << this);
     }
 
+    void set_cors()
+    {
+      const std::vector<std::string>& origins = data_.global->options.access_controls;
+      if (origins.empty())
+        return;
+
+      // The response echoes the request Origin. Caches must not share it between origins.
+      response_.set(boost::beast::http::field::vary, "Origin");
+
+      const auto& request = parser_->get();
+      const auto origin = request[boost::beast::http::field::origin];
+      if (origin.empty())
+        return;
+      if (std::find(origins.begin(), origins.end(), "*") == origins.end() &&
+          std::find(origins.begin(), origins.end(), origin) == origins.end())
+        return;
+
+      response_.set(boost::beast::http::field::access_control_allow_origin, origin);
+      if (request.method() == boost::beast::http::verb::options)
+      {
+        response_.set(boost::beast::http::field::access_control_allow_methods, "GET, POST, OPTIONS");
+        response_.set(boost::beast::http::field::access_control_allow_headers, "Content-Type");
+      }
+    }
+
     template<typename F>
     void bad_request(const boost::beast::http::status status, F&& resume)
     {
@@ -1979,6 +2025,7 @@ namespace lws
       assert(strand_.running_in_this_thread());
       response_ = {status, parser_->get().version()};
       response_.set(boost::beast::http::field::server, BOOST_BEAST_VERSION_STRING);
+      set_cors();
       response_.keep_alive(keep_alive_);
       response_.prepare_payload();
       resume();
@@ -1991,7 +2038,7 @@ namespace lws
       MINFO("REST error: " << error.message() << " from " << sock().remote_endpoint(ec) << " / " << this);
 
       assert(strand_.running_in_this_thread());
-      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount)
+      if (error.category() == wire::error::rapidjson_category() || error == lws::error::invalid_range || error == lws::error::not_enough_amount || error == lws::error::bad_client_tx)
         return bad_request(boost::beast::http::status::bad_request, std::forward<F>(resume));
       else if (error == lws::error::bad_verb)
         return bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
@@ -2005,14 +2052,15 @@ namespace lws
     }
 
     template<typename F>
-    void valid_request(epee::byte_slice body, F&& resume)
+    void valid_request(epee::byte_slice body, F&& resume, const boost::beast::http::status status = boost::beast::http::status::ok)
     {
-      MDEBUG("Sending HTTP 200 OK (" << body.size() << " bytes) to " << this);
+      MDEBUG("Sending HTTP " << int(status) << " (" << body.size() << " bytes) to " << this);
 
       assert(strand_.running_in_this_thread());
-      response_ = {boost::beast::http::status::ok, parser_->get().version(), std::move(body)};
+      response_ = {status, parser_->get().version(), std::move(body)};
       response_.set(boost::beast::http::field::server, BOOST_BEAST_VERSION_STRING);
       response_.set(boost::beast::http::field::content_type, "application/json");
+      set_cors();
       response_.keep_alive(keep_alive_);
       response_.prepare_payload();
       resume(); // runs in strand
@@ -2122,6 +2170,8 @@ namespace lws
       }
 
       const boost::beast::http::verb verb = self_->parser_->get().method();
+      if (verb == boost::beast::http::verb::options && !self_->data_.global->options.access_controls.empty())
+        return self_->bad_request(boost::beast::http::status::ok, std::forward<F>(resume));
       if (verb != boost::beast::http::verb::post && verb != boost::beast::http::verb::get)
         return self_->bad_request(boost::beast::http::status::method_not_allowed, std::forward<F>(resume));
 
@@ -2135,14 +2185,14 @@ namespace lws
           a new callable like `wrap` does (which is deprecated, see dispatch
           below). */
         const auto& self = self_;
-        resumer = [self, resume] (expect<copyable_slice> body) mutable
+        resumer = [self, resume] (expect<http_response> body) mutable
         {
             boost::asio::dispatch(self->strand_, [self, resume = std::move(resume), body = std::move(body)] () mutable
             {
               if (!body)
                 self->bad_request(body.error(), std::move(resume));
               else
-                self->valid_request(std::move(body->value), std::move(resume));
+                self->valid_request(std::move(body->value), std::move(resume), body->status);
             });
         };
       }

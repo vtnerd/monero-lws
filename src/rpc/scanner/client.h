@@ -37,6 +37,7 @@
 #include "crypto/hash.h" // monero/src
 #include "db/fwd.h"
 #include "rpc/scanner/connection.h"
+#include "rpc/client.h"
 #include "rpc/scanner/queue.h"
 
 namespace lws { namespace rpc { namespace scanner
@@ -45,6 +46,7 @@ namespace lws { namespace rpc { namespace scanner
   class client : public connection
   {
     const std::vector<std::shared_ptr<queue>> local_;
+    rpc::client zclient_;
     const std::string pass_;
     std::size_t next_push_;
     boost::asio::steady_timer connect_timer_;
@@ -58,13 +60,16 @@ namespace lws { namespace rpc { namespace scanner
     using command = bool(*)(const std::shared_ptr<client>&);
 
     //! Does not start connection to `address`, see `connect`.
-    explicit client(boost::asio::io_context& io, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local);
+    explicit client(boost::asio::io_context& io, rpc::client zclient, const std::string& address, std::string pass, std::vector<std::shared_ptr<queue>> local);
 
     client(const client&) = delete;
     client(client&&) = delete;
     ~client();
     client& operator=(const client&) = delete;
     client& operator=(client&&) = delete;
+
+    //! \return accept all message sizes
+    header::length_type::value_type next_size() const noexcept;
 
     //! \return Handlers for client commands
     static const std::array<command, 2>& commands() noexcept;

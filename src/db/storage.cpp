@@ -52,7 +52,6 @@
 #include "hex.h"
 #include "lmdb/lws_database.h"
 #include "lmdb/lws_error.h"
-#include "lmdb/lws_table.h"
 #include "lmdb/error.h"
 #include "lmdb/key_stream.h"
 #include "lmdb/msgpack_table.h"
@@ -425,7 +424,7 @@ namespace db
     constexpr const lmdb::msgpack_table<webhook_key, webhook_dupsort, webhook_data> webhooks{
       "webhooks_by_account_id,payment_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<db::webhook_dupsort>
     };
-    constexpr const lws_lmdb::basic_table<account_id, webhook_event> events_by_account_id{
+    constexpr const lmdb::basic_table<account_id, webhook_event> events_by_account_id{
       "webhook_events_by_account_id,type,block_id,tx_hash,output_id,payment_id,event_id", (MDB_CREATE | MDB_DUPSORT), &lmdb::less<webhook_event>
     };
     constexpr const lmdb::msgpack_table<account_id, major_index, index_ranges> subaddress_ranges{
@@ -444,7 +443,7 @@ namespace db
       }
       else
       {
-        auto new_cur = lmdb::open_cursor<D>(txn, tbl);
+        auto new_cur = lws_lmdb::open_cursor<D>(txn, tbl);
         if (!new_cur)
           return new_cur.error();
         cur = std::move(*new_cur);
@@ -529,7 +528,7 @@ namespace db
 
     void check_blockchain(MDB_txn& txn, MDB_dbi tbl)
     {
-      cursor::blocks cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_blocks>(txn, tbl));
+      cursor::blocks cur = MONERO_UNWRAP(lws_lmdb::open_cursor<cursor::close_blocks>(txn, tbl));
 
       std::map<std::uint64_t, crypto::hash> const& points =
         storage::get_checkpoints().get_points();
@@ -585,7 +584,7 @@ namespace db
 
     void check_pow(MDB_txn& txn, MDB_dbi tbl)
     {
-      cursor::pow cur = MONERO_UNWRAP(lmdb::open_cursor<cursor::close_pow>(txn, tbl));
+      cursor::pow cur = MONERO_UNWRAP(lws_lmdb::open_cursor<cursor::close_pow>(txn, tbl));
 
       MDB_val key = lmdb::to_val(pows_version);
       int err = mdb_cursor_get(cur.get(), &key, nullptr, MDB_SET);
@@ -784,7 +783,7 @@ namespace db
     explicit storage_internal(lws_lmdb::environment env, unsigned create_queue_max)
       : lws_lmdb::database(std::move(env)), tables{}, create_queue_max(create_queue_max)
     {
-      lmdb::write_txn txn = this->create_write_txn().value();
+      lws_lmdb::write_txn txn = this->create_write_txn().value();
       assert(txn != nullptr);
 
       tables.blocks      = blocks.open(*txn).value();
@@ -1511,7 +1510,7 @@ namespace db
     return success();
   }
 
-  lmdb::suspended_txn storage_reader::finish_read() noexcept
+  lws_lmdb::suspended_txn storage_reader::finish_read() noexcept
   {
     if (txn != nullptr)
     {
@@ -1595,11 +1594,11 @@ namespace db
     return storage{db};
   }
 
-  expect<storage_reader> storage::start_read(lmdb::suspended_txn txn) const
+  expect<storage_reader> storage::start_read(lws_lmdb::suspended_txn txn) const
   {
     MONERO_PRECOND(db != nullptr);
 
-    expect<lmdb::read_txn> reader = db->create_read_txn(std::move(txn));
+    expect<lws_lmdb::read_txn> reader = db->create_read_txn(std::move(txn));
     if (!reader)
       return reader.error();
 
@@ -2455,7 +2454,7 @@ namespace db
         return success();
 
       // Quick fail check
-      if (std::numeric_limits<std::uint32_t>::max() < major / minor)
+      if (std::numeric_limits<std::uint32_t>::max() / minor < major)
         return {error::max_subaddresses};
       if (max_subaddresses < major * minor)
         return {error::max_subaddresses};
@@ -2495,7 +2494,7 @@ namespace db
               const auto this_minor = add_and_clamp(minor - 1, to_uint(receipient->min_i));
 
               // Quick Sanity Check before vector expansion
-              if (minor && std::numeric_limits<std::uint32_t>::max() < needed / minor)
+              if (std::numeric_limits<std::uint32_t>::max() / minor < needed)
                 return {error::max_subaddresses};
               if (max_subaddresses < needed * minor)
                 return {error::max_subaddresses};
@@ -2514,9 +2513,9 @@ namespace db
               }
               else
                 elem = {major_index(major), index_ranges{{index_range{minor_index(0), minor_index(this_minor)}}}};
-
-              err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_NEXT_DUP);
             }
+
+            err = mdb_cursor_get(&outputs_cur, &key, &value, MDB_NEXT_DUP);
           }
         }
       }
@@ -2606,7 +2605,8 @@ namespace db
         return user.error();
 
       const block_id current_height = user->scan_height;
-      user->scan_height = std::min(height, user->scan_height);
+      const block_id new_height = std::min(height, current_height);
+      user->scan_height = new_height;
       user->start_height = std::min(height, user->start_height);
       if (height <= user->lookahead_fail)
         user->lookahead_fail = block_id(0);
@@ -2630,7 +2630,8 @@ namespace db
       );
       MLWS_LMDB_CHECK(mdb_cursor_del(&accounts_bh_cur, 0));
 
-      key = lmdb::to_val(height);
+      // index must match `scan_height`, which never moves forward here
+      key = lmdb::to_val(new_height);
       value = lmdb::to_val(*lookup);
       MLWS_LMDB_CHECK(
         mdb_cursor_put(&accounts_bh_cur, &key, &value, MDB_NODUPDATA)
@@ -3270,7 +3271,7 @@ namespace db
     }
   } // anonymous
 
-  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow)
+  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow, bool regtest)
   {
     if (users.empty() && chain.empty())
       return {updated{}};
@@ -3279,7 +3280,7 @@ namespace db
     if (!pow.empty())
       MONERO_PRECOND(chain.size() == pow.size());
 
-    return db->try_write([this, height, chain, users, pow] (MDB_txn& txn) -> expect<updated>
+    return db->try_write([this, height, chain, users, pow, regtest] (MDB_txn& txn) -> expect<updated>
     {
       epee::span<const crypto::hash> chain_copy{chain};
       epee::span<const pow_sync> pow_copy{pow};
@@ -3289,7 +3290,7 @@ namespace db
 
       // collect all .value() errors
       updated out{};
-      if (get_checkpoints().get_max_height() <= last_update)
+      if (regtest || get_checkpoints().get_max_height() <= last_update)
       {
         cursor::blocks blocks_cur;
         cursor::pow    pow_cur;
@@ -3532,7 +3533,7 @@ namespace db
         return 0;
 
       expect<std::vector<subaddress_dict>> upserted{error::max_subaddresses};
-      if (major / minor <= std::numeric_limits<decltype(major)>::max())
+      if (major <= std::numeric_limits<decltype(major)>::max() / minor)
       {
         if (major * minor <= max_subaddresses)
         { 

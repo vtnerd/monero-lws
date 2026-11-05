@@ -42,22 +42,22 @@ ENV USE_SINGLE_BUILDDIR 1
 ENV BOOST_DEBUG         1
 
 # Build expat, a dependency for libunbound
-RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_8_1/expat-2.8.1.tar.bz2 && \
-    echo "f5833dd2e1cd7739ec9182804a1a29c4f0cc7c2f26b633d3a2188b7766a88ecb expat-2.8.1.tar.bz2" | sha256sum -c && \
-    tar -xf expat-2.8.1.tar.bz2 && \
-    rm expat-2.8.1.tar.bz2 && \
-    cd expat-2.8.1 && \
+RUN set -ex && wget https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.bz2 && \
+    echo "775e8a68f81a748a401dc3168318d4a39484eb4f954726f21517c8f42c0ba984 expat-2.9.0.tar.bz2" | sha256sum -c && \
+    tar -xf expat-2.9.0.tar.bz2 && \
+    rm expat-2.9.0.tar.bz2 && \
+    cd expat-2.9.0 && \
     ./configure --enable-static --disable-shared --prefix=/usr && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
 
 # Build libunbound for static builds
 WORKDIR /tmp
-RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.25.1.tar.gz && \
-    echo "0fe8b6277b0959cfd17562debac0aa5f71e0b02dc4ffa9c60271c583edab586f unbound-1.25.1.tar.gz" | sha256sum -c && \
-    tar -xzf unbound-1.25.1.tar.gz && \
-    rm unbound-1.25.1.tar.gz && \
-    cd unbound-1.25.1 && \
+RUN set -ex && wget https://www.nlnetlabs.nl/downloads/unbound/unbound-1.26.2.tar.gz && \
+    echo "d8ee7aa6bbb3ff1be7d9e57637d0d0ec2f18273a8efff1a0afe2c665858b96f7 unbound-1.26.2.tar.gz" | sha256sum -c && \
+    tar -xzf unbound-1.26.2.tar.gz && \
+    rm unbound-1.26.2.tar.gz && \
+    cd unbound-1.26.2 && \
     ./configure --disable-shared --enable-static --without-pyunbound --with-libexpat=/usr --with-ssl=/usr --with-libevent=no --without-pythonmodule --disable-flto --with-pthreads --with-libunbound-only --with-pic && \
     make -j${NPROC:-$(nproc)} && \
     make -j${NPROC:-$(nproc)} install
@@ -75,11 +75,11 @@ RUN set -ex && wget https://github.com/zeromq/libzmq/releases/download/v4.3.5/ze
 
 # Build boost for latest security updates
 WORKDIR /tmp
-RUN set -ex && wget https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.bz2 && \
-    echo "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5 boost_1_91_0.tar.bz2" | sha256sum -c && \
-    tar -xf boost_1_91_0.tar.bz2 && \
-    rm boost_1_91_0.tar.bz2 && \
-    cd boost_1_91_0 && \
+RUN set -ex && wget https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.bz2 && \
+    echo "5c1d40cb8e19adbf740a4ec2da35b3e58f3f5804b1dce44deb53df72193cbc6c boost_1_92_0.tar.bz2" | sha256sum -c && \
+    tar -xf boost_1_92_0.tar.bz2 && \
+    rm boost_1_92_0.tar.bz2 && \
+    cd boost_1_92_0 && \
     ./bootstrap.sh && \
     ./b2 -j${NPROC:-$(nproc)} runtime-link=static link=static threading=multi variant=release \
       --with-chrono --with-context --with-coroutine --with-date_time --with-filesystem --with-locale \
@@ -94,7 +94,7 @@ ARG NPROC
 RUN set -ex \
     && git submodule update --init --recursive \
     && rm -rf build && mkdir build && cd build \
-    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D LWS_DEAD_FUNCTION_REMOVAL=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON .. \
+    && cmake -D CMAKE_BUILD_TYPE=Release -D STATIC=ON -D Boost_USE_STATIC_LIBS=ON -D Boost_USE_STATIC_RUNTIME=ON -D LWS_DEAD_FUNCTION_REMOVAL=ON -D BUILD_TESTS=ON -D WITH_RMQ=ON .. \
     && make -j${NPROC:-$(nproc)} monero-lws-admin monero-lws-daemon monero-lws-unit \
     && ./tests/unit/monero-lws-unit
 

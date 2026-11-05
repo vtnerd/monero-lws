@@ -32,6 +32,7 @@
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/system/error_code.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <zmq.h>
@@ -61,6 +62,7 @@ namespace net { namespace zmq
     async_client() = delete;
     socket zsock;
     asocket asock;
+    std::uint32_t msg_limit;
     bool close;
 
     static expect<async_client> make(boost::asio::io_context& io, socket zsock);
@@ -70,6 +72,8 @@ namespace net { namespace zmq
   {
     async_client* sock_;
     std::string* msg_;
+
+    expect<std::string> read();
 
   public:
     read_msg_op(async_client& sock, std::string& msg)
@@ -87,7 +91,7 @@ namespace net { namespace zmq
         return self.complete(boost::asio::error::operation_aborted, 0);
 
       assert(sock_->zsock && sock_->asock);
-      expect<std::string> msg = receive(sock_->zsock.get(), ZMQ_DONTWAIT);
+      expect<std::string> msg = read();
       if (!msg)
       {
         if (msg != make_error_code(EAGAIN))

@@ -82,6 +82,12 @@ namespace
     const std::pair<lws::db::output, std::vector<crypto::key_image>>& data;
     const crypto::secret_key& user_key;
   };
+
+  struct expand_receive
+  {
+    const lws::db::output& data;
+    const crypto::secret_key& user_key;
+  };
 } // anonymous
 
 namespace wire
@@ -136,6 +142,35 @@ namespace
     dest.string({buf, sizeof(buf) - 1});
   }
 
+  //! \return False if `src` is not a ringct output.
+  bool expand_rct(rct_bytes& rct, const lws::db::output& src, const crypto::secret_key& user_key)
+  {
+    const auto flags = unpack(src.extra).first;
+    if (!(flags & lws::db::ringct_output))
+      return false;
+
+    if (!(flags & lws::db::coinbase_output))
+    {
+      crypto::key_derivation derived;
+      if (!crypto::generate_key_derivation(src.spend_meta.tx_public, user_key, derived))
+        MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
+
+      crypto::secret_key scalar;
+      rct::ecdhTuple encrypted{src.ringct_mask, rct::d2h(src.spend_meta.amount)};
+
+      crypto::derivation_to_scalar(derived, src.spend_meta.index, scalar);
+      rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
+
+      rct.commitment = rct::commit(src.spend_meta.amount, src.ringct_mask);
+      rct.mask = encrypted.mask;
+      rct.amount = encrypted.amount;
+    }
+    else
+      rct.mask = rct::identity();
+
+    return true;
+  }
+
   void write_bytes(wire::json_writer& dest, const expand_outputs self)
   {
     /*! \TODO Sending the public key for the output isn't necessary, as it can be
@@ -145,30 +180,8 @@ namespace
 
     rct_bytes rct{};
     rct_bytes const* optional_rct = nullptr;
-    const auto flags = unpack(self.data.first.extra).first;
-    if (flags & lws::db::ringct_output)
-    {
-      if (!(flags & lws::db::coinbase_output))
-      {
-        crypto::key_derivation derived;
-        if (!crypto::generate_key_derivation(self.data.first.spend_meta.tx_public, self.user_key, derived))
-          MONERO_THROW(lws::error::crypto_failure, "generate_key_derivation failed");
-
-        crypto::secret_key scalar;
-        rct::ecdhTuple encrypted{self.data.first.ringct_mask, rct::d2h(self.data.first.spend_meta.amount)};
-
-        crypto::derivation_to_scalar(derived, self.data.first.spend_meta.index, scalar);
-        rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
-
-        rct.commitment = rct::commit(self.data.first.spend_meta.amount, self.data.first.ringct_mask);
-        rct.mask = encrypted.mask;
-        rct.amount = encrypted.amount;
-      }
-      else
-        rct.mask = rct::identity();
-
+    if (expand_rct(rct, self.data.first, self.user_key))
       optional_rct = std::addressof(rct);
-    }
 
     carrot::encrypted_janus_anchor_t const* anchor = nullptr;
     crypto::key_image const* first = nullptr;
@@ -196,6 +209,24 @@ namespace
       wire::field("unified", self.data.first.spend_meta.id.is_unified()),
       wire::optional_field("first_key_image", first),
       wire::optional_field("janus_enc", anchor)
+    );
+  }
+
+  void write_bytes(wire::json_writer& dest, const expand_receive self)
+  {
+    rct_bytes rct{};
+    rct_bytes const* optional_rct = nullptr;
+    if (expand_rct(rct, self.data, self.user_key))
+      optional_rct = std::addressof(rct);
+
+    wire::object(dest,
+      wire::field("amount", lws::rpc::safe_uint64(self.data.spend_meta.amount)),
+      wire::field("public_key", self.data.pub),
+      wire::field("index", self.data.spend_meta.index),
+      wire::field("global_index", self.data.spend_meta.id.low),
+      wire::field("tx_pub_key", self.data.spend_meta.tx_public),
+      wire::optional_field("rct", optional_rct),
+      wire::field("recipient", std::cref(self.data.recipient))
     );
   }
 
@@ -533,7 +564,12 @@ namespace lws
 
   namespace rpc
   {
-    static void write_bytes(wire::json_writer& dest, boost::range::index_value<const get_transaction&> self)
+    struct indexed_transaction : boost::range::index_value<const get_transaction&>
+    {
+      crypto::secret_key const* user_key;
+    };
+
+    static void write_bytes(wire::json_writer& dest, const indexed_transaction& self)
     {
       epee::span<const std::uint8_t> const* payment_id = nullptr;
       epee::span<const std::uint8_t> payment_id_bytes;
@@ -554,6 +590,14 @@ namespace lws
       const bool mempool = height == db::block_id::txpool;
       const iso_timestamp timestamp{self.value().info.timestamp};
 
+      // Mempool outputs are always in `receives`, so only the key enables this field
+      static const std::vector<db::output> no_receives{};
+      const auto& receives = self.user_key ? self.value().receives : no_receives;
+      const auto expand = [&self] (const db::output& src)
+      {
+        return expand_receive{src, *self.user_key};
+      };
+
       wire::object(dest,
         wire::field("id", std::uint64_t(self.index())),
         wire::field("hash", std::cref(self.value().info.link.tx_hash)),
@@ -568,7 +612,8 @@ namespace lws
         wire::field("mempool", mempool),
         wire::field("mixin", self.value().info.spend_meta.rpc_mixin()),
         wire::field("recipient", self.value().info.recipient),
-        wire::field("spent_outputs", std::cref(self.value().spends))
+        wire::field("spent_outputs", std::cref(self.value().spends)),
+        wire::optional_field("receives", wire::array(boost::adaptors::transform(receives, expand)))
       );
     }
   } // rpc
@@ -615,7 +660,6 @@ namespace lws
           static_assert(std::is_trivially_copyable<U>(), "value type must be memcpy safe");
           static_assert(std::is_trivially_copyable<G>(), "field type must be memcpy safe");
           static_assert(sizeof(G) + uoffset <= sizeof(U), "bad field and/or offset");
-          assert(sizeof(G) + uoffset <= end - pos);
           assert(!is_end());
 
           G value;
@@ -630,11 +674,11 @@ namespace lws
     vec_lmdb_<T> vec_lmdb(const std::vector<T>& src) { return {src.begin(), src.end()}; }
 
     template<typename T, typename U>
-    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, db::account const* const user, mempool const* const pool, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
+    std::pair<std::vector<rpc::get_transaction>, std::uint64_t> merge_into_txes(T output, U spend, db::account const* const user, db::storage_reader* const reader, mempool const* const pool, const std::size_t reserve, const bool all_outputs, const bool skip_spend_meta)
     {
       // merge input and output info into a single set of txes.
 
-      const bool has_pool = (user && pool);
+      const bool has_pool = (user && reader && pool);
       std::uint64_t total = 0;
       crypto::secret_key balance_key{};
       db::account_address user_address{};
@@ -768,7 +812,7 @@ namespace lws
         // Add mempool transactions. Order is not important, since
         // mempool txs cannot depend on each other.
         lws::account full_user{*user, std::move(receives), std::move(balance), {}};
-        const auto pool_txs = pool->scan_account(full_user);
+        const auto pool_txs = pool->scan_account(full_user, *reader);
         for (const auto& row: pool_txs)
         {
           // mempool update after block could be delayed
@@ -807,11 +851,12 @@ namespace lws
           }
           else
           {
-            if (row.spends.empty() || from_future) break;
-            auto spend = row.spends.front();
             tx.info.link.tx_hash = row.hash;
             tx.info.link.height = db::block_id::txpool;
             tx.info.spend_meta.amount = tx_total;
+
+            if(row.spends.empty() || from_future) continue;
+            const auto& spend = row.spends.front();
             tx.info.spend_meta.mixin_count = spend.mixin_count;
             tx.info.timestamp = spend.timestamp;
             tx.info.unlock_time = spend.unlock_time;
@@ -837,7 +882,7 @@ namespace lws
   {
     std::sort(outputs.begin(), outputs.end(), by_tx_link);
     std::sort(spends.begin(), spends.end(), by_tx_link);
-    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), nullptr, nullptr, outputs.size(), true, true).first;
+    return merge_into_txes(vec_lmdb(outputs), vec_lmdb(spends), nullptr, nullptr, nullptr, outputs.size(), true, true).first;
   }
 
   expect<rpc::get_address_txs_response> rpc::get_address_txs_response::load(db::storage_reader& reader, const db::account& acct, mempool const* const pool, const bool all_outputs)
@@ -863,7 +908,7 @@ namespace lws
     resp.lookahead_fail = db::to_uint(acct.lookahead_fail);
     resp.lookahead = acct.lookahead;
 
-    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), std::addressof(acct), pool, outputs->count(), all_outputs, false);
+    auto out = merge_into_txes(outputs->make_iterator(), spends->make_iterator(), std::addressof(acct), std::addressof(reader), pool, outputs->count(), all_outputs, false);
     resp.total_received = safe_uint64(out.second);
     resp.transactions = std::move(out.first);
     return resp;
@@ -871,6 +916,10 @@ namespace lws
 
   void rpc::write_bytes(wire::json_writer& dest, const get_address_txs_response& self)
   {
+    const auto with_key = [&self] (boost::range::index_value<const get_transaction&> tx)
+    {
+      return indexed_transaction{tx, self.user_key.get_ptr()};
+    };
     wire::object(dest,
       wire::field("total_received", safe_uint64(self.total_received)),
       WIRE_FIELD_COPY(scanned_height),
@@ -880,8 +929,19 @@ namespace lws
       WIRE_FIELD_COPY(blockchain_height),
       WIRE_FIELD_DEFAULTED(lookahead_fail, unsigned(0)),
       WIRE_FIELD_DEFAULTED(lookahead, db::address_index{}),
-      wire::optional_field("transactions", wire::array(boost::adaptors::index(self.transactions)))
+      wire::optional_field("transactions", wire::array(boost::adaptors::transform(boost::adaptors::index(self.transactions), with_key)))
     );
+  }
+
+  void rpc::read_bytes(wire::json_reader& source, get_address_txs_request& self)
+  {
+    std::string address;
+    wire::object(source,
+      wire::field("address", std::ref(address)),
+      wire::field("view_key", std::ref(unwrap(unwrap(self.creds.key)))),
+      WIRE_FIELD_DEFAULTED(receives, false)
+    );
+    convert_address(address, self.creds.address);
   }
 
   void rpc::read_bytes(wire::json_reader& source, get_random_outs_request& self)
@@ -1116,9 +1176,13 @@ namespace lws
   {
     wire::object(source, WIRE_FIELD(tx));
   }
-  void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response self)
+  void rpc::write_bytes(wire::json_writer& dest, const submit_raw_tx_response& self)
   {
-    wire::object(dest, WIRE_FIELD_COPY(status));
+    wire::object(dest,
+      WIRE_FIELD(status),
+      WIRE_FIELD_DEFAULTED(reason, std::string{}),
+      WIRE_FIELD_DEFAULTED(not_relayed, false)
+    );
   }
 
   void rpc::read_bytes(wire::json_reader& source, upsert_subaddrs_request& self)

@@ -67,9 +67,11 @@ namespace lws
   {
     struct internal;
 
+  public:
     using balance_t = std::tuple<crypto::key_image, std::uint64_t, db::address_index>;
     using spendable_t = std::pair<db::output_id, db::address_index>;
-
+ 
+ private:
     std::shared_ptr<const internal> immutable_;
     std::vector<std::pair<db::output_id, db::address_index>> spendable_;
     std::vector<balance_t> balance_;

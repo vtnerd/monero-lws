@@ -30,12 +30,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "common/pod-class.h" // monero/src
 #include "wire/json/fwd.h"
 
 namespace crypto
 {
-  POD_CLASS hash;
+  struct hash;
 }
 
 namespace cryptonote

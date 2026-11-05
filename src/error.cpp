@@ -45,6 +45,8 @@ namespace lws
       {
       case error::account_exists:
         return "Account with specified address already exists";
+      case error::account_list_change:
+        return "An in-process message was received that accounts were given to scanner threads";
       case error::account_max:
         return "Account limit has been reached";
       case error::account_not_found:

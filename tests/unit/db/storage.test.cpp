@@ -130,7 +130,48 @@ LWS_CASE("lws::db::storage")
       EXPECT(get_account().lookahead_fail == lws::db::block_id(0));
     }
 
-    const auto add_output = [&] ()
+    SECTION("rescan above scan_height")
+    {
+      // extend the chain without scanning the account
+      std::vector<crypto::hash> hashes{last_block.hash};
+      for (unsigned i = 0; i < 5; ++i)
+        hashes.push_back(crypto::rand<crypto::hash>());
+      EXPECT(db.sync_chain(last_block.id, epee::to_span(hashes), false));
+
+      const lws::db::block_id scan_height = get_account().scan_height;
+      EXPECT(scan_height == last_block.id);
+
+      // the account keeps its lower scan_height
+      const auto above = lws::db::block_id(to_uint(last_block.id) + 3);
+      EXPECT(db.rescan(above, {std::addressof(account_address), 1}));
+      EXPECT(get_account().scan_height == scan_height);
+
+      // both find the height index entry at the account's scan_height
+      EXPECT(db.rescan(scan_height, {std::addressof(account_address), 1}));
+      lws::account real_account{get_account(), {}, {}, {}};
+      EXPECT(db.update(scan_height, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      EXPECT(get_account().scan_height == lws::db::block_id(to_uint(last_block.id) + 5));
+    }
+
+    SECTION("import above scan_height")
+    {
+      std::vector<crypto::hash> hashes{last_block.hash};
+      for (unsigned i = 0; i < 5; ++i)
+        hashes.push_back(crypto::rand<crypto::hash>());
+      EXPECT(db.sync_chain(last_block.id, epee::to_span(hashes), false));
+
+      const lws::db::block_id scan_height = get_account().scan_height;
+      const auto above = lws::db::block_id(to_uint(last_block.id) + 3);
+      EXPECT(db.import_request(account_address, above, {}));
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 10));
+      EXPECT(get_account().scan_height == scan_height);
+
+      lws::account real_account{get_account(), {}, {}, {}};
+      EXPECT(db.update(scan_height, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      EXPECT(get_account().scan_height == lws::db::block_id(to_uint(last_block.id) + 5));
+    }
+
+    const auto add_output = [&] (const std::uint32_t major = 2, const std::uint32_t minor = 10)
     {
       auto account = get_account();
       const lws::db::transaction_link link{
@@ -170,7 +211,7 @@ LWS_CASE("lws::db::storage")
           lws::db::pack(extra, sizeof(crypto::hash)),
           payment_id_,
           std::uint64_t(100),
-          lws::db::address_index{lws::db::major_index(2), lws::db::minor_index(10)}
+          lws::db::address_index{lws::db::major_index(major), lws::db::minor_index(minor)}
         }
       );
  
@@ -266,6 +307,22 @@ LWS_CASE("lws::db::storage")
         EXPECT(!db.shrink_lookahead(account_address, lookahead));
         EXPECT(!db.shrink_lookahead(account_address, shrink));
       }
+    }
+
+    SECTION("Lookahead with outputs to {0, 0}")
+    {
+      add_output(0, 0);
+      const auto scan_height = get_account().scan_height;
+
+      EXPECT(MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_subaddresses(lws::db::account_id(1))).empty());
+      EXPECT(db.import_request(account_address, scan_height, lookahead));
+      EXPECT(db.accept_requests(lws::db::request::import_scan, {std::addressof(account_address), 1}, 18));
+
+      const std::vector<lws::db::subaddress_dict> expected_range{
+        {lws::db::major_index(0), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(1)}}}},
+        {lws::db::major_index(1), {{lws::db::index_range{lws::db::minor_index(0), lws::db::minor_index(1)}}}}
+      };
+      EXPECT(MONERO_UNWRAP(MONERO_UNWRAP(db.start_read()).get_subaddresses(lws::db::account_id(1))) == expected_range);
     }
   }
 }

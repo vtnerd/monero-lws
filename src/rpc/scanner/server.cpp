@@ -51,11 +51,22 @@ namespace lws { namespace rpc { namespace scanner
 {
   namespace
   {
+    //! Wake local scan threads waiting at the top of the chain
+    void notify_threads(rpc::client& zclient)
+    {
+      const expect<void> notified = zclient.raise_account_change();
+      if (!notified)
+        MERROR("Failed to notify scan threads of new accounts: " << notified.error().message());
+    }
+
     //! Use remote scanning only if users-per-local-thread exceeds this
     constexpr const std::size_t remote_threshold = 100;
 
     //! Threshold for resetting/replacing state instead of pushing
     constexpr const std::size_t replace_threshold = 10000;
+
+    //! Max incoming message size before valid authentication
+    constexpr const std::size_t max_unauthenticated = 1 * 1024 * 1024;
 
     //! \brief Handler for server to initialize new scanner
     struct initialize_handler
@@ -79,15 +90,25 @@ namespace lws { namespace rpc { namespace scanner
   {
     const std::shared_ptr<server> parent_;
     std::size_t threads_; //!< Number of scan threads at remote process
+    bool authenticated_;
 
   public:
     explicit server_connection(std::shared_ptr<server> parent, boost::asio::io_context& io)
       : connection(io),
         parent_(std::move(parent)),
-        threads_(0)
+        threads_(0),
+        authenticated_(false)
     {
       if (!parent_)
         MONERO_THROW(common_error::kInvalidArgument, "nullptr parent");
+    }
+
+    header::length_type::value_type next_size() const noexcept
+    {
+      const auto length = next_.length.value();
+      if (authenticated_ || (next_.id == initialize_handler::input::id() && length <= max_unauthenticated))
+        return length;
+      return 0;
     }
 
     //! \return Handlers for commands from client
@@ -135,6 +156,7 @@ namespace lws { namespace rpc { namespace scanner
         return false;
       }
 
+      self->authenticated_ = true;
       self->threads_ = boost::numeric_cast<std::size_t>(msg.threads);
       server::replace_users(self->parent_);
       return true;
@@ -147,6 +169,12 @@ namespace lws { namespace rpc { namespace scanner
 
       if (msg.users.empty())
         return true;
+
+      if (!self->authenticated_)
+      {
+        MINFO("Remote peer needs to authenticate first");
+        return false;
+      }
 
       MINFO("Client (" << self->remote_endpoint() << ") processed "
         << msg.blocks.size() << " block(s) against " << msg.users.size() << " account(s)");
@@ -224,7 +252,8 @@ namespace lws { namespace rpc { namespace scanner
         if (std::numeric_limits<std::size_t>::max() - total_threads < conn->threads_)
           MONERO_THROW(error::configuration, "Exceeded max threads (size_t) across all systems");
         total_threads += conn->threads_;
-        remotes.push_back(std::move(conn));
+        if (conn->threads_)
+          remotes.push_back(std::move(conn));
       }
 
       if (!total_threads)
@@ -288,6 +317,7 @@ namespace lws { namespace rpc { namespace scanner
         return;
       }
 
+      bool notify = false; // local threads were given accounts
       if (self_->balance_new_addresses_ && !self_->local_.empty())
       {
         // New algorithm: Assign new accounts to thread with highest blockheight not above account height
@@ -340,6 +370,7 @@ namespace lws { namespace rpc { namespace scanner
             std::make_move_iterator(new_accounts.end())
           );
           new_accounts.erase(new_accounts.end() - 1);
+          notify = true;
         }
       }
       else
@@ -356,6 +387,7 @@ namespace lws { namespace rpc { namespace scanner
             );
             new_accounts.erase(new_accounts.end() - 1);
             ++self_->next_thread_;
+            notify = true;
           }
           else
           {
@@ -372,7 +404,7 @@ namespace lws { namespace rpc { namespace scanner
               std::make_move_iterator(new_accounts.end() - user_count),
               std::make_move_iterator(new_accounts.end())
             };
-            new_accounts.erase(new_accounts.end() - user_count);
+            new_accounts.erase(new_accounts.end() - user_count, new_accounts.end());
             write_command(remotes[j], push_accounts{std::move(next)});
             self_->next_thread_ += remotes[j]->threads_;
           }
@@ -382,6 +414,8 @@ namespace lws { namespace rpc { namespace scanner
       }
       reader->finish_read();
       self_->accounts_cur_ = current_users.give_cursor();
+      if (notify)
+        notify_threads(self_->zclient_);
     }
   };
 
@@ -451,6 +485,8 @@ namespace lws { namespace rpc { namespace scanner
       local->replace_accounts(std::move(next));
       --remaining_threads;
     }
+    if (!local_.empty())
+      notify_threads(zclient_);
 
     // make sure to notify of zero users too!
     for (auto& remote : remotes)
@@ -519,7 +555,7 @@ namespace lws { namespace rpc { namespace scanner
     };
   }
 
-  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl, bool balance_new_addresses)
+  server::server(boost::asio::io_context& io, db::storage disk, rpc::client zclient, std::vector<std::shared_ptr<queue>> local, std::vector<db::account_id> active, std::shared_ptr<boost::asio::ssl::context> ssl, bool balance_new_addresses, bool regtest)
     : strand_(io),
       check_timer_(io),
       acceptor_(io),
@@ -534,7 +570,8 @@ namespace lws { namespace rpc { namespace scanner
       pass_hashed_(),
       pass_salt_(),
       stop_(false),
-      balance_new_addresses_(balance_new_addresses)
+      balance_new_addresses_(balance_new_addresses),
+      regtest_(regtest)
   {
     std::sort(active_.begin(), active_.end());
     for (const auto& local : local_)
@@ -565,7 +602,7 @@ namespace lws { namespace rpc { namespace scanner
     if (crypto_pwhash_BYTES_MAX < out.size())
       MONERO_THROW(error::crypto_failure, "Invalid output size");
 
-    if (pass.size() < crypto_pwhash_PASSWD_MIN && crypto_pwhash_PASSWD_MAX < pass.size())
+    if (pass.size() < crypto_pwhash_PASSWD_MIN || crypto_pwhash_PASSWD_MAX < pass.size())
       MONERO_THROW(error::crypto_failure, "Invalid password size");
 
     if (crypto_pwhash(out.data(), out.size(), pass.data(), pass.size(), pass_salt_.data(),
@@ -573,7 +610,7 @@ namespace lws { namespace rpc { namespace scanner
       MONERO_THROW(error::crypto_failure, "Failed password hashing");
   }
 
-  void server::start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass)
+  void server::start_acceptor(const std::shared_ptr<server>& self, const std::string& address, std::string pass, const bool allow_external)
   {
     if (!self)
       MONERO_THROW(common_error::kInvalidArgument, "nullptr self");
@@ -581,6 +618,9 @@ namespace lws { namespace rpc { namespace scanner
       return;
 
     auto endpoint = get_endpoint(address);
+    if (!endpoint.address().is_loopback() && !allow_external)
+      MONERO_THROW(error::configuration, "--lws-server-addr given external bind address, use --lws-server-external after reading docs");
+
     boost::asio::dispatch(
       self->strand_,
       [self, endpoint = std::move(endpoint), pass = std::move(pass)] ()
@@ -625,7 +665,7 @@ namespace lws { namespace rpc { namespace scanner
       self->strand_,
       [self, users = std::move(users), blocks = std::move(blocks)] () mutable
       {
-        if (!lws::user_data::store(self->strand_.context(), self->disk_, self->zclient_, self->webhook_, epee::to_span(blocks), epee::to_mut_span(users), nullptr))
+        if (!lws::user_data::store(self->strand_.context(), self->disk_, self->zclient_, self->webhook_, epee::to_span(blocks), epee::to_mut_span(users), nullptr, self->regtest_))
         {
           self->do_stop();
           self->strand_.context().stop();

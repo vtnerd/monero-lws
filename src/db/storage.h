@@ -37,8 +37,8 @@
 #include "db/account.h"
 #include "db/data.h"
 #include "fwd.h"
-#include "lmdb/transaction.h"
 #include "lmdb/key_stream.h"
+#include "lmdb/lws_transaction.h"
 #include "lmdb/value_stream.h"
 #include "wire/msgpack/fwd.h"
 
@@ -49,21 +49,21 @@ namespace db
 {
   namespace cursor
   {
-    MONERO_CURSOR(accounts);
-    MONERO_CURSOR(outputs);
-    MONERO_CURSOR(spends);
-    MONERO_CURSOR(images);
-    MONERO_CURSOR(requests);
-    MONERO_CURSOR(subaddress_ranges);
-    MONERO_CURSOR(subaddress_indexes);
+    MONERO_LWS_CURSOR(accounts);
+    MONERO_LWS_CURSOR(outputs);
+    MONERO_LWS_CURSOR(spends);
+    MONERO_LWS_CURSOR(images);
+    MONERO_LWS_CURSOR(requests);
+    MONERO_LWS_CURSOR(subaddress_ranges);
+    MONERO_LWS_CURSOR(subaddress_indexes);
 
-    MONERO_CURSOR(blocks);
-    MONERO_CURSOR(pow);
-    MONERO_CURSOR(accounts_by_address);
-    MONERO_CURSOR(accounts_by_height);
+    MONERO_LWS_CURSOR(blocks);
+    MONERO_LWS_CURSOR(pow);
+    MONERO_LWS_CURSOR(accounts_by_address);
+    MONERO_LWS_CURSOR(accounts_by_height);
   
-    MONERO_CURSOR(webhooks);
-    MONERO_CURSOR(events);
+    MONERO_LWS_CURSOR(webhooks);
+    MONERO_LWS_CURSOR(events);
   }
 
   struct storage_internal;
@@ -85,11 +85,11 @@ namespace db
   class storage_reader
   {
     std::shared_ptr<storage_internal> db;
-    lmdb::read_txn txn;
+    lws_lmdb::read_txn txn;
     reader_internal curs;
 
   public:
-    storage_reader(std::shared_ptr<storage_internal> db, lmdb::read_txn txn) noexcept
+    storage_reader(std::shared_ptr<storage_internal> db, lws_lmdb::read_txn txn) noexcept
       : db(std::move(db)), txn(std::move(txn)), curs{}
     {}
 
@@ -179,7 +179,7 @@ namespace db
     expect<void> json_debug(std::ostream& out, bool show_keys);
 
     //! \return Read txn that can be re-used via `storage::start_read`.
-    lmdb::suspended_txn finish_read() noexcept;
+    lws_lmdb::suspended_txn finish_read() noexcept;
   };
 
   //! Wrapper for LMDB on-disk storage of light-weight server data.
@@ -222,6 +222,12 @@ namespace db
 
     //! \return A copy of the LMDB environment, but not reusable txn/cursors.
     storage clone() const noexcept;
+
+    //! \return Storage without an LMDB environment, like a moved-from object.
+    static storage none() noexcept { return storage{nullptr}; }
+
+    //! \return False if `this` has no LMDB environment.
+    explicit operator bool() const noexcept { return bool(db); }
 
     //! Rollback chain and accounts to `height`.
     expect<void> rollback(block_id height);
@@ -292,18 +298,19 @@ namespace db
       \param height The first hash in `chain` is at this height.
       \param chain List of block hashes that `accts` were scanned against.
       \param accts Updated to `height + chain.size()` scan height.
+      \param regtest Bypass the checkpoint-height gate for regtest environment.
 
       \return Status via `updated` object.
     */
     expect<updated>
-      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow);
+      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow, bool regtest = false);
 
     /*!
       Adds subaddresses to an account. Upon success, an account will
       immediately begin tracking them in the scanner.
 
       \param id of the account to associate new indexes
-      \param addresss of the account (needed to generate subaddress publc key)
+      \param address_key of the account (needed to generate subaddress publc key)
       \param view_key of the account (needed to generate subaddress public key)
       \param subaddrs Range of subaddress indexes that need to be added to the
         database. Indexes _may_ overlap with existing indexes.
@@ -342,7 +349,7 @@ namespace db
     expect<void> clear_webhooks(std::vector<boost::uuids::uuid> ids);
 
     //! `txn` must have come from a previous call on the same thread.
-    expect<storage_reader> start_read(lmdb::suspended_txn txn = nullptr) const;
+    expect<storage_reader> start_read(lws_lmdb::suspended_txn txn = nullptr) const;
   };
 } // db
 } // lws

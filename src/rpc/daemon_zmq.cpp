@@ -230,10 +230,6 @@ namespace cryptonote
   {
     wire::object(source, WIRE_FIELD(key), WIRE_FIELD(view_tag), WIRE_FIELD(encrypted_janus_anchor));
   }
-  static void read_bytes(wire::json_reader& source, txout_to_scripthash& self)
-  {
-    wire::object(source, WIRE_FIELD(hash));
-  }
   static void read_bytes(wire::json_reader& source, txout_to_tagged_key& self)
   {
     wire::object(source, WIRE_FIELD(key), WIRE_FIELD(view_tag));
@@ -249,8 +245,7 @@ namespace cryptonote
       WIRE_FIELD(amount),
       WIRE_OPTION("to_key", txout_to_key, variant),
       WIRE_OPTION("to_tagged_key", txout_to_tagged_key, variant),
-      WIRE_OPTION("to_carrot_v1", txout_to_carrot_v1, variant),
-      WIRE_OPTION("to_scripthash", txout_to_scripthash, variant)
+      WIRE_OPTION("to_carrot_v1", txout_to_carrot_v1, variant)
     );
   }
 

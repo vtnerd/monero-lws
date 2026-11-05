@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "common/expect.h" // monero/src
 #include "crypto/hash.h"   // monero/src

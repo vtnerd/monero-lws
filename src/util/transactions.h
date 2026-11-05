@@ -29,9 +29,13 @@
 #include <optional>
 #include <utility>
 
-#include "common/pod-class.h" // monero/src
-#include "crypto/crypto.h"    // monero/src
-#include "ringct/rctTypes.h"  // moneor/src 
+#include "ringct/rctTypes.h"
+
+namespace crypto
+{
+  struct hash8;
+  struct key_derivation;
+}
 
 namespace lws
 {

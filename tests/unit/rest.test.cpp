@@ -41,6 +41,7 @@
 #include "db/print.test.h"
 #include "db/storage.test.h"
 #include "db/string.h"
+#include "device/device_default.hpp"             // monero/src
 #include "error.h"
 #include "hex.h" // monero/epee/contrib/include
 #include "mempool.h"
@@ -62,6 +63,14 @@ namespace rapidjson
     PrettyWriter<StringBuffer> writer{buffer};
     src.Accept(writer);
 
+    return out << buffer.GetString();
+  }
+
+  std::ostream& operator<<(std::ostream& out, const Value& src)
+  {
+    StringBuffer buffer;
+    PrettyWriter<StringBuffer> writer{buffer};
+    src.Accept(writer);
     return out << buffer.GetString();
   }
 }
@@ -113,6 +122,16 @@ namespace
     if (!client.invoke(uri, "POST", body, std::chrono::milliseconds{500}, std::addressof(info), {}))
       throw std::runtime_error{"HTTP invoke failed"};
     return {std::string{info->m_body}, info->m_response_code}; 
+  }
+
+  const std::string* find_field(const enet::http::http_response_info& info, const boost::string_ref name)
+  {
+    for (const auto& field : info.m_header_info.m_etc_fields)
+    {
+      if (field.first == name)
+        return std::addressof(field.second);
+    }
+    return nullptr;
   }
 
   std::string invoke(enet::http::http_simple_client& client, const boost::string_ref uri, const boost::string_ref body)
@@ -248,7 +267,7 @@ LWS_CASE("rest_server")
     const auto init_server = [&] (std::shared_ptr<lws::mempool> pool) 
     {
       const lws::rest_server::configuration config{
-        {}, {}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
+        {}, {"http://localhost:5173"}, std::chrono::seconds{10}, 1, 20, {}, false, true, true, false
       };
       std::vector<std::string> addresses{rest_server};
       server.emplace(
@@ -318,8 +337,11 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
       response = invoke(client, "/get_unspent_outs", message);
@@ -639,8 +661,11 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
@@ -833,7 +858,7 @@ LWS_CASE("rest_server")
                 "key_image":")" + epee::to_hex::string(epee::as_byte_span(tx.images.at(0))) + R"(",
                 "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
                 "out_index":2,
-                "mixin":15,
+                "mixin":16,
                 "sender":{"maj_i":2, "min_i": 66}
               }]
             }
@@ -841,10 +866,92 @@ LWS_CASE("rest_server")
         })";
       verify_json(lest_env, "/get_address_txs", response, expected);
 
+      const auto block_rct = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
+      const auto pool_rct = get_rct_bytes(view, tx.pub_keys.at(0), tx.ringct.at(0), 8000, 0, false);
+      const std::string receives_message =
+        "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"receives\":true}";
+      response = invoke(client, "/get_address_txs", receives_message);
+      const std::string expected_receives =
+        R"({
+          "total_received":"48000",
+          "scanned_height":)" + scan_height + R"(,
+          "scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + start_height + R"(,
+          "transaction_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[
+            {
+              "id":0,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"40000",
+              "total_sent":"40000",
+              "fee":"100",
+              "unlock_time":4670,
+              "height":4000,
+              "payment_id":")" + epee::to_hex::string(epee::as_byte_span(payment_id_.long_)) + R"(",
+              "coinbase":true,
+              "mempool":false,
+              "mixin":16,
+              "recipient":{"maj_i":2,"min_i":66},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(image)) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":16,
+                "sender":{"maj_i":4,"min_i":55}
+              }],
+              "receives":[{
+                "amount":"40000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub)) + R"(",
+                "index":2,
+                "global_index":35,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(block_rct)) + R"(",
+                "recipient":{"maj_i":2,"min_i":66}
+              }]
+            },{
+              "id":1,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(get_transaction_hash(tx.tx))) + R"(",
+              "total_received":"8000",
+              "total_sent":"40000",
+              "fee":"12000",
+              "unlock_time":0,
+              "payment_id":"0000000000000000",
+              "coinbase":false,
+              "mempool":true,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "spent_outputs":[{
+                "amount":"40000",
+                "key_image":")" + epee::to_hex::string(epee::as_byte_span(tx.images.at(0))) + R"(",
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "out_index":2,
+                "mixin":16,
+                "sender":{"maj_i":2, "min_i": 66}
+              }],
+              "receives":[{
+                "amount":"8000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(tx.spend_publics.at(0))) + R"(",
+                "index":0,
+                "global_index":18446744073709551615,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx.pub_keys.at(0))) + R"(",
+                "rct":")" + epee::to_hex::string(epee::as_byte_span(pool_rct)) + R"(",
+                "recipient":{"maj_i":0,"min_i":0}
+              }]
+            }
+          ]
+        })";
+      verify_json(lest_env, "/get_address_txs receives", response, expected_receives);
+
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
 
       const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 40000, 2, true);
       message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\",\"amount\":\"0\"}";
@@ -887,6 +994,7 @@ LWS_CASE("rest_server")
         crypto::generate_keys(out, secret);
         return out;
       }();
+
       const crypto::hash tx_prefix = crypto::rand<crypto::hash>();
       const crypto::public_key pub = crypto::rand<crypto::public_key>();
       const rct::key ringct = crypto::rand<rct::key>();
@@ -992,6 +1100,7 @@ LWS_CASE("rest_server")
           "\"coinbase\":false,"
           "\"mempool\":false,"
           "\"mixin\":4294967295,"
+          "\"recipient\":{\"maj_i\":0,\"min_i\":0},"
           "\"spent_outputs\":[{"
             "\"amount\":\"0\","
             "\"key_image\":\"" + epee::to_hex::string(epee::as_byte_span(image)) + "\","
@@ -1005,7 +1114,8 @@ LWS_CASE("rest_server")
 
       std::vector<epee::byte_slice> messages;
       messages.emplace_back(get_fee_response());
-      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages));
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
       const join on_scope_exit{server_thread};
 
       const auto ringct_expanded = get_rct_bytes(view, tx_public, ringct, 70000, 1, false);
@@ -1035,6 +1145,197 @@ LWS_CASE("rest_server")
       );
     }
 
+    SECTION("get_address_txs receives")
+    {
+      const std::string scan_height = std::to_string(std::uint64_t(account.scan_height) + 5);
+      const std::string start_height = std::to_string(std::uint64_t(account.start_height));
+
+      const lws::db::transaction_link link_a{
+        lws::db::block_id(4000), crypto::rand<crypto::hash>()
+      };
+      const lws::db::transaction_link link_b{
+        lws::db::block_id(4001), crypto::rand<crypto::hash>()
+      };
+      const crypto::public_key tx_public = []() {
+        crypto::secret_key secret;
+        crypto::public_key out;
+        crypto::generate_keys(out, secret);
+        return out;
+      }();
+
+      const crypto::public_key pub_a0 = crypto::rand<crypto::public_key>();
+      const crypto::public_key pub_a1 = crypto::rand<crypto::public_key>();
+      const crypto::public_key pub_b = crypto::rand<crypto::public_key>();
+      const rct::key mask_a0 = crypto::rand<rct::key>();
+      const rct::key mask_a1 = crypto::rand<rct::key>();
+      const auto ringct = lws::db::pack(lws::db::extra::ringct_output, 0);
+      const auto legacy = lws::db::pack(lws::db::extra(0), 0);
+
+      const auto make_output = [&] (const lws::db::transaction_link& link, const lws::db::output_id id, const std::uint64_t amount, const std::uint32_t index, const crypto::public_key& pub, const rct::key& mask, const lws::db::extra_and_length extra, const lws::db::address_index recipient)
+      {
+        return lws::db::output{
+          link,
+          lws::db::output::spend_meta_{id, amount, std::uint32_t(15), index, tx_public},
+          std::uint64_t(7000),
+          std::uint64_t(0),
+          crypto::rand<crypto::hash>(),
+          pub,
+          mask,
+          {0, 0, 0, 0, 0, 0, 0},
+          extra,
+          {},
+          std::uint64_t(100),
+          recipient
+        };
+      };
+
+      lws::account real_account{account, {}, {}, {}};
+      real_account.add_out(make_output(link_a, {0, 40}, 10000, 0, pub_a0, mask_a0, ringct, {}));
+      real_account.add_out(
+        make_output(link_a, {0, 41}, 20000, 1, pub_a1, mask_a1, ringct, {lws::db::major_index(1), lws::db::minor_index(3)})
+      );
+      real_account.add_out(make_output(link_b, {5000, 7}, 5000, 0, pub_b, rct::key{}, legacy, {}));
+
+      {
+        std::vector<crypto::hash> hashes{
+          last_block.hash,
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>(),
+          crypto::rand<crypto::hash>()
+        };
+
+        EXPECT(db.update(last_block.id, epee::to_span(hashes), {std::addressof(real_account), 1}, {}));
+      }
+
+      const std::string credentials = "\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"";
+      const std::string response_default = invoke(client, "/get_address_txs", "{" + credentials + "}");
+      EXPECT(response_default.find("\"receives\"") == std::string::npos);
+
+      response = invoke(client, "/get_address_txs", "{" + credentials + ",\"receives\":false}");
+      EXPECT(response == response_default);
+
+      const auto rct_a0 = get_rct_bytes(view, tx_public, mask_a0, 10000, 0, false);
+      const auto rct_a1 = get_rct_bytes(view, tx_public, mask_a1, 20000, 1, false);
+      response = invoke(client, "/get_address_txs", "{" + credentials + ",\"receives\":true}");
+      const std::string expected =
+        R"({
+          "total_received":"35000",
+          "scanned_height":)" + scan_height + R"(,
+          "scanned_block_height":)" + scan_height + R"(,
+          "start_height":)" + start_height + R"(,
+          "transaction_height":)" + scan_height + R"(,
+          "blockchain_height":)" + scan_height + R"(,
+          "transactions":[
+            {
+              "id":0,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link_a.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"30000",
+              "total_sent":"0",
+              "fee":"100",
+              "unlock_time":0,
+              "height":4000,
+              "coinbase":false,
+              "mempool":false,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "receives":[
+                {
+                  "amount":"10000",
+                  "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_a0)) + R"(",
+                  "index":0,
+                  "global_index":40,
+                  "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                  "rct":")" + epee::to_hex::string(epee::as_byte_span(rct_a0)) + R"(",
+                  "recipient":{"maj_i":0,"min_i":0}
+                },{
+                  "amount":"20000",
+                  "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_a1)) + R"(",
+                  "index":1,
+                  "global_index":41,
+                  "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                  "rct":")" + epee::to_hex::string(epee::as_byte_span(rct_a1)) + R"(",
+                  "recipient":{"maj_i":1,"min_i":3}
+                }
+              ]
+            },{
+              "id":1,
+              "hash":")" + epee::to_hex::string(epee::as_byte_span(link_b.tx_hash)) + R"(",
+              "timestamp":"1970-01-01T01:56:40Z",
+              "total_received":"5000",
+              "total_sent":"0",
+              "fee":"100",
+              "unlock_time":0,
+              "height":4001,
+              "coinbase":false,
+              "mempool":false,
+              "mixin":15,
+              "recipient":{"maj_i":0,"min_i":0},
+              "receives":[{
+                "amount":"5000",
+                "public_key":")" + epee::to_hex::string(epee::as_byte_span(pub_b)) + R"(",
+                "index":0,
+                "global_index":7,
+                "tx_pub_key":")" + epee::to_hex::string(epee::as_byte_span(tx_public)) + R"(",
+                "recipient":{"maj_i":0,"min_i":0}
+              }]
+            }
+          ]
+        })";
+      verify_json(lest_env, "/get_address_txs receives", response, expected);
+    }
+
+    SECTION("mempool subaddress")
+    {
+      const auto pool = std::make_shared<lws::mempool>();
+
+      EXPECT(client.disconnect());
+      init_server(pool);
+      EXPECT(client.connect(std::chrono::milliseconds{500}));
+
+      {
+        const std::vector<lws::db::subaddress_dict> indexes{
+          lws::db::subaddress_dict{
+            lws::db::major_index::primary,
+            lws::db::index_ranges{
+              {lws::db::index_range{lws::db::minor_index(1), lws::db::minor_index(2)}}
+            }
+          }
+        };
+        EXPECT(db.upsert_subaddresses(account.id, std::nullopt, indexes, 2));
+      }
+
+      hw::core::device_default hw{};
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      destinations.emplace_back();
+      destinations.back().amount = 2000;
+      destinations.back().addr = hw.get_subaddress(base, cryptonote::subaddress_index{0, 1});
+      destinations.back().is_subaddress = true;
+      const auto tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+
+      pool->reset_txs(
+        lws::mempool::pool_table{
+          {get_transaction_hash(tx.tx), std::make_shared<lws::mempool::pool_entry>(cryptonote::transaction{tx.tx}, now)}
+        }
+      );
+
+      message = "{\"address\":\"" + address + "\",\"view_key\":\"" + viewkey + "\"}";
+      response = invoke(client, "/get_address_txs", message);
+
+      rapidjson::Document doc;
+      doc.Parse(response.c_str());
+      EXPECT(!doc.HasParseError());
+      EXPECT(doc["total_received"] == "10000");
+      EXPECT(doc["transactions"].Size() == 1u);
+      EXPECT(doc["transactions"][0u]["mempool"] == true);
+      EXPECT(doc["transactions"][0u]["total_received"] == "10000");
+      EXPECT(get_account().lookahead == account.lookahead);
+    }
 
     SECTION("provision_subaddrs")
     {
@@ -1142,6 +1443,89 @@ LWS_CASE("rest_server")
       check_address_map(lest_env, db, account_incoming, {0, 10});
     }
 
+    SECTION("submit_raw_tx")
+    {
+      const auto pool = std::make_shared<lws::mempool>();
+
+      EXPECT(client.disconnect());
+      init_server(pool);
+      EXPECT(client.connect(std::chrono::milliseconds{500}));
+
+      std::vector<cryptonote::tx_destination_entry> destinations;
+      destinations.emplace_back();
+      destinations.back().amount = 8000;
+      destinations.back().addr = base.m_account_address;
+      const lws_test::transaction tx = lws_test::make_tx(lest_env, base, destinations, 20, true);
+      message = "{\"tx\":\"" + epee::to_hex::string(epee::strspan<std::uint8_t>(cryptonote::tx_to_blob(tx.tx))) + "\"}";
+
+      std::vector<epee::byte_slice> messages;
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"relayed\":false}}"});
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"error\":{\"code\":-1,\"error_str\":\"Failed\",\"message\":\"double spend and fee too low\"}}"});
+      messages.emplace_back(std::string{"{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"relayed\":true}}"});
+      std::atomic<bool> ready{false};
+      boost::thread server_thread(&lws_test::rpc_thread, context.zmq_context(), std::cref(messages), std::ref(ready));
+      const join on_scope_exit{server_thread};
+      while (!ready)
+        boost::this_thread::sleep_for(boost::chrono::milliseconds{10});
+
+      auto full_account = get_full_account();
+      auto reader = MONERO_UNWRAP(db.start_read());
+
+      const auto bad_hex = invoke_base(client, "/submit_raw_tx", "{\"tx\":\"zz\"}");
+      EXPECT(bad_hex.second == 400);
+      EXPECT(bad_hex.first.empty());
+
+      response = invoke(client, "/submit_raw_tx", message);
+      EXPECT(response == "{\"status\":\"OK\",\"reason\":\"Not relayed\",\"not_relayed\":true}");
+      EXPECT(pool->scan_account(full_account, reader).empty());
+
+      const auto rejected = invoke_base(client, "/submit_raw_tx", message);
+      EXPECT(rejected.second == 422);
+      EXPECT(rejected.first == "{\"status\":\"Failed\",\"reason\":\"double spend and fee too low\"}");
+      EXPECT(pool->scan_account(full_account, reader).empty());
+
+      response = invoke(client, "/submit_raw_tx", message);
+      EXPECT(response == "{\"status\":\"OK\"}");
+      EXPECT(pool->scan_account(full_account, reader).size() == 1);
+    }
+    
+    SECTION("CORS")
+    {
+      const enet::http::http_response_info* info = nullptr;
+      const enet::http::fields_list allowed{{"Origin", "http://localhost:5173"}};
+      const enet::http::fields_list preflight{
+        {"Origin", "http://localhost:5173"}, {"Access-Control-Request-Method", "POST"}
+      };
+
+      EXPECT(client.invoke("/get_version", "OPTIONS", "", std::chrono::milliseconds{500}, std::addressof(info), preflight));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(info->m_body.empty());
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Origin") == "http://localhost:5173");
+      EXPECT(find_field(*info, "Access-Control-Allow-Methods") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Methods") == "GET, POST, OPTIONS");
+      EXPECT(find_field(*info, "Access-Control-Allow-Headers") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Headers") == "Content-Type");
+
+      EXPECT(client.invoke("/get_version", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), allowed));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+      EXPECT(*find_field(*info, "Access-Control-Allow-Origin") == "http://localhost:5173");
+      EXPECT(find_field(*info, "Vary") != nullptr);
+      EXPECT(*find_field(*info, "Vary") == "Origin");
+      EXPECT(find_field(*info, "Access-Control-Allow-Methods") == nullptr);
+
+      EXPECT(client.invoke("/not_an_endpoint", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), allowed));
+      EXPECT(info->m_response_code == 404);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") != nullptr);
+
+      const enet::http::fields_list other{{"Origin", "http://other.example"}};
+      EXPECT(client.invoke("/get_version", "POST", "{}", std::chrono::milliseconds{500}, std::addressof(info), other));
+      EXPECT(info->m_response_code == 200);
+      EXPECT(find_field(*info, "Access-Control-Allow-Origin") == nullptr);
+      EXPECT(find_field(*info, "Vary") != nullptr);
+    }
+
     SECTION("feed check")
     {
       auto response = invoke_base(client, "/feed", "");
@@ -1159,7 +1543,7 @@ LWS_CASE("rest_server")
       boost::asio::io_context io;
       boost::asio::steady_timer timeout{io};
 
-      timeout.expires_after(std::chrono::seconds{5});
+      timeout.expires_after(std::chrono::seconds{10});
       timeout.async_wait([&io] (auto) { io.stop(); });
 
       //

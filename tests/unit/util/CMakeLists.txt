@@ -26,5 +26,5 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_library(monero-lws-unit-util account.test.cpp account.test.h transaction.test.cpp transaction.test.h)
-target_link_libraries(monero-lws-unit-util monero-lws-unit-framework monero-lws-db monero::libraries)
+add_library(monero-lws-unit-util OBJECT account.test.cpp account.test.h ownership_test.test.cpp transaction.test.cpp transaction.test.h)
+target_link_libraries(monero-lws-unit-util monero-lws-unit-framework monero-lws-db monero-lws-util monero::libraries)

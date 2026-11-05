@@ -88,16 +88,16 @@ set(MONERO_LIBRARIES
   common
   lmdb
   device
+  fcmp_pp
+  cncrypto
+  randomx
   epee
   easylogging
   version
   wallet-crypto
-  fcmp_pp
   wallet
   carrot_impl
   carrot_core
-  cncrypto
-  randomx
   mx25519
 )
 
@@ -133,7 +133,7 @@ if (MONERO_BUILD_DIR)
   # find routines. So the upstream cmake names differ
 
   load_cache(${MONERO_BUILD_DIR} READ_WITH_PREFIX monero_
-    Boost_THREAD_LIBRARY_RELEASE
+    Boost_DIR
     CMAKE_CXX_COMPILER
     EXTRA_LIBRARIES
     LIBUDEV_LIBRARY
@@ -197,6 +197,8 @@ else () # NOT MONERO_BUILD_DIR
     set (MONERO_SOURCE_DIR "${monero-lws_SOURCE_DIR}/external/monero")
   endif ()
 
+  # don't support `-march=native` for now
+  set(ARCH "default")
   include(FetchContent)
   FetchContent_Declare(monero SOURCE_DIR "${MONERO_SOURCE_DIR}" EXCLUDE_FROM_ALL)
 
@@ -206,7 +208,7 @@ else () # NOT MONERO_BUILD_DIR
 
   set(MONERO_BUILD_DIR "${monero_BINARY_DIR}")
   set(IMPORTED_MONERO_LIBRARIES "${MONERO_LIBRARIES}")
-  set(monero_Boost_THREAD_LIBRARY_RELEASE "${Boost_THREAD_LIBRARY_RELEASE}")
+  set(monero_Boost_DIR "${Boost_DIR}")
   set(monero_pkgcfg_lib_libzmq_zmq "${pkgcfg_lib_libzmq_zmq}")
   if (SODIUM_LIBRARY)
     set(monero_SODIUM_LIBRARY "${SODIUM_LIBRARY}")
@@ -223,17 +225,11 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # boost
+find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization thread CONFIG)
 
-set(Boost_NO_BOOST_CMAKE ON)
-if(STATIC)
-  set(Boost_USE_STATIC_LIBS ON)
-  set(Boost_USE_STATIC_RUNTIME ON)
-endif()
-find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization thread)
-
-if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
-  message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
-  message(STATUS "Found monero_Boost_THREAD_LIBRARY_RELEASE: ${monero_Boost_THREAD_LIBRARY_RELEASE}")
+if (NOT (Boost_DIR STREQUAL monero_Boost_DIR))
+  message(STATUS "Found Boost_DIR: ${Boost_DIR}")
+  message(STATUS "Found monero_Boost_DIR: ${monero_Boost_DIR}")
   message(FATAL_ERROR "Boost libraries for monero build differs from this project")
 endif()
 
@@ -283,24 +279,9 @@ if(APPLE)
   list(APPEND IMPORTED_MONERO_LIBRARIES ${IOKIT_LIBRARY})
 endif()
 
-add_library(monero::libraries INTERFACE IMPORTED)
-set_property(TARGET monero::libraries PROPERTY
-  INTERFACE_INCLUDE_DIRECTORIES
-    ${Boost_INCLUDE_DIR}
-    ${monero_HIDAPI_INCLUDE_DIRS}
-    ${monero_OPENSSL_INCLUDE_DIR}
-    "${MONERO_BUILD_DIR}/generated_include"
-    "${MONERO_SOURCE_DIR}/contrib/epee/include"
-    "${MONERO_SOURCE_DIR}/external/easylogging++"
-    "${MONERO_SOURCE_DIR}/external/rapidjson/include"
-    "${MONERO_SOURCE_DIR}/external/supercop/include"
-    "${MONERO_SOURCE_DIR}/external/mx25519/include"
-    "${MONERO_SOURCE_DIR}/src"
-)
-
-set_property(TARGET monero::libraries PROPERTY
-  INTERFACE_LINK_LIBRARIES
-    ${IMPORTED_MONERO_LIBRARIES}
+add_library(monero::dependencies INTERFACE IMPORTED)
+target_link_libraries(monero::dependencies
+  INTERFACE
     ${Boost_CHRONO_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
@@ -316,6 +297,27 @@ set_property(TARGET monero::libraries PROPERTY
     ${SODIUM_LIBRARY}
     ${monero_UNBOUND_LIBRARIES}
     ${CMAKE_DL_LIBS}
+)
+
+add_library(monero::libraries INTERFACE IMPORTED)
+set_property(TARGET monero::libraries PROPERTY
+  INTERFACE_INCLUDE_DIRECTORIES
+    ${Boost_INCLUDE_DIR}
+    ${monero_HIDAPI_INCLUDE_DIRS}
+    ${monero_OPENSSL_INCLUDE_DIR}
+    "${MONERO_BUILD_DIR}/generated_include"
+    "${MONERO_SOURCE_DIR}/contrib/epee/include"
+    "${MONERO_SOURCE_DIR}/external/easylogging++"
+    "${MONERO_SOURCE_DIR}/external/mx25519/include"
+    "${MONERO_SOURCE_DIR}/external/rapidjson/include"
+    "${MONERO_SOURCE_DIR}/external/supercop/include"
+    "${MONERO_SOURCE_DIR}/src"
+)
+
+set_property(TARGET monero::libraries PROPERTY
+  INTERFACE_LINK_LIBRARIES
+    ${IMPORTED_MONERO_LIBRARIES}
+    monero::dependencies
 )
 
 #

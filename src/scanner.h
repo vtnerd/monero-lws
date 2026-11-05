@@ -46,6 +46,13 @@ namespace lws
 {
   constexpr std::uint64_t MINIMUM_BLOCK_DEPTH = 16;
 
+  struct scanner_server
+  {
+    std::string address;
+    std::string pass;
+    bool allow_external;
+  };
+
   struct scanner_options
   {
     double split_sync_threads;
@@ -78,10 +85,10 @@ namespace lws
 
     /*! Store updated accounts locally (`disk`), and send ZMQ/RMQ/webhook
       events. `users` must be sorted by height (lowest first). */
-    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow);
+    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
 
     //! `users` must be sorted by height (lowest first)
-    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow);
+    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
   };
 
   struct scanner_sync
@@ -118,7 +125,7 @@ namespace lws
     ~scanner();
 
     //! Callback for storing user account (typically local lmdb, but perhaps remote rpc)
-    using store_func = std::function<bool(boost::asio::io_context&, rpc::client&, net::http::client&, epee::span<const crypto::hash>, epee::span<lws::account>, epee::span<const db::pow_sync>)>;
+    using store_func = std::function<bool(boost::asio::io_context&, rpc::client&, net::http::client&, epee::span<const crypto::hash>, epee::span<lws::account>, epee::span<const db::pow_sync>, bool)>;
 
     /*! Run _just_ the inner scanner loop while `self.is_running() == true`.
      *
@@ -135,8 +142,7 @@ namespace lws
       rpc::context ctx,
       std::shared_ptr<mempool> pool,
       std::size_t thread_count,
-      const std::string& server_addr,
-      std::string server_pass,
+      scanner_server lws_server,
       const scanner_options&);
 
     //! \return True iff `stop()` and `shutdown()` has never been called

@@ -69,7 +69,7 @@ namespace lws
   bool gamma_picker::is_valid() const noexcept
   {
     static_assert(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > 0);
-    return CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1 < rct_offsets.size();
+    return CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1 < rct_offsets.size() && 0.f < outputs_per_second;
   }
 
   std::uint64_t gamma_picker::spendable_upper_bound() const noexcept

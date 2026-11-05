@@ -187,6 +187,7 @@ namespace lws { namespace rpc { namespace feed
     std::size_t pull_iter_;
     connection_sync sync_;
     const protocol proto_;
+    bool close_started_;
 
     virtual void async_shutdown(std::shared_ptr<connection> self) = 0;
 
@@ -196,6 +197,14 @@ namespace lws { namespace rpc { namespace feed
     void do_async_close(T& sock, std::shared_ptr<connection> self)
     {
       LWS_VERIFY(self);
+
+      /* Beast allows one close operation per stream. Shutting down `sub_`
+        below completes the pending ZMQ read with an error, and that handler
+        calls `close_check()` again. */
+      if (close_started_)
+        return;
+      close_started_ = true;
+
       MDEBUG("Starting websocket close on " << this);
       boost::system::error_code ec{};
       sub_.shutdown(ec);
@@ -336,7 +345,8 @@ namespace lws { namespace rpc { namespace feed
         socket_timer_(io),
         pull_iter_(0),
         sync_{},
-        proto_(proto)
+        proto_(proto),
+        close_started_(false)
     {
       ws_buffer_.max_size(max_read_size);
     }

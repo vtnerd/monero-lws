@@ -78,6 +78,12 @@ namespace lws { namespace rpc { namespace scanner
     current_min_height_ = std::max(height, current_min_height_);
   }
 
+  bool queue::has_accounts()
+  {
+    const boost::lock_guard<boost::mutex> lock{sync_};
+    return replace_ || !push_.empty();
+  }
+
   queue::status queue::get_accounts()
   {
     const boost::lock_guard<boost::mutex> lock{sync_};

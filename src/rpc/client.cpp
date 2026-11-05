@@ -29,6 +29,7 @@
 
 #include <array>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/numeric/conversion/cast.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/utility/string_ref.hpp>
 #include <cassert>
@@ -73,6 +74,7 @@ namespace rpc
     constexpr const char account_endpoint[] = "inproc://account";
     constexpr const char abort_scan_signal[] = "SCAN";
     constexpr const char abort_process_signal[] = "PROCESS";
+    constexpr const char account_change_signal[] = "ACCOUNT";
     constexpr const char minimal_chain_topic[] = "json-minimal-chain_main";
     constexpr const char full_txpool_topic[] = "json-full-txpool_add";
     constexpr const int daemon_zmq_linger = 0;
@@ -202,7 +204,8 @@ namespace rpc
     };
 #endif
 
-    expect<void> do_wait(void* daemon, void* signal_sub, short events, std::chrono::milliseconds timeout) noexcept
+    //! \param account_changes Return on `account_change_signal`, otherwise keep waiting.
+    expect<void> do_wait(void* daemon, void* signal_sub, short events, std::chrono::milliseconds timeout, const bool account_changes = false) noexcept
     {
       if (timeout <= std::chrono::seconds{0})
         return {lws::error::daemon_timeout};
@@ -212,38 +215,45 @@ namespace rpc
         {signal_sub, 0, short(ZMQ_POLLIN | ZMQ_POLLERR), 0}
       };
 
+      // retries (EINTR, ignored signals) wait only for what is left of `timeout`
+      const auto start = std::chrono::steady_clock::now();
       for (;;)
       {
-        const auto start = std::chrono::steady_clock::now();
-        const int ready = zmq_poll(items, 2, timeout.count());
-        const auto end = std::chrono::steady_clock::now();
-        const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(start - end);
-        timeout -= std::min(spent, timeout);
+        const auto spent =
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+        const int ready = zmq_poll(items, 2, (timeout - std::min(spent, timeout)).count());
 
         if (ready == 0)
           return {lws::error::daemon_timeout};
-        if (0 < ready)
+        if (ready < 0)
+        {
+          const int err = zmq_errno();
+          if (err != EINTR)
+            return ::net::zmq::make_error_code(err);
+          continue;
+        }
+
+        if (items[0].revents)
+          return success();
+
+        char buf[1];
+        MONERO_ZMQ_CHECK(zmq_recv(signal_sub, buf, 1, 0));
+
+        switch (buf[0])
+        {
+        case 'A':
+          if (account_changes)
+            return {lws::error::account_list_change};
+          continue; // only `wait_for_block` reports this
+        case 'P':
+          return {lws::error::signal_abort_process};
+        case 'S':
+          return {lws::error::signal_abort_scan};
+        default:
           break;
-        const int err = zmq_errno();
-        if (err != EINTR)
-          return ::net::zmq::make_error_code(err);
+        }
+        return {lws::error::signal_unknown};
       }
-      if (items[0].revents)
-        return success();
-
-      char buf[1];
-      MONERO_ZMQ_CHECK(zmq_recv(signal_sub, buf, 1, 0));
-
-      switch (buf[0])
-      {
-      case 'P':
-        return {lws::error::signal_abort_process};
-      case 'S':
-        return {lws::error::signal_abort_scan};
-      default:
-        break;
-      }
-      return {lws::error::signal_unknown};
     }
 
     template<std::size_t N>
@@ -266,6 +276,79 @@ namespace rpc
       MONERO_ZMQ_CHECK(zmq_setsockopt(sock, option, std::addressof(value), sizeof(value)));
       return success();
     }
+
+    struct do_receive
+    {
+      /* ZMQ documentation states that message parts are atomic - either
+         all are received or none are. Looking through ZMQ code and
+         GitHub discussions indicates that after part 1 is returned,
+         `EAGAIN` cannot be returned to meet these guarantees. Unit tests
+         verify (for the `inproc://` case) that this is the behavior.
+         Therefore, read errors after the first part are treated as a
+         failure for the entire message (probably `ETERM`). */
+      int operator()(std::string& payload, void* const socket, const int flags, const std::uint64_t max_message_size) const
+      {
+        //! RAII wrapper for `zmq_msg_t`.
+        class message
+        {
+          zmq_msg_t handle_;
+
+        public:
+          message() noexcept
+            : handle_()
+          {
+            zmq_msg_init(handle());
+          }
+
+          message(message&& rhs) = delete;
+          message(const message& rhs) = delete;
+          message& operator=(message&& rhs) = delete;
+          message& operator=(const message& rhs) = delete;
+
+          ~message() noexcept
+          {
+            zmq_msg_close(handle());
+          }
+
+          zmq_msg_t* handle() noexcept
+          {
+            return std::addressof(handle_);
+          }
+
+          const char* data() noexcept
+          {
+            return static_cast<const char*>(zmq_msg_data(handle()));
+          }
+
+          std::size_t size() noexcept
+          {
+            return zmq_msg_size(handle());
+          }
+        };
+
+        static constexpr const int max_out = std::numeric_limits<int>::max();
+        const std::string::size_type initial = payload.size();
+        message part{};
+        for (;;)
+        {
+          int last = 0;
+          if ((last = zmq_msg_recv(part.handle(), socket, flags)) < 0)
+            return last;
+
+          if (max_message_size < payload.size() ||
+              max_message_size - payload.size() < part.size())
+          {
+            errno = EMSGSIZE;
+            return -1;
+          }
+          payload.append(part.data(), part.size());
+          if (!zmq_msg_more(part.handle()))
+            break;
+        }
+        const std::string::size_type added = payload.size() - initial;
+        return unsigned(max_out) < added ? max_out : int(added);
+      }
+    };
   } // anonymous
 
   namespace detail
@@ -288,6 +371,7 @@ namespace rpc
         , sync_pub()
         , sync_rates()
         , sync_internal_pub()
+        , sync_signal()
         , untrusted_daemon(untrusted_daemon)
         , rates_running()
       {
@@ -295,6 +379,9 @@ namespace rpc
         if (!rmq.connect())
           MONERO_THROW(error::configuration, "RMQ misconfigured");
       }
+
+      std::uint64_t get_msg_max(const std::uint64_t limit) const noexcept
+      { return untrusted_daemon ? limit : - 1; }
 
       zcontext comm;
       net::zmq::socket signal_pub;
@@ -311,10 +398,18 @@ namespace rpc
       boost::mutex sync_pub;
       boost::mutex sync_rates;
       boost::mutex sync_internal_pub;
+      boost::mutex sync_signal; //!< For writes to `signal_pub`
       const bool untrusted_daemon;
       std::atomic_flag rates_running;
     };
   } // detail
+
+  expect<std::string> read_msg(void* const socket, const int flags, const std::uint64_t max_message_size)
+  {
+    std::string payload{};
+    MONERO_CHECK(net::zmq::retry_op(do_receive{}, payload, socket, flags, max_message_size));
+    return {std::move(payload)};
+  }
 
   expect<void> parse_response(cryptonote::rpc::Message& parser, std::string msg, source_location loc)
   {
@@ -329,6 +424,9 @@ namespace rpc
       }
 
       MERROR("Server returned RPC error: " << json_error.message << " with code " << json_error.code << " called from " << loc);
+      // Some callers send the daemon status and reason to the REST client
+      parser.status = json_error.error_str;
+      parser.error_details = json_error.message;
     }
     catch (const cryptonote::json::JSON_ERROR& error)
     {
@@ -381,7 +479,7 @@ namespace rpc
     assert(signal_sub != nullptr);
 
     expect<std::string> msg{common_error::kInvalidArgument};
-    while (!(msg = net::zmq::receive(daemon.get(), ZMQ_DONTWAIT)))
+    while (!(msg = read_msg(daemon.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_req))))
     {
       if (msg != net::zmq::make_error_code(EAGAIN))
         break;
@@ -450,6 +548,21 @@ namespace rpc
     return do_subscribe(signal_sub.get(), abort_scan_signal);
   }
 
+  expect<void> client::watch_account_changes() noexcept
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(signal_sub != nullptr);
+    return do_subscribe(signal_sub.get(), account_change_signal);
+  }
+
+  expect<void> client::raise_account_change() noexcept
+  {
+    MONERO_PRECOND(ctx != nullptr);
+    assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
+    return do_signal(ctx->signal_pub.get(), account_change_signal);
+  }
+
   expect<std::vector<std::pair<client::topic, std::string>>> client::wait_for_block()
   {
     MONERO_PRECOND(ctx != nullptr);
@@ -458,12 +571,12 @@ namespace rpc
 
     if (daemon_sub == nullptr)
     {
-      MONERO_CHECK(do_wait(daemon.get(), signal_sub.get(), 0, chain_poll_timeout));
+      MONERO_CHECK(do_wait(daemon.get(), signal_sub.get(), 0, chain_poll_timeout, true));
       return {lws::error::daemon_timeout};
     }
 
     {
-      const expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, chain_sub_timeout);
+      const expect<void> ready = do_wait(daemon_sub.get(), signal_sub.get(), ZMQ_POLLIN, chain_sub_timeout, true);
       if (!ready)
       {
         if (ready == lws::error::daemon_timeout)
@@ -475,7 +588,7 @@ namespace rpc
     std::vector<std::pair<topic, std::string>> messages{};
     for (; /*every message */ ;)
     {
-      expect<std::string> pub = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+      expect<std::string> pub = read_msg(daemon_sub.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_sub));
       if (!pub)
       {
         if (pub == net::zmq::make_error_code(EAGAIN))
@@ -557,7 +670,7 @@ namespace rpc
       // check for rpc responses:
       if (daemon && (poll_items[1].revents & (ZMQ_POLLIN | ZMQ_POLLERR)))
       {
-        auto json = net::zmq::receive(daemon.get(), ZMQ_DONTWAIT);
+        auto json = read_msg(daemon.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_req));
         if (!json)
         {
           if (json != net::zmq::make_error_code(EAGAIN))
@@ -575,7 +688,7 @@ namespace rpc
       {
         while (true)
         {
-          auto json = net::zmq::receive(daemon_sub.get(), ZMQ_DONTWAIT);
+          auto json = read_msg(daemon_sub.get(), ZMQ_DONTWAIT, ctx->get_msg_max(max_msg_sub));
           if (!json)
           {
             if (json == net::zmq::make_error_code(EAGAIN))
@@ -637,7 +750,14 @@ namespace rpc
     expect<net::zmq::socket> daemon = make_daemon(ctx);
     if (!daemon)
       return daemon.error();
-    return net::zmq::async_client::make(io, std::move(*daemon));
+    auto out = net::zmq::async_client::make(io, std::move(*daemon));
+    if (out && ctx->untrusted_daemon)
+    {
+      const std::uint64_t limit{ctx->get_msg_max(max_msg_req)};
+      out->msg_limit = boost::numeric_cast<std::uint32_t>(limit);
+      MONERO_CHECK(do_set_option(out->zsock.get(), ZMQ_MAXMSGSIZE, limit));
+    }
+    return out;
   }
 
   expect<void> client::send(epee::byte_slice message, std::chrono::seconds timeout) noexcept
@@ -908,6 +1028,7 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
     return do_signal(ctx->signal_pub.get(), abort_scan_signal);
   }
 
@@ -915,6 +1036,7 @@ namespace rpc
   {
     MONERO_PRECOND(ctx != nullptr);
     assert(ctx->signal_pub != nullptr);
+    const boost::lock_guard<boost::mutex> lock{ctx->sync_signal};
     return do_signal(ctx->signal_pub.get(), abort_process_signal);
   }
 

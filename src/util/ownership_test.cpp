@@ -27,6 +27,7 @@
 
 #include "ownership_test.h"
 
+#include <boost/numeric/conversion/cast.hpp>
 #include <boost/optional/optional.hpp>
 #include <boost/range/combine.hpp>
 
@@ -82,6 +83,11 @@ namespace lws
     subaddress.emplace(disk, max_subaddresses);
   }
 
+  void ownership_test::enable_subaddresses(db::storage_reader& reader)
+  {
+    subaddress.emplace(reader);
+  }
+
   void ownership_test::disable_subaddresses()
   {
     subaddress.reset();
@@ -113,7 +119,7 @@ namespace lws
     cryptonote::tx_extra_pub_key key;
     boost::optional<crypto::hash> prefix_hash;
     boost::optional<cryptonote::tx_extra_nonce> extra_nonce;
-    std::pair<std::uint8_t, db::output::payment_id_> payment_id;
+    std::pair<std::uint8_t, db::output::payment_id_> unencrypted_id;
     cryptonote::tx_extra_additional_pub_keys additional_tx_pub_keys;
     std::vector<mx25519_pubkey> additional_derivations;
 
@@ -136,8 +142,8 @@ namespace lws
       extra_nonce.emplace();
       if (cryptonote::find_tx_extra_field_by_type(extra, *extra_nonce))
       {
-        if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, payment_id.second.long_))
-          payment_id.first = sizeof(crypto::hash);
+        if (cryptonote::get_payment_id_from_tx_extra_nonce(extra_nonce->nonce, unencrypted_id.second.long_))
+          unencrypted_id.first = sizeof(crypto::hash);
       }
       else
         extra_nonce = boost::none;
@@ -151,8 +157,9 @@ namespace lws
       if (height <= user.scan_height())
         continue;
 
-      if (payment_id.first == sizeof(crypto::hash8))
-        payment_id = {};
+      // An encrypted payment id decrypts correctly for one recipient only, so
+      // every account decrypts its own copy.
+      std::pair<std::uint8_t, db::output::payment_id_> payment_id = unencrypted_id;
 
       const account::key_type account_type = user.type();
       const crypto::secret_key& view_key = user.view_key();
@@ -168,7 +175,7 @@ namespace lws
       else // failed derivation
         continue;
 
-      if (subaddress && additional_tx_pub_keys.data.size() == tx.vout.size())
+      
       if ((is_carrot || subaddress) && additional_tx_pub_keys.data.size() == tx.vout.size())
       {
         additional_derivations.resize(tx.vout.size());
@@ -317,6 +324,7 @@ namespace lws
                 },
                 active_derivation,
                 {std::addressof(user.spend_public()), 1},
+                user.view_public(),
                 is_carrot->gout,
                 is_carrot->tout,
                 derived_pub
@@ -332,7 +340,7 @@ namespace lws
 
               ::carrot::CarrotEnoteV1 enote{
                 out_pub_key,
-                tx.rct_signatures.outPk.at(index).mask,
+                ::carrot::raw_byte_convert<::carrot::amount_commitment_t>(tx.rct_signatures.outPk.at(index).mask),
                 ::carrot::encrypted_amount_t{},
                 anchor,
                 carrot_info->view_tag,
@@ -489,20 +497,30 @@ namespace lws
             *account_index,
             first_key_image,
             anchor
-          }
+          },
+          get_reader()
         );
       }
     }
   }
 
   subaddress_reader::subaddress_reader(db::storage const& disk_in, const std::uint32_t max_subaddresses)
-    : reader(common_error::kInvalidArgument), disk(disk_in.clone()), cur(nullptr), max_subaddresses(max_subaddresses)
+    : reader(common_error::kInvalidArgument), borrowed(nullptr), disk(disk_in.clone()), cur(nullptr), max_subaddresses(max_subaddresses)
   {
     update_reader();
   }
 
+  subaddress_reader::subaddress_reader(db::storage_reader& borrowed_in)
+    : reader(common_error::kInvalidArgument), borrowed(std::addressof(borrowed_in)), disk(db::storage::none()), cur(nullptr), max_subaddresses(0)
+  {}
+
   void subaddress_reader::update_reader()
   {
+    // Release the current read txn before opening the next one - `reader = disk.start_read()`
+    // would otherwise begin the new LMDB read txn (inside start_read()) while the old one
+    // is still open on this thread, which LMDB's default (non-MDB_NOTLS) reader-slot tracking
+    // does not support and reports as MDB_BAD_RSLOT.
+    reader = expect<db::storage_reader>{common_error::kInvalidArgument};
     reader = disk.start_read();
     if (!reader)
       MERROR("Subadress lookup failure: " << reader.error().message());
@@ -510,9 +528,10 @@ namespace lws
   
   expect<db::address_index> subaddress_reader::find_subaddress(const account& user, crypto::public_key const& pubkey)
   {
-    if (!reader)
+    db::storage_reader* const active = get_reader();
+    if (!active)
       return {lmdb::error(MDB_NOTFOUND)};
-    return reader->find_subaddress(user.id(), pubkey, cur);
+    return active->find_subaddress(user.id(), pubkey, cur);
   }
 
   expect<void> subaddress_reader::update_lookahead(const account& user, const db::address_index& match, db::block_id height)
@@ -520,17 +539,24 @@ namespace lws
     if (match.is_zero())
       return {}; // keep subaddress disabled servers quick
 
+    if (!disk)
+      return {}; // borrowed reader, the scanner updates the lookahead
+
     if (height == db::block_id::txpool)
       height = user.scan_height();
 
+    // release reader first - update_lookahead() below can trigger resize(),
+    // which takes ctx.sync exclusive while this reader holds it shared
+    reader = expect<db::storage_reader>{common_error::kInvalidArgument};
+
     auto upserted = disk.update_lookahead(user.db_address(), height, match, max_subaddresses);
+    update_reader(); // reacquire - released above regardless of outcome
+
     if (!upserted)
       return upserted.error();
-    if (0 < *upserted)
-      update_reader(); // update reader after upsert added new addresses
-    else if (*upserted < 0)
-      upserted = {error::max_subaddresses};
-    return upserted.error();
+    if (*upserted < 0)
+      return {error::max_subaddresses};
+    return success();
   }
 
 } // namespace lws

@@ -474,6 +474,16 @@ will put the listed address into the "inactive" state.
   ```bash
   monero-lws-admin accept_requests create $(monero-lws-admin list_requests | jq -j '.create? | .[]? | .address?+" "')
   ```
+
+**Add a payment webhook for an account, then list all webhooks:**
+  ```bash
+  monero-lws-admin webhook_add tx-confirmation https://example.com/hook <base58 address> confirmations=2 token=1234
+  monero-lws-admin webhook_list
+  ```
+`webhook_add` takes the type and URL by position, then the address (required
+for `tx-confirmation` and `tx-spend`), then any of `payment_id=<hex>`,
+`confirmations=<count>` and `token=<string>`. The fields match
+[webhook_add](#webhook_add) in the REST API.
 # Debugging
 
 `monero-lws-admin` has a debug mode that dumps everything stored in the

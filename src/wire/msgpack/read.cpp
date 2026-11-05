@@ -27,6 +27,7 @@
 
 #include "read.h"
 
+#include <algorithm>
 #include <boost/endian/buffers.hpp>
 #include <boost/fusion/include/any.hpp>
 #include <boost/fusion/include/std_tuple.hpp>
@@ -387,10 +388,16 @@ namespace wire
 
     const auto read_float = [this](auto value)
     {
-      if (remaining_.size() < sizeof(value))
-        WIRE_DLOG_THROW_(error::msgpack::not_enough_bytes);
-      std::memcpy(std::addressof(value), remaining_.data(), sizeof(value));
-      remaining_.remove_prefix(sizeof(value));
+      using real_type = decltype(value);
+      using buf_type =  typename std::conditional<
+        std::is_same<real_type, float>::value, std::uint32_t, std::uint64_t
+      >::type;
+      static_assert(std::is_same<real_type, float>() || std::is_same<real_type, double>(), "");
+      static_assert(std::numeric_limits<real_type>::is_iec559, "");
+      static_assert(sizeof(real_type) == sizeof(buf_type), "");
+
+      const auto buf = read_endian<buf_type>(remaining_);
+      std::memcpy(&value, &buf, sizeof(buf));
       return value;
     };
 
@@ -435,7 +442,7 @@ namespace wire
       read_count<msgpack::ftag_array, msgpack::array_types>(error::schema::array);
     if (limits<std::size_t>::max() - tags_remaining_ < upcoming)
       WIRE_DLOG_THROW_(error::msgpack::max_tree_size);
-    if (min_element_size && (remaining_.size() / min_element_size) < upcoming)
+    if ((remaining_.size() / std::max(min_element_size, std::size_t(1))) < upcoming)
       WIRE_DLOG_THROW(error::schema::array, upcoming << " array elements of at least " << min_element_size << " bytes each exceeds " << remaining_.size() << " remaining bytes");
 
     tags_remaining_ += upcoming;
