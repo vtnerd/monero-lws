@@ -34,6 +34,7 @@
 #include "db/fwd.h"
 #include "lest.hpp"
 
+namespace carrot { struct RCTOutputEnoteProposal; }
 namespace cryptonote
 {
   class account_keys;
@@ -53,6 +54,7 @@ namespace lws_test
     std::vector<crypto::public_key> spend_publics;
     std::vector<crypto::key_image> images;
     std::vector<rct::key> ringct;
+    std::vector<carrot::RCTOutputEnoteProposal> carrot;
   };
 
   transaction make_miner_tx(lest::env& lest_env, lws::db::block_id height, const lws::db::account_address& miner_address, bool use_view_tags);

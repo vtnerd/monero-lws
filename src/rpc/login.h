@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "common/expect.h" // monero/src
+#include "crypto/crypto.h"
 #include "db/fwd.h"
 #include "rpc/fwd.h"
 
@@ -38,8 +39,11 @@ namespace lws { namespace rpc
   bool is_hidden(db::account_status status) noexcept;
 
   //! Verify that view pub matches view secret.
-  bool key_check(const rpc::account_credentials& creds);
+  bool key_check(const crypto::public_key& view_public, const crypto::secret_key& key);
 
+  //! Verify that view pub matches view secret.
+  bool key_check(const rpc::account_credentials& creds, const bool balance_key);
+  
   //! \return Account info from the DB, iff key matches address AND address is NOT hidden.
   expect<std::pair<db::account, db::storage_reader>> open_account(const account_credentials& creds, const db::storage& disk);
 }} // lws // rpc

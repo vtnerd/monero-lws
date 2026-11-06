@@ -41,6 +41,6 @@ namespace lws { namespace db { namespace test
   };
 
   lws::db::storage get_fresh_db();
-  lws::db::account make_db_account(const lws::db::account_address& pubs, const crypto::secret_key& key);
-  lws::account make_account(const lws::db::account_address& pubs, const crypto::secret_key& key);
+  lws::db::account make_db_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
+  lws::account make_account(const lws::db::account_pubs& pubs, const crypto::secret_key& key);
 }}} // lws // db // test

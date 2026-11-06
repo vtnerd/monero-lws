@@ -29,6 +29,7 @@
 
 namespace lws
 {
+  struct carrot_account;
   class gamma_picker;
   struct random_output;
   struct random_ring;
