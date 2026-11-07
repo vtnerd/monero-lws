@@ -355,7 +355,7 @@ namespace rpc
   {
     struct context
     {
-      explicit context(zcontext comm, net::zmq::socket signal_pub, net::zmq::socket external_pub, net::zmq::socket internal_pub, rcontext rmq_src, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon)
+      explicit context(zcontext comm, net::zmq::socket signal_pub, net::zmq::socket external_pub, net::zmq::socket internal_pub, rcontext rmq_src, std::string daemon_addr, std::string sub_addr, std::chrono::minutes interval, bool untrusted_daemon, std::string rates_api_key)
         : comm(std::move(comm))
         , signal_pub(std::move(signal_pub))
         , external_pub(std::move(external_pub))
@@ -364,6 +364,7 @@ namespace rpc
         , daemon_addr(std::move(daemon_addr))
         , sub_addr(std::move(sub_addr))
         , rates_conn(epee::net_utils::ssl_verification_t::system_ca)
+        , rates_api_key(std::move(rates_api_key))
         , cache_time()
         , cache_interval(interval)
         , cached{}
@@ -391,6 +392,7 @@ namespace rpc
       const std::string daemon_addr;
       const std::string sub_addr;
       net::http::client rates_conn;
+      const std::string rates_api_key;
       std::chrono::steady_clock::time_point cache_time;
       const std::chrono::minutes cache_interval;
       rates cached;
@@ -948,8 +950,11 @@ namespace rpc
     return ctx->cached;
   }
 
-  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, const bool push_updates)
+  context context::make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, const bool push_updates, std::string rates_api_key)
   {
+    if (rates_api_key.find_first_of("\r\n") != std::string::npos)
+      MONERO_THROW(error::configuration, "Invalid exchange-rate-api-key");
+
     zcontext comm{zmq_init(1)};
     if (comm == nullptr)
       MONERO_THROW(net::zmq::get_error_code(), "zmq_init");
@@ -987,7 +992,7 @@ namespace rpc
  
     return context{
       std::make_shared<detail::context>(
-        std::move(comm), std::move(pub), std::move(external_pub), std::move(internal_pub), rcontext{std::move(rmq_info)}, std::move(daemon_addr), std::move(sub_addr), rates_interval, untrusted_daemon
+        std::move(comm), std::move(pub), std::move(external_pub), std::move(internal_pub), rcontext{std::move(rmq_info)}, std::move(daemon_addr), std::move(sub_addr), rates_interval, untrusted_daemon, std::move(rates_api_key)
       )
     };
   }
@@ -1040,7 +1045,7 @@ namespace rpc
     return do_signal(ctx->signal_pub.get(), abort_process_signal);
   }
 
-  expect<void> context::retrieve_rates_async(boost::asio::io_context& io)
+  expect<void> context::retrieve_rates_async(boost::asio::io_context& io, std::string url)
   {
     MONERO_PRECOND(ctx != nullptr);
 
@@ -1052,10 +1057,10 @@ namespace rpc
 
     auto& self = ctx;
     const expect<void> rc = ctx->rates_conn.get_async(
-      io, crypto_compare.url, [self] (boost::system::error_code error, std::string body)
+      io, url.empty() ? crypto_compare.url : std::move(url), [self] (boost::system::error_code error, unsigned status, std::string body)
       {
         expect<rates> fresh{lws::error::exchange_rates_fetch};
-        if (!error)
+        if (!error && (status == 200 || status == 201))
         {
           fresh = crypto_compare(std::move(body));
           if (fresh)
@@ -1063,6 +1068,8 @@ namespace rpc
           else
             MERROR("Failed to parse exchange rates: " << fresh.error());
         }
+        else if (status)
+          MERROR("Failed to retrieve exchange rates: HTTP " << status);
         else
           MERROR("Failed to retrieve exchange rates: " << error.message());
 
@@ -1074,7 +1081,7 @@ namespace rpc
           self->cached = std::move(*fresh);
         }
         self->rates_running.clear();
-      });
+      }, self->rates_api_key.empty() ? std::string{} : "Apikey " + self->rates_api_key);
     if (!rc)
       ctx->rates_running.clear();
     return rc;

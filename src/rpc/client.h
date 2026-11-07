@@ -268,7 +268,7 @@ namespace rpc
       \param True if additional size constraints should be placed on
         daemon messages
     */
-    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, bool push_updates);
+    static context make(std::string daemon_addr, std::string sub_addr, std::string pub_addr, rmq_details rmq_info, std::chrono::minutes rates_interval, const bool untrusted_daemon, bool push_updates, std::string rates_api_key = {});
 
     context(context&&) = default;
     context(context const&) = delete;
@@ -320,7 +320,7 @@ namespace rpc
       new rates once completed.
 
       \return `success()` if HTTP GET was queued. */
-    expect<void> retrieve_rates_async(boost::asio::io_context& io);
+    expect<void> retrieve_rates_async(boost::asio::io_context& io, std::string url = {});
   };
 } // rpc
 } // lws

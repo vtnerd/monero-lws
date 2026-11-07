@@ -79,6 +79,7 @@ namespace
     const command_line::arg_descriptor<bool> lws_server_external;
     const command_line::arg_descriptor<unsigned> create_queue_max;
     const command_line::arg_descriptor<std::chrono::minutes::rep> rates_interval;
+    const command_line::arg_descriptor<std::string> rates_api_key;
     const command_line::arg_descriptor<unsigned short> log_level;
     const command_line::arg_descriptor<bool> disable_admin_auth;
     const command_line::arg_descriptor<std::string> webhook_ssl_verification;
@@ -136,6 +137,7 @@ namespace
       , lws_server_external{"lws-server-external", "Allow listening on external interface for scanner connections (see documentation)", false}
       , create_queue_max{"create-queue-max", "Set pending create account requests maximum", 10000}
       , rates_interval{"exchange-rate-interval", "Retrieve exchange rates in minute intervals from cryptocompare.com if greater than 0", 0}
+      , rates_api_key{"exchange-rate-api-key", "CryptoCompare API key (prefer config file to command line)", ""}
       , log_level{"log-level", "Log level [0-4]", 1}
       , disable_admin_auth{"disable-admin-auth", "Make auth field optional in HTTP-REST requests", false}
       , webhook_ssl_verification{"webhook-ssl-verification", "[<none|system_ca>] specify SSL verification mode for webhooks", "system_ca"}
@@ -181,6 +183,7 @@ namespace
       command_line::add_arg(description, lws_server_external);
       command_line::add_arg(description, create_queue_max);
       command_line::add_arg(description, rates_interval);
+      command_line::add_arg(description, rates_api_key);
       command_line::add_arg(description, log_level);
       command_line::add_arg(description, disable_admin_auth);
       command_line::add_arg(description, webhook_ssl_verification);
@@ -214,6 +217,7 @@ namespace
     lws::rpc::rmq_details rmq;
     std::string webhook_ssl_verification;
     std::chrono::minutes rates_interval;
+    std::string rates_api_key;
     std::size_t scan_threads;
     std::uint64_t split_sync_depth;
     std::uint64_t min_block_depth;
@@ -324,6 +328,7 @@ namespace
 #endif
       command_line::get_arg(args, opts.webhook_ssl_verification),
       std::chrono::minutes{command_line::get_arg(args, opts.rates_interval)},
+      command_line::get_arg(args, opts.rates_api_key),
       command_line::get_arg(args, opts.scan_threads),
       command_line::get_arg(args, opts.split_sync_depth),
       command_line::get_arg(args, opts.min_block_depth),
@@ -373,7 +378,8 @@ namespace
       std::move(prog.rmq),
       prog.rates_interval,
       prog.untrusted_daemon,
-      std::chrono::seconds{0} < prog.rest_config.feed_timeout
+      std::chrono::seconds{0} < prog.rest_config.feed_timeout,
+      std::move(prog.rates_api_key)
     );
 
     //! SIGINT handle registered by `scanner` constructor

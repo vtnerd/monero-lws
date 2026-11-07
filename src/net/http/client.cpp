@@ -69,9 +69,10 @@ namespace net { namespace http
 
     struct message
     {
-      message(epee::byte_slice json_body, std::string host, std::string target, std::uint16_t port, bool https, std::function<server_response_func>&& notifier)
+      message(epee::byte_slice json_body, std::string host, std::string target, std::uint16_t port, bool https, std::function<server_response_func>&& notifier, std::string authorization)
         : json_body(std::move(json_body)),
           notifier(std::move(notifier)),
+          authorization(std::move(authorization)),
           host(std::move(host)),
           target(std::move(target)),
           port(port),
@@ -82,6 +83,7 @@ namespace net { namespace http
       message(const message& rhs)
         : json_body(rhs.json_body.clone()),
           notifier(rhs.notifier),
+          authorization(rhs.authorization),
           host(rhs.host),
           target(rhs.target),
           port(rhs.port),
@@ -90,6 +92,7 @@ namespace net { namespace http
 
       epee::byte_slice json_body;
       std::function<server_response_func> notifier;
+      std::string authorization;
       std::string host;
       std::string target;
       std::uint16_t port;
@@ -149,6 +152,8 @@ namespace net { namespace http
         std::move(outgoing.front().json_body)
       };
       request.set(boost::beast::http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+      if (!outgoing.front().authorization.empty())
+        request.set(boost::beast::http::field::authorization, outgoing.front().authorization);
       if (!no_body)
         request.set(boost::beast::http::field::content_type, "application/json");
 
@@ -186,7 +191,14 @@ namespace net { namespace http
     {
       assert(!outgoing.empty()); 
       if (outgoing.front().notifier)
-        outgoing.front().notifier(error, {});
+        outgoing.front().notifier(error, 0, {});
+    }
+
+    void notify_status(const unsigned status) const
+    {
+      assert(!outgoing.empty());
+      if (outgoing.front().notifier)
+        outgoing.front().notifier({}, status, {});
     }
   };  
 
@@ -324,15 +336,19 @@ namespace net { namespace http
                       MERROR("Failed to parse HTTP response from " << self.outgoing.front() << ": " << error.message());
                     else if (self.parser->get().result_int() != 200 && self.parser->get().result_int() != 201)
                     {
-                      MERROR(self.outgoing.front() << " returned " << self.parser->get().result_int() << " status code");
-                      self.notify_error(boost::asio::error::operation_not_supported);
+                      const unsigned status = self.parser->get().result_int();
+                      MERROR(self.outgoing.front() << " returned HTTP " << status);
+                      self.notify_status(status);
                     }
                     else
                     {
                       MDEBUG(self.outgoing.front() << " successful");
                       reuse = self.parser->get().keep_alive();
                       if (self.outgoing.front().notifier)
-                        self.outgoing.front().notifier({}, std::move(self.parser->get()).body());
+                      {
+                        const unsigned status = self.parser->get().result_int();
+                        self.outgoing.front().notifier({}, status, std::move(self.parser->get()).body());
+                      }
                     }
                   }
                   else
@@ -394,7 +410,7 @@ namespace net { namespace http
     }
   } // anonymous
 
-  expect<void> client::queue_async(boost::asio::io_context& io, std::string url, epee::byte_slice json_body, std::function<server_response_func> notifier)
+  expect<void> client::queue_async(boost::asio::io_context& io, std::string url, epee::byte_slice json_body, std::function<server_response_func> notifier, std::string authorization)
   {
     static constexpr const std::uint16_t max_port = std::numeric_limits<std::uint16_t>::max();
 
@@ -416,7 +432,8 @@ namespace net { namespace http
       std::move(parsed.uri),
       std::uint16_t(parsed.port),
       bool(parsed.schema == "https"),
-      std::move(notifier)
+      std::move(notifier),
+      std::move(authorization)
     };
 
     MDEBUG("Queueing HTTP " << (msg.notifier ? "GET" : "POST") << " to " << msg << " using " << this);
@@ -469,14 +486,14 @@ namespace net { namespace http
 
   expect<void> client::post_async(boost::asio::io_context& io, std::string url, epee::byte_slice json_body)
   {
-    return queue_async(io, std::move(url), std::move(json_body), {});
+    return queue_async(io, std::move(url), std::move(json_body), {}, {});
   }
 
-  expect<void> client::get_async(boost::asio::io_context& io, std::string url, std::function<server_response_func> notifier)
+  expect<void> client::get_async(boost::asio::io_context& io, std::string url, std::function<server_response_func> notifier, std::string authorization)
   {
     if (!notifier)
       throw std::logic_error{"net::http::client::get_async requires callback"};
-    return queue_async(io, std::move(url), epee::byte_slice{}, std::move(notifier));
+    return queue_async(io, std::move(url), epee::byte_slice{}, std::move(notifier), std::move(authorization));
   }
 }} // net // http
 
