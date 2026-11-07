@@ -41,7 +41,8 @@
 namespace net { namespace http
 {
   struct client_state;
-  using server_response_func = void(boost::system::error_code, std::string);
+  //! Transport errors have status 0; HTTP responses have no transport error and carry their status.
+  using server_response_func = void(boost::system::error_code, unsigned, std::string);
 
   //! Primarily for webhooks, where the response is (basically) ignored.
   class client
@@ -50,7 +51,7 @@ namespace net { namespace http
     std::shared_ptr<boost::asio::ssl::context> ssl_;
     boost::mutex sync_;
 
-    expect<void> queue_async(boost::asio::io_context& io, std::string url, epee::byte_slice json_body, std::function<server_response_func> notifier);
+    expect<void> queue_async(boost::asio::io_context& io, std::string url, epee::byte_slice json_body, std::function<server_response_func> notifier, std::string authorization);
 
   public:
     explicit client(epee::net_utils::ssl_verification_t verify);
@@ -66,7 +67,7 @@ namespace net { namespace http
     /*! Never blocks. Thread safe. Calls `notifier` with server response iff
       `success()` is returned.
       \return `success()` if `url` is valid. */
-    expect<void> get_async(boost::asio::io_context& io, std::string url, std::function<server_response_func> notifier);
+    expect<void> get_async(boost::asio::io_context& io, std::string url, std::function<server_response_func> notifier, std::string authorization = {});
   };
 }} // net // http
 
