@@ -86,7 +86,7 @@ namespace
     const command_line::arg_descriptor<std::uint32_t> max_subaddresses;
     const command_line::arg_descriptor<bool> auto_accept_creation;
     const command_line::arg_descriptor<bool> untrusted_daemon;
-    const command_line::arg_descriptor<bool> regtest;
+    const command_line::arg_descriptor<bool> disable_checkpoints;
     const command_line::arg_descriptor<bool> version;
     const command_line::arg_descriptor<bool> auto_accept_import;
     const command_line::arg_descriptor<bool> block_depth_threading;
@@ -143,7 +143,7 @@ namespace
       , max_subaddresses{"max-subaddresses", "Maximum number of subaddresses per primary account (defaults to 0)", 0}
       , auto_accept_creation{"auto-accept-creation", "New account creation requests are automatically accepted", false}
       , untrusted_daemon{"untrusted-daemon", "Perform (expensive) chain-verification and PoW checks", false}
-      , regtest{"regtest", "Run in a regression testing mode", false}
+      , disable_checkpoints{"disable-checkpoints", "Disable checkpoints for testing", false}
       , version{"version", "Display version and quit", false}
       , auto_accept_import{"auto-accept-import", "Account import requests are automatically accepted", false}
       , block_depth_threading{"block-depth-threading", "Balance thread workload by block depth instead of account count", false}
@@ -188,7 +188,7 @@ namespace
       command_line::add_arg(description, max_subaddresses);
       command_line::add_arg(description, auto_accept_creation);
       command_line::add_arg(description, untrusted_daemon);
-      command_line::add_arg(description, regtest);
+      command_line::add_arg(description, disable_checkpoints);
       command_line::add_arg(description, version);
       command_line::add_arg(description, auto_accept_import);
       command_line::add_arg(description, block_depth_threading);
@@ -220,7 +220,7 @@ namespace
     unsigned create_queue_max;
     double split_sync_threads;
     bool untrusted_daemon;
-    bool regtest;
+    bool disable_checkpoints;
     bool block_depth_threading;
     bool balance_new_addresses;
     bool lws_server_external;
@@ -330,14 +330,11 @@ namespace
       command_line::get_arg(args, opts.create_queue_max),
       command_line::get_arg(args, opts.split_sync_threads),
       command_line::get_arg(args, opts.untrusted_daemon),
-      command_line::get_arg(args, opts.regtest),
+      command_line::get_arg(args, opts.disable_checkpoints),
       command_line::get_arg(args, opts.block_depth_threading),
       command_line::get_arg(args, opts.balance_new_addresses),
       command_line::get_arg(args, opts.lws_server_external)
     };
-
-    if (prog.regtest && lws::config::network != cryptonote::MAINNET)
-      MONERO_THROW(lws::error::configuration, "Regtest cannot be used with testnet or stagenet");
 
     if (prog.split_sync_threads < 0.0 || prog.split_sync_threads > 1.0)
       MONERO_THROW(lws::error::configuration, "--split-sync-threads must be between 0 and 1");
@@ -387,7 +384,7 @@ namespace
       mempool = std::make_shared<lws::mempool>();
     }
 
-    auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon, prog.regtest).value();
+    auto client = scanner.sync(ctx.connect().value(), prog.untrusted_daemon, prog.disable_checkpoints).value();
 
     lws::rest_server server{
       epee::to_span(prog.rest_servers),
@@ -408,7 +405,7 @@ namespace
       mempool,
       prog.scan_threads,
       lws::scanner_server{std::move(prog.lws_server_addr), std::move(prog.lws_server_pass), prog.lws_server_external},
-      lws::scanner_options{prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.regtest, prog.block_depth_threading, prog.balance_new_addresses}
+      lws::scanner_options{prog.split_sync_threads, prog.split_sync_depth, prog.min_block_depth, prog.rest_config.max_subaddresses, prog.untrusted_daemon, prog.disable_checkpoints, prog.block_depth_threading, prog.balance_new_addresses}
     );
   }
 } // anonymous

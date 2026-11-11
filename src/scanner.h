@@ -60,7 +60,7 @@ namespace lws
     std::uint64_t min_block_depth;
     std::uint32_t max_subaddresses;
     bool untrusted_daemon;
-    bool regtest;
+    bool disable_checkpoints;
     bool block_depth_threading;
     bool balance_new_addresses;
   };
@@ -85,10 +85,10 @@ namespace lws
 
     /*! Store updated accounts locally (`disk`), and send ZMQ/RMQ/webhook
       events. `users` must be sorted by height (lowest first). */
-    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
+    static bool store(boost::asio::io_context& io, db::storage& disk, rpc::client& zclient, net::http::client& webhook ,epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool disable_checkpoints);
 
     //! `users` must be sorted by height (lowest first)
-    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool regtest);
+    bool operator()(boost::asio::io_context& io, rpc::client& zclient, net::http::client& webhook, epee::span<const crypto::hash> chain, epee::span<lws::account> users, epee::span<const db::pow_sync> pow, bool disable_checkpoints);
   };
 
   struct scanner_sync
@@ -135,7 +135,7 @@ namespace lws
     static bool loop(scanner_sync& self, store_func store, std::optional<db::storage> disk, rpc::client client, std::vector<lws::account> users, rpc::scanner::queue& queue, const scanner_options& opts, const size_t thread_n);
     
     //! Use `client` to sync blockchain data, and \return client if successful.
-    expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false, const bool regtest = false);
+    expect<rpc::client> sync(rpc::client client, const bool untrusted_daemon = false, const bool disable_checkpoints = false);
 
     //! Poll daemon until `shutdown()` is called, using `thread_count` threads.
     void run(
