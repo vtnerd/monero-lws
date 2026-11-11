@@ -1793,12 +1793,12 @@ namespace db
     });
   }
 
-  expect<void> storage::sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool regtest)
+  expect<void> storage::sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool disable_checkpoints)
   {
     MONERO_PRECOND(!hashes.empty());
     MONERO_PRECOND(db != nullptr);
 
-    return db->try_write([this, height, hashes, regtest] (MDB_txn& txn) -> expect<void>
+    return db->try_write([this, height, hashes, disable_checkpoints] (MDB_txn& txn) -> expect<void>
     {
       cursor::blocks blocks_cur;
       MONERO_CHECK(check_cursor(txn, this->db->tables.blocks, blocks_cur));
@@ -1831,7 +1831,7 @@ namespace db
 
         if (*hash != chain.front())
         {
-          if (!regtest && current <= get_checkpoints().get_max_height())
+          if (!disable_checkpoints && current <= get_checkpoints().get_max_height())
           {
             /* Either the daemon is performing an attack with a fake chain, or
               the daemon is still syncing. */
@@ -3153,7 +3153,7 @@ namespace db
     }
   } // anonymous
 
-  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow, bool regtest)
+  expect<storage::updated> storage::update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> users, epee::span<const pow_sync> pow, bool disable_checkpoints)
   {
     if (users.empty() && chain.empty())
       return {updated{}};
@@ -3162,7 +3162,7 @@ namespace db
     if (!pow.empty())
       MONERO_PRECOND(chain.size() == pow.size());
 
-    return db->try_write([this, height, chain, users, pow, regtest] (MDB_txn& txn) -> expect<updated>
+    return db->try_write([this, height, chain, users, pow, disable_checkpoints] (MDB_txn& txn) -> expect<updated>
     {
       epee::span<const crypto::hash> chain_copy{chain};
       epee::span<const pow_sync> pow_copy{pow};
@@ -3172,7 +3172,7 @@ namespace db
 
       // collect all .value() errors
       updated out{};
-      if (regtest || get_checkpoints().get_max_height() <= last_update)
+      if (disable_checkpoints || get_checkpoints().get_max_height() <= last_update)
       {
         cursor::blocks blocks_cur;
         cursor::pow    pow_cur;

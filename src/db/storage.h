@@ -241,7 +241,7 @@ namespace db
 
       \return True if the local blockchain is correctly synced.
     */
-    expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool regtest);
+    expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes, bool disable_checkpoints);
 
     expect<void> sync_pow(block_id height, epee::span<const crypto::hash> hashes, epee::span<const pow_sync> pow);
 
@@ -296,12 +296,12 @@ namespace db
       \param height The first hash in `chain` is at this height.
       \param chain List of block hashes that `accts` were scanned against.
       \param accts Updated to `height + chain.size()` scan height.
-      \param regtest Bypass the checkpoint-height gate for regtest environment.
+      \param disable_checkpoints Bypass the checkpoint-height gate for testing environments.
 
       \return Status via `updated` object.
     */
     expect<updated>
-      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow, bool regtest = false);
+      update(block_id height, epee::span<const crypto::hash> chain, epee::span<const lws::account> accts, epee::span<const pow_sync> pow, bool disable_checkpoints = false);
 
     /*!
       Adds subaddresses to an account. Upon success, an account will
